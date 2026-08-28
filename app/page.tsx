@@ -11,9 +11,16 @@ const gameIds = new Set(games.map((game) => game.id));
 function isSessionResult(value: unknown): value is SessionResult {
   if (!value || typeof value !== 'object') return false;
   const item = value as Partial<SessionResult>;
+  const numericValues = [item.accuracy, item.medianRt, item.stability, item.errors];
   return typeof item.id === 'string' && typeof item.gameId === 'string' && gameIds.has(item.gameId as GameId)
-    && typeof item.completedAt === 'string' && typeof item.accuracy === 'number' && typeof item.medianRt === 'number'
-    && typeof item.stability === 'number' && typeof item.errors === 'number';
+    && typeof item.completedAt === 'string' && Number.isFinite(Date.parse(item.completedAt))
+    && numericValues.every((number) => typeof number === 'number' && Number.isFinite(number));
+}
+
+function formatCompletedAt(value: string) {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return '날짜 정보 없음';
+  return new Intl.DateTimeFormat('ko-KR', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }).format(new Date(timestamp));
 }
 
 export default function Home() {
@@ -25,7 +32,13 @@ export default function Home() {
       const saved = window.localStorage.getItem(STORAGE_KEY);
       const parsed: unknown = saved ? JSON.parse(saved) : [];
       if (Array.isArray(parsed)) {
-        const sanitized = parsed.filter(isSessionResult).map((result) => ({
+        const valid = parsed.filter(isSessionResult);
+        const seenIds = new Set<string>();
+        const sanitized = valid.filter((result) => {
+          if (seenIds.has(result.id)) return false;
+          seenIds.add(result.id);
+          return true;
+        }).map((result) => ({
           ...result,
           accuracy: Math.min(100, Math.max(0, Math.round(result.accuracy))),
           stability: Math.min(100, Math.max(0, Math.round(result.stability))),
@@ -113,7 +126,7 @@ export default function Home() {
         <div className="records-heading"><div><span>LOCAL RECORDS</span><h2 id="records-title">내 연습 기록</h2></div><p>회원가입 없이 이 브라우저에만 저장됩니다.</p></div>
         {recentResults.length ? <>
           <div className="record-summary"><article><span>최근 연습</span><b>{recentResults.length}회</b></article><article><span>평균 정확도</span><b>{averageAccuracy}%</b></article><article><span>평균 중앙 반응</span><b>{averageRt ? `${averageRt}ms` : '—'}</b></article></div>
-          <div className="record-list">{recentResults.map((result) => { const game = games.find((item) => item.id === result.gameId)!; const mode = result.detail?.sessionMode; return <article key={result.id}><div><span>{game.no}</span><b>{game.title}</b><small>{new Intl.DateTimeFormat('ko-KR', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }).format(new Date(result.completedAt))}{typeof mode === 'string' ? ` · ${mode}` : ''}</small></div><dl><div><dt>정확도</dt><dd>{result.accuracy}%</dd></div><div><dt>중앙 반응</dt><dd>{result.medianRt ? `${result.medianRt}ms` : '—'}</dd></div><div><dt>오류</dt><dd>{result.errors}</dd></div></dl></article>; })}</div>
+          <div className="record-list">{recentResults.map((result) => { const game = games.find((item) => item.id === result.gameId)!; const mode = result.detail?.sessionMode; return <article key={result.id}><div><span>{game.no}</span><b>{game.title}</b><small>{formatCompletedAt(result.completedAt)}{typeof mode === 'string' ? ` · ${mode}` : ''}</small></div><dl><div><dt>정확도</dt><dd>{result.accuracy}%</dd></div><div><dt>중앙 반응</dt><dd>{result.medianRt ? `${result.medianRt}ms` : '—'}</dd></div><div><dt>오류</dt><dd>{result.errors}</dd></div></dl></article>; })}</div>
         </> : <div className="records-empty"><b>아직 완료한 연습이 없습니다.</b><span>게임 하나를 끝내면 정확도·반응시간·오류가 여기에 쌓입니다.</span></div>}
       </section>
 

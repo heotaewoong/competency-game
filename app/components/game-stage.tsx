@@ -1,7 +1,5 @@
 'use client';
 
-/* eslint-disable react-hooks/purity -- 반응시간은 렌더 중이 아니라 사용자 입력 이벤트에서만 측정한다. */
-
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import Image from 'next/image';
 import { CognitiveGlyph, glyphDefaultMnemonics, glyphShapeNames } from './cognitive-glyph';
@@ -57,6 +55,20 @@ function defaultPracticeConfig(gameId: GameId): PracticeConfig {
 
 function formatPace(milliseconds: number) {
   return `${Number.isInteger(milliseconds / 1000) ? milliseconds / 1000 : (milliseconds / 1000).toFixed(1)}초`;
+}
+
+function DeadlineBar({ duration, label, className = '' }: { duration: number; label: string; className?: string }) {
+  const [remaining, setRemaining] = useState(duration);
+  useEffect(() => {
+    const startedAt = performance.now();
+    const timer = window.setInterval(() => {
+      const next = Math.max(0, duration - (performance.now() - startedAt));
+      setRemaining(next);
+      if (next === 0) window.clearInterval(timer);
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [duration]);
+  return <div className={`time-strip ${className}`.trim()} role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={duration} aria-valuenow={Math.round(remaining)} aria-valuetext={`${(remaining / 1000).toFixed(1)}초 남음`}><i style={{ '--duration': `${duration}ms` } as CSSProperties} /><span className="deadline-text" aria-hidden="true">{(remaining / 1000).toFixed(1)}초</span></div>;
 }
 
 function median(values: number[]) {
@@ -142,7 +154,14 @@ export function GameStage({ gameId, onClose, onSave }: { gameId: GameId; onClose
     };
   }, [onClose]);
 
-  useEffect(() => { panelRef.current?.scrollTo({ top: 0 }); }, [phase, run]);
+  useEffect(() => {
+    panelRef.current?.scrollTo({ top: 0 });
+    const focusFrame = window.requestAnimationFrame(() => {
+      if (phase === 'play') panelRef.current?.querySelector<HTMLElement>('.game-workspace')?.focus();
+      if (phase === 'result') panelRef.current?.querySelector<HTMLElement>('.stage-result')?.focus();
+    });
+    return () => window.cancelAnimationFrame(focusFrame);
+  }, [phase, run]);
 
   useEffect(() => {
     if (gameId !== 'nback') return;
@@ -211,10 +230,10 @@ export function GameStage({ gameId, onClose, onSave }: { gameId: GameId; onClose
 
   return (
     <div className="stage-backdrop" role="presentation">
-      <section ref={panelRef} className="stage-panel" role="dialog" aria-modal="true" aria-label={`${game.title} 연습`} tabIndex={-1}>
+      <section ref={panelRef} className="stage-panel" role="dialog" aria-modal="true" aria-label={`${game.title} ${sessionMode === 'practice' ? '연습' : '실전 시뮬레이션'}`} tabIndex={-1}>
         {phase === 'intro' && (
           <div className="stage-intro">
-            <button className="stage-close" aria-label="연습 닫기" onClick={onClose}>×</button>
+            <button className="stage-close" aria-label={`${sessionMode === 'practice' ? '연습' : '실전 시뮬레이션'} 닫기`} onClick={onClose}>×</button>
             <div className="intro-heading">
               <div className="intro-visual"><GameThumbnail gameId={gameId} /></div>
               <div><p>{game.no} · {game.skill}</p><h2>{game.title}</h2><span>{game.rounds}</span></div>
@@ -244,14 +263,25 @@ export function GameStage({ gameId, onClose, onSave }: { gameId: GameId; onClose
 }
 
 function ModeSelector({ mode, onChange }: { mode: SessionMode; onChange: (mode: SessionMode) => void }) {
+  const practiceRef = useRef<HTMLButtonElement>(null);
+  const simulationRef = useRef<HTMLButtonElement>(null);
+  function select(next: SessionMode) {
+    onChange(next);
+    (next === 'practice' ? practiceRef : simulationRef).current?.focus();
+  }
+  function navigate(event: React.KeyboardEvent<HTMLButtonElement>) {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+    event.preventDefault();
+    select(event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? 'practice' : 'simulation');
+  }
   return (
     <section className="mode-selector" aria-label="진행 모드 선택">
       <div><b>진행 모드</b><small>목표에 맞게 한 번만 선택하세요</small></div>
       <div className="mode-options" role="radiogroup" aria-label="연습 또는 실전 모드">
-        <button type="button" role="radio" aria-checked={mode === 'practice'} className={mode === 'practice' ? 'active' : ''} onClick={() => onChange('practice')}>
-          <span>연습 모드</span><b>내 설정으로 반복</b><small>분량·속도 조절 · 이름표 · 즉시 피드백</small>
+        <button ref={practiceRef} type="button" role="radio" aria-checked={mode === 'practice'} tabIndex={mode === 'practice' ? 0 : -1} className={mode === 'practice' ? 'active' : ''} onKeyDown={navigate} onClick={() => onChange('practice')}>
+          <span>연습 모드</span><b>내 설정으로 반복</b><small>분량·속도 조절 · 이름표 · 학습 도움</small>
         </button>
-        <button type="button" role="radio" aria-checked={mode === 'simulation'} className={mode === 'simulation' ? 'active' : ''} onClick={() => onChange('simulation')}>
+        <button ref={simulationRef} type="button" role="radio" aria-checked={mode === 'simulation'} tabIndex={mode === 'simulation' ? 0 : -1} className={mode === 'simulation' ? 'active' : ''} onKeyDown={navigate} onClick={() => onChange('simulation')}>
           <span>실전 모드</span><b>고정 조건으로 집중</b><small>설정 잠금 · 이름표/정오 피드백 비공개</small>
         </button>
       </div>
@@ -327,11 +357,11 @@ function GameFrame({ gameId, current, total, children, helper, feedback, showFee
   const game = getGame(gameId);
   const { mode } = useContext(SessionModeContext);
   return (
-    <div className={`game-workspace game-${gameId}`} data-mode={mode}>
+    <div className={`game-workspace game-${gameId}`} data-mode={mode} role="region" aria-label={`${game.title} ${mode === 'practice' ? '연습' : '실전 시뮬레이션'} 진행 화면`} tabIndex={-1}>
       <header className="workspace-head">
         <div><p>{game.no} · {game.skill} <span className="mode-chip">{mode === 'practice' ? '연습' : '실전'}</span></p><h2>{game.title}</h2></div>
-        <div className="workspace-progress"><span>{current} / {total}</span><i><b style={{ width: `${Math.round((current / total) * 100)}%` }} /></i></div>
-        <button aria-label="연습 닫기" onClick={onClose}>×</button>
+        <div className="workspace-progress"><span>{current} / {total}</span><i role="progressbar" aria-label="문제 진행률" aria-valuemin={1} aria-valuemax={total} aria-valuenow={current} aria-valuetext={`${total}문제 중 ${current}번째`}><b style={{ width: `${Math.round((current / total) * 100)}%` }} /></i></div>
+        <button aria-label={`${mode === 'practice' ? '연습' : '실전 시뮬레이션'} 닫기`} onClick={onClose}>×</button>
       </header>
       <div className="workspace-body">{children}</div>
       <footer className="workspace-foot"><span>{mode === 'practice' ? helper : '공개 튜토리얼 흐름 기반 · 코칭 표시 없이 진행 중'}</span><b aria-live="polite">{mode === 'practice' || showFeedbackInSimulation ? feedback ?? '' : ''}</b></footer>
@@ -342,7 +372,7 @@ function GameFrame({ gameId, current, total, children, helper, feedback, showFee
 function ResultView({ result, mode, onClose, onRestart }: { result: SessionResult; mode: SessionMode; onClose: () => void; onRestart: () => void }) {
   const game = getGame(result.gameId);
   return (
-    <div className="stage-result">
+    <div className="stage-result" tabIndex={-1}>
       <span className="result-check">✓</span><p>{mode === 'practice' ? '연습 모드' : '실전 모드'} 완료 · {game.no}</p><h2>{game.title}</h2>
       <div className="result-metrics">
         <article><span>정확도</span><b>{result.accuracy}%</b></article>
@@ -384,12 +414,14 @@ function RpsGame({ onFinish, onClose, config }: GameProps & { config: PracticeCo
   const [locked, setLocked] = useState(false);
   const started = useRef(0);
   const timeoutRef = useRef<number | null>(null);
+  const resolvedRef = useRef(false);
   const schedule = useManagedTimeout();
   const item = trials[round];
 
   function choose(choice: Rps | null) {
-    if (locked) return;
-    if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
+    if (locked || resolvedRef.current) return;
+    resolvedRef.current = true;
+    if (timeoutRef.current !== null) { window.clearTimeout(timeoutRef.current); timeoutRef.current = null; }
     setLocked(true);
     const ok = choice === item.answer;
     const nextCorrect = correct + (ok ? 1 : 0);
@@ -399,11 +431,12 @@ function RpsGame({ onFinish, onClose, config }: GameProps & { config: PracticeCo
     setFeedback(choice === null ? '시간 초과' : ok ? '정답' : '물음표 위치를 먼저 확인하세요.');
     schedule(() => {
       if (round === trials.length - 1) onFinish(resultFor('rps', nextCorrect, trials.length, nextRts, nextErrors));
-      else { setRound(round + 1); setFeedback(''); setLocked(false); started.current = performance.now(); }
+      else { resolvedRef.current = false; setRound(round + 1); setFeedback(''); setLocked(false); started.current = performance.now(); }
     }, 420);
   }
 
   useEffect(() => {
+    resolvedRef.current = false;
     started.current = performance.now();
     timeoutRef.current = window.setTimeout(() => choose(null), config.paceMs);
     return () => { if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current); };
@@ -414,6 +447,7 @@ function RpsGame({ onFinish, onClose, config }: GameProps & { config: PracticeCo
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.repeat) return;
+      if (['ArrowLeft','ArrowDown','ArrowRight'].includes(event.key)) event.preventDefault();
       if (event.key === 'ArrowLeft') choose('scissors');
       if (event.key === 'ArrowDown') choose('rock');
       if (event.key === 'ArrowRight') choose('paper');
@@ -426,7 +460,7 @@ function RpsGame({ onFinish, onClose, config }: GameProps & { config: PracticeCo
   return (
     <GameFrame gameId="rps" current={round + 1} total={trials.length} helper="← 가위 · ↓ 바위 · → 보" feedback={feedback} onClose={onClose}>
       <div className="round-label">{item.phase}</div>
-      <div className="time-strip" aria-label="문제 제한시간"><i key={round} style={{ '--duration': `${config.paceMs}ms` } as CSSProperties} /></div>
+      <DeadlineBar key={round} duration={config.paceMs} label="문제 제한시간" />
       <div className="rps-board">
         <article><span>나</span>{item.unknown === 'player' ? <b className="rps-question">?</b> : <Image src={shown.image} alt={shown.label} width={126} height={126} />}</article>
         <div><b>VS</b><span>내가 이기는 관계</span></div>
@@ -501,6 +535,7 @@ function RotationGame({ onFinish, onClose, config }: GameProps & { config: Pract
   const [locked, setLocked] = useState(false);
   const started = useRef(0);
   const timeoutRef = useRef<number | null>(null);
+  const resolvedRef = useRef(false);
   const schedule = useManagedTimeout();
   const puzzle = puzzles[round];
   const target = useMemo(() => matrixFor(puzzle.answer), [puzzle]);
@@ -508,6 +543,7 @@ function RotationGame({ onFinish, onClose, config }: GameProps & { config: Pract
   const remaining = 20 - clicks;
 
   useEffect(() => {
+    resolvedRef.current = false;
     started.current = performance.now();
     timeoutRef.current = window.setTimeout(() => finishRound(false, '시간 초과 · 다음 문제로 이동합니다.'), config.paceMs);
     return () => { if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current); };
@@ -528,8 +564,9 @@ function RotationGame({ onFinish, onClose, config }: GameProps & { config: Pract
     setSequence([]); setClicks((value) => value + 1);
   }
   function finishRound(ok: boolean, message: string) {
-    if (locked) return;
-    if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
+    if (locked || resolvedRef.current) return;
+    resolvedRef.current = true;
+    if (timeoutRef.current !== null) { window.clearTimeout(timeoutRef.current); timeoutRef.current = null; }
     setLocked(true);
     const nextCorrect = correct + (ok ? 1 : 0);
     const nextErrors = errors + (ok ? 0 : 1);
@@ -538,7 +575,7 @@ function RotationGame({ onFinish, onClose, config }: GameProps & { config: Pract
     setFeedback(message);
     schedule(() => {
       if (round === puzzles.length - 1) onFinish(resultFor('rotation', nextCorrect, puzzles.length, nextRts, nextErrors));
-      else { setRound(round + 1); setSequence([]); setClicks(0); setFeedback(''); setLocked(false); }
+      else { resolvedRef.current = false; setRound(round + 1); setSequence([]); setClicks(0); setFeedback(''); setLocked(false); }
     }, 700);
   }
   function submit() {
@@ -549,7 +586,7 @@ function RotationGame({ onFinish, onClose, config }: GameProps & { config: Pract
 
   return (
     <GameFrame gameId="rotation" current={round + 1} total={puzzles.length} helper="조작 순서를 모두 정한 뒤 제출하세요." feedback={feedback} onClose={onClose}>
-      <div className="time-strip" aria-label="문제 제한시간"><i key={round} style={{ '--duration': `${config.paceMs}ms` } as CSSProperties} /></div>
+      <DeadlineBar key={round} duration={config.paceMs} label="문제 제한시간" />
       <div className="rotation-comparison">
         <article><span>시작</span><RotationShape puzzle={puzzle} matrix={identity} label="시작 모양" /></article>
         <b>→</b>
@@ -584,6 +621,7 @@ function PersonMemory({ trial, person }: { trial: AppointmentTrial; person: numb
 }
 
 function AppointmentGame({ onFinish, onClose, config }: GameProps & { config: PracticeConfig }) {
+  const { mode } = useContext(SessionModeContext);
   const [seed] = useState(newSessionSeed);
   const trials = useMemo(() => Array.from({ length: config.quantity }, (_, index) => seededShuffle(appointmentTrials, seed + Math.floor(index / appointmentTrials.length))[index % appointmentTrials.length]), [config.quantity, seed]);
   const [round, setRound] = useState(0);
@@ -595,13 +633,16 @@ function AppointmentGame({ onFinish, onClose, config }: GameProps & { config: Pr
   const [feedback, setFeedback] = useState('');
   const [locked, setLocked] = useState(false);
   const started = useRef(0);
+  const answerTimeoutRef = useRef<number | null>(null);
+  const answerResolvedRef = useRef(false);
   const schedule = useManagedTimeout();
   const trial = trials[round];
+  const answerLimit = Math.max(5000, config.paceMs * 2);
   useEffect(() => { started.current = performance.now(); }, []);
 
   function nextPerson() {
     if (person < 2) setPerson(person + 1);
-    else { setAnswering(true); started.current = performance.now(); }
+    else { answerResolvedRef.current = false; setAnswering(true); started.current = performance.now(); }
   }
   useEffect(() => {
     if (answering || locked) return;
@@ -610,23 +651,35 @@ function AppointmentGame({ onFinish, onClose, config }: GameProps & { config: Pr
     // Person cards advance after the configured presentation time, or earlier by button.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [round, person, answering, locked]);
-  function choose(value: string) {
-    if (locked) return;
+  useEffect(() => {
+    if (!answering || locked || mode !== 'simulation') return;
+    answerResolvedRef.current = false;
+    answerTimeoutRef.current = window.setTimeout(() => choose(null), answerLimit);
+    return () => {
+      if (answerTimeoutRef.current !== null) { window.clearTimeout(answerTimeoutRef.current); answerTimeoutRef.current = null; }
+    };
+    // The public tutorial does not publish an exact response deadline, so simulation uses the visible preset-derived limit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [answering, round, locked, mode, answerLimit]);
+  function choose(value: string | null) {
+    if (!answering || locked || answerResolvedRef.current) return;
+    answerResolvedRef.current = true;
+    if (answerTimeoutRef.current !== null) { window.clearTimeout(answerTimeoutRef.current); answerTimeoutRef.current = null; }
     setLocked(true);
     const ok = value === trial.answer;
     const nextCorrect = correct + (ok ? 1 : 0);
     const nextErrors = errors + (ok ? 0 : 1);
     const nextRts = [...rts, Math.round(performance.now() - started.current)];
-    setCorrect(nextCorrect); setErrors(nextErrors); setRts(nextRts); setFeedback(ok ? '정답' : `정답은 ${trial.answer}`);
+    setCorrect(nextCorrect); setErrors(nextErrors); setRts(nextRts); setFeedback(value === null ? '시간 초과' : ok ? '정답' : `정답은 ${trial.answer}`);
     schedule(() => {
       if (round === trials.length - 1) onFinish(resultFor('appointment', nextCorrect, trials.length, nextRts, nextErrors));
-      else { setRound(round + 1); setPerson(0); setAnswering(false); setFeedback(''); setLocked(false); started.current = performance.now(); }
+      else { answerResolvedRef.current = false; setRound(round + 1); setPerson(0); setAnswering(false); setFeedback(''); setLocked(false); started.current = performance.now(); }
     }, 650);
   }
 
   return (
     <GameFrame gameId="appointment" current={round + 1} total={trials.length} helper={trial.kind === 'bus' ? '버스는 본 번호를 누적해 NOT을 찾습니다.' : '두 사람부터 교집합만 남겨 셋째와 비교합니다.'} feedback={feedback} onClose={onClose}>
-      {!answering ? <div className="appointment-stimulus"><div className="time-strip"><i key={`${round}-${person}`} style={{ '--duration': `${config.paceMs}ms` } as CSSProperties} /></div><span>{personNames[person]} · {trial.kind === 'bus' ? '탑승 버스' : '선호 정보'}</span><h3>{trial.title}</h3><PersonMemory trial={trial} person={person} /><button className="single-action" onClick={nextPerson}>{person < 2 ? '다음 사람' : '질문 보기'} <i>→</i></button></div> : <div className="appointment-question"><span>{trial.kind === 'bus' ? 'NOT' : 'AND'}</span><h3>{trial.title}</h3><div>{trial.choices.map((value) => <button disabled={locked} onClick={() => choose(value)} key={value}>{trial.kind === 'food' && <i>{foodIcons[value]}</i>}<b>{value}</b></button>)}</div></div>}
+      {!answering ? <div className="appointment-stimulus"><DeadlineBar key={`${round}-${person}`} duration={config.paceMs} label={`${personNames[person]} 정보 제시시간`} /><span>{personNames[person]} · {trial.kind === 'bus' ? '탑승 버스' : '선호 정보'}</span><h3>{trial.title}</h3><PersonMemory trial={trial} person={person} /><button className="single-action" onClick={nextPerson}>{person < 2 ? '다음 사람' : '질문 보기'} <i>→</i></button></div> : <div className="appointment-question">{mode === 'simulation' && <DeadlineBar key={`${round}-answer`} duration={answerLimit} label="응답 제한시간" />}<span>{trial.kind === 'bus' ? 'NOT' : 'AND'}</span><h3>{trial.title}</h3><div>{trial.choices.map((value) => <button disabled={locked} onClick={() => choose(value)} key={value}>{trial.kind === 'food' && <i>{foodIcons[value]}</i>}<b>{value}</b></button>)}</div></div>}
     </GameFrame>
   );
 }
@@ -694,28 +747,36 @@ function PathGame({ onFinish, onClose, config }: GameProps & { config: PracticeC
   const [locked, setLocked] = useState(false);
   const started = useRef(0);
   const timeoutRef = useRef<number | null>(null);
-  const scoreRef = useRef({ correct: 0, errors: 0, rts: [] as number[] });
+  const resolvedRef = useRef(false);
+  const hadErrorRef = useRef(false);
+  const interactionClicksRef = useRef(0);
+  const scoreRef = useRef({ correct: 0, errors: 0, rts: [] as number[], attemptErrors: 0, clicks: 0 });
   const schedule = useManagedTimeout();
   const puzzle = puzzles[round];
 
   function advanceRound(success: boolean, message: string) {
-    if (locked) return;
-    if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
+    if (locked || resolvedRef.current) return;
+    resolvedRef.current = true;
+    if (timeoutRef.current !== null) { window.clearTimeout(timeoutRef.current); timeoutRef.current = null; }
     setLocked(true); setFeedback(message);
+    const firstTrySuccess = success && !hadErrorRef.current;
     scoreRef.current = {
-      correct: scoreRef.current.correct + (success ? 1 : 0),
-      errors: scoreRef.current.errors + (success ? 0 : 1),
+      ...scoreRef.current,
+      correct: scoreRef.current.correct + (firstTrySuccess ? 1 : 0),
+      errors: scoreRef.current.errors + (firstTrySuccess ? 0 : 1),
       rts: [...scoreRef.current.rts, Math.round(performance.now() - started.current)],
+      clicks: interactionClicksRef.current,
     };
     schedule(() => {
       if (round === puzzles.length - 1) {
         const score = scoreRef.current;
-        onFinish(resultFor('path', score.correct, puzzles.length, score.rts, score.errors, { clicks }));
-      } else { setRound((value) => value + 1); setFences({}); setClicks(0); setFeedback(''); setLocked(false); }
+        onFinish(resultFor('path', score.correct, puzzles.length, score.rts, score.errors, { clicks: score.clicks, attemptErrors: score.attemptErrors }));
+      } else { resolvedRef.current = false; hadErrorRef.current = false; setRound((value) => value + 1); setFences({}); setClicks(0); setFeedback(''); setLocked(false); }
     }, 550);
   }
 
   useEffect(() => {
+    resolvedRef.current = false;
     started.current = performance.now();
     timeoutRef.current = window.setTimeout(() => advanceRound(false, '시간 초과 · 다음 문제로 이동합니다.'), config.paceMs);
     return () => { if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current); };
@@ -732,6 +793,7 @@ function PathGame({ onFinish, onClose, config }: GameProps & { config: PracticeC
       return next;
     });
     setClicks((value) => value + 1);
+    interactionClicksRef.current += 1;
   }
   function submit() {
     if (locked) return;
@@ -742,7 +804,9 @@ function PathGame({ onFinish, onClose, config }: GameProps & { config: PracticeC
     });
     if (!routesOk) {
       if (mode === 'simulation') { advanceRound(false, ''); return; }
-      scoreRef.current.errors += 1; setFeedback('모든 교통수단의 도착 위치를 다시 확인하세요.'); return;
+      hadErrorRef.current = true;
+      scoreRef.current.attemptErrors += 1;
+      setFeedback('모든 교통수단의 도착 위치를 다시 확인하세요.'); return;
     }
     const maximumScore = count === puzzle.target;
     advanceRound(maximumScore, maximumScore ? '경로 성공 · 정답 울타리 수 일치' : `경로는 성공했지만 최대 득점 조건은 울타리 ${puzzle.target}개입니다.`);
@@ -750,7 +814,7 @@ function PathGame({ onFinish, onClose, config }: GameProps & { config: PracticeC
 
   return (
     <GameFrame gameId="path" current={round + 1} total={puzzles.length} helper="칸을 누르면 빈칸 → / → \\ → 빈칸 순으로 바뀝니다." feedback={feedback} onClose={onClose}>
-      <div className="time-strip" aria-label="문제 제한시간"><i key={round} style={{ '--duration': `${config.paceMs}ms` } as CSSProperties} /></div>
+      <DeadlineBar key={round} duration={config.paceMs} label="문제 제한시간" />
       <div className="path-toolbar"><span>클릭 가능 <b>{18 - clicks}</b></span><span>정답 울타리 수 <b>{puzzle.target}</b></span><button disabled={locked} onClick={() => { setFences({}); setClicks(0); setFeedback(''); }}>전체 초기화</button></div>
       <div className="path-shell">
         <div className="edge-row top">{Array.from({ length: 5 }, (_, index) => <EdgeMarker side="top" index={index} vehicles={puzzle.vehicles} key={index} />)}</div>
@@ -801,11 +865,13 @@ function PotionGame({ onFinish, onClose, config }: GameProps & { config: Practic
   const [locked, setLocked] = useState(false);
   const started = useRef(0);
   const timeoutRef = useRef<number | null>(null);
+  const resolvedRef = useRef(false);
   const schedule = useManagedTimeout();
   const trial = trials[round];
   const key = trial.combo.join('-');
   const observed = history[key] ?? { red: 0, blue: 0 };
   useEffect(() => {
+    resolvedRef.current = false;
     started.current = performance.now();
     timeoutRef.current = window.setTimeout(() => choose(null), config.paceMs);
     return () => { if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current); };
@@ -814,8 +880,9 @@ function PotionGame({ onFinish, onClose, config }: GameProps & { config: Practic
   }, [round]);
 
   function choose(prediction: 'red' | 'blue' | null) {
-    if (locked) return;
-    if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
+    if (locked || resolvedRef.current) return;
+    resolvedRef.current = true;
+    if (timeoutRef.current !== null) { window.clearTimeout(timeoutRef.current); timeoutRef.current = null; }
     setLocked(true);
     const ok = prediction === trial.outcome;
     const nextCorrect = correct + (ok ? 1 : 0);
@@ -827,14 +894,14 @@ function PotionGame({ onFinish, onClose, config }: GameProps & { config: Practic
     setFeedback(`${prediction === null ? '시간 초과 · ' : ''}실제 결과: ${trial.outcome === 'blue' ? '파란 약' : '빨간 약'}`);
     schedule(() => {
       if (round === trials.length - 1) onFinish(resultFor('potion', nextCorrect, trials.length, nextRts, nextErrors, { recipes: Object.keys(nextHistory).length }));
-      else { setRound(round + 1); setFeedback(''); setLocked(false); started.current = performance.now(); }
+      else { resolvedRef.current = false; setRound(round + 1); setFeedback(''); setLocked(false); started.current = performance.now(); }
     }, 600);
   }
 
   return (
     <GameFrame gameId="potion" current={round + 1} total={trials.length} helper="1장 4개 · 2장 6개 · 3장 4개를 서로 다른 14개 레시피로 기억합니다." feedback={feedback} showFeedbackInSimulation onClose={onClose}>
       <div className="potion-layout">
-        <div className="time-strip"><i key={round} style={{ '--duration': `${config.paceMs}ms` } as CSSProperties} /></div>
+        <DeadlineBar key={round} duration={config.paceMs} label="응답 제한시간" />
         <div className="ingredient-cards">{trial.combo.map((index) => <article key={index}><i>{ingredients[index].icon}</i><b>{ingredients[index].name}</b><span>{String.fromCharCode(65 + index)}</span></article>)}</div>
         <div className="potion-observation"><span>이 조합의 이전 실제 결과</span><div><b className="blue">파랑 {observed.blue}</b><b className="red">빨강 {observed.red}</b></div></div>
         <h3>어떤 색의 약이 나올 가능성이 높을까요?</h3>
@@ -926,7 +993,7 @@ function NBackGame({ onFinish, onClose, glyphMnemonics, config }: GameProps & { 
     <GameFrame gameId="nback" current={index + 1} total={nbackTrials.length} helper={trial.mode === '2-back' ? '← 2번째 전과 같음 · Space 다름' : '← 2번째 전 · → 3번째 전 · Space 둘 다 다름'} onClose={onClose}>
       <div className="nback-stage">
         <div className="nback-status"><span>ROUND {trial.round} · SET {trial.group + 1} · {trial.mode}</span>{mode === 'practice' && <button onClick={() => setShowName((value) => !value)}>이름표 {showName ? '숨기기' : '보기'}</button>}</div>
-        <div className="time-strip nback-time" aria-label="도형 제시시간"><i key={index} style={{ '--duration': `${config.paceMs}ms` } as CSSProperties} /></div>
+        <DeadlineBar key={index} duration={config.paceMs} label="도형 제시시간" className="nback-time" />
         <div className="nback-stimulus" key={`${trial.set}-${index}`}><CognitiveGlyph variant={trial.variant} size={240} color="#55c8c3" label={glyphShapeNames[trial.variant]} /></div>
         {mode === 'practice' && showName && <p className="nback-name">{glyphShapeNames[trial.variant]} · 내 이름 <b>{glyphMnemonics[trial.variant]}</b></p>}
         {trial.warmup ? <p className="auto-next nback-warmup">입력 없이 기억하세요. 같은 시간 뒤 자동으로 넘어갑니다.</p> : <div className="nback-actions"><button className={selected === 'left' ? 'selected' : ''} disabled={selected !== null} onClick={() => choose('left')}><span>←</span><b>2번째 전</b></button>{trial.mode === '2·3-back' && <button className={selected === 'right' ? 'selected' : ''} disabled={selected !== null} onClick={() => choose('right')}><span>→</span><b>3번째 전</b></button>}<button className={selected === 'space' ? 'selected' : ''} disabled={selected !== null} onClick={() => choose('space')}><span>Space</span><b>둘 다 다름</b></button></div>}
@@ -960,13 +1027,15 @@ function NumberGame({ onFinish, onClose, config }: GameProps & { config: Practic
   const [locked, setLocked] = useState(false);
   const started = useRef(0);
   const timeoutRef = useRef<number | null>(null);
+  const resolvedRef = useRef(false);
   const schedule = useManagedTimeout();
   const roundConfig = rounds[round];
   const expected = numberExpected(roundConfig);
 
   function finishRound(success: boolean, message: string) {
-    if (locked) return;
-    if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
+    if (locked || resolvedRef.current) return;
+    resolvedRef.current = true;
+    if (timeoutRef.current !== null) { window.clearTimeout(timeoutRef.current); timeoutRef.current = null; }
     setLocked(true);
     const nextPassed = passed + (success ? 1 : 0);
     const nextErrors = errors + (success ? 0 : 1);
@@ -974,11 +1043,12 @@ function NumberGame({ onFinish, onClose, config }: GameProps & { config: Practic
     setPassed(nextPassed); setErrors(nextErrors); setRts(nextRts); setFeedback(message);
     schedule(() => {
       if (round === rounds.length - 1) onFinish(resultFor('number', nextPassed, rounds.length, nextRts, nextErrors));
-      else { setRound((value) => value + 1); setCursor(0); setFeedback(''); setLocked(false); }
+      else { resolvedRef.current = false; setRound((value) => value + 1); setCursor(0); setFeedback(''); setLocked(false); }
     }, 420);
   }
 
   useEffect(() => {
+    resolvedRef.current = false;
     started.current = performance.now();
     timeoutRef.current = window.setTimeout(() => finishRound(false, '시간 초과 · 다음 문제로 이동합니다.'), config.paceMs);
     return () => { if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current); };
@@ -997,7 +1067,7 @@ function NumberGame({ onFinish, onClose, config }: GameProps & { config: Practic
   return (
     <GameFrame gameId="number" current={round + 1} total={rounds.length} helper={roundConfig.mode === 'flash' ? 'ROUND 1 · 정렬된 판에서 강조된 숫자만 빠르게 누릅니다.' : `ROUND 2 · 건너뛰기 ${roundConfig.skip} · 두 번 누르기 ${roundConfig.double.join('·')}`} feedback={feedback} onClose={onClose}>
       <div className="number-layout">
-        <div className="time-strip" aria-label="라운드 제한시간"><i key={round} style={{ '--duration': `${config.paceMs}ms` } as CSSProperties} /></div>
+        <DeadlineBar key={round} duration={config.paceMs} label="라운드 제한시간" />
         <div className="number-rule">{roundConfig.mode === 'flash' ? <span className="basic">강조된 숫자를 누르세요</span> : <><span>건너뛰기 <b>{roundConfig.skip}</b></span><span>두 번 누르기 <b>{roundConfig.double.join(' · ')}</b></span></>}</div>
         <div className="number-board-pro">{roundConfig.board.map((value) => <button className={roundConfig.mode === 'flash' && value === expected[cursor] ? 'target' : ''} disabled={locked} key={value} onClick={() => choose(value)}>{value}</button>)}</div>
       </div>
@@ -1013,6 +1083,7 @@ function CountCloud({ word, count, offset }: { word: string; count: number; offs
 }
 
 function CountGame({ onFinish, onClose, config }: GameProps & { config: PracticeConfig }) {
+  const { mode } = useContext(SessionModeContext);
   const [seed] = useState(newSessionSeed);
   const specs = useMemo(() => Array.from({ length: config.quantity }, (_, index) => seededShuffle(countSpecs, seed + Math.floor(index / countSpecs.length))[index % countSpecs.length]), [config.quantity, seed]);
   const [round, setRound] = useState(0);
@@ -1022,30 +1093,46 @@ function CountGame({ onFinish, onClose, config }: GameProps & { config: Practice
   const [rts, setRts] = useState<number[]>([]);
   const [locked, setLocked] = useState(false);
   const started = useRef(0);
+  const answerTimeoutRef = useRef<number | null>(null);
+  const answerResolvedRef = useRef(false);
   const schedule = useManagedTimeout();
   const spec = specs[round]; const pair = seededShuffle(wordPairs, seed + round)[0];
+  const answerLimit = Math.max(2500, config.paceMs * 3);
 
   useEffect(() => {
     const showTimer = window.setTimeout(() => setPhase('show'), COUNT_BLANK_MS);
-    const answerTimer = window.setTimeout(() => { setPhase('answer'); started.current = performance.now(); }, COUNT_BLANK_MS + config.paceMs);
+    const answerTimer = window.setTimeout(() => { answerResolvedRef.current = false; setPhase('answer'); started.current = performance.now(); }, COUNT_BLANK_MS + config.paceMs);
     return () => { window.clearTimeout(showTimer); window.clearTimeout(answerTimer); };
   }, [round, config.paceMs]);
 
-  function choose(side: 'left' | 'right') {
-    if (locked || phase !== 'answer') return;
+  useEffect(() => {
+    if (phase !== 'answer' || locked || mode !== 'simulation') return;
+    answerResolvedRef.current = false;
+    answerTimeoutRef.current = window.setTimeout(() => choose(null), answerLimit);
+    return () => {
+      if (answerTimeoutRef.current !== null) { window.clearTimeout(answerTimeoutRef.current); answerTimeoutRef.current = null; }
+    };
+    // Simulation must always terminate; this visible limit is derived from the public-flow practice preset.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, round, locked, mode, answerLimit]);
+
+  function choose(side: 'left' | 'right' | null) {
+    if (locked || phase !== 'answer' || answerResolvedRef.current) return;
+    answerResolvedRef.current = true;
+    if (answerTimeoutRef.current !== null) { window.clearTimeout(answerTimeoutRef.current); answerTimeoutRef.current = null; }
     setLocked(true);
     const target = spec.left > spec.right ? 'left' : 'right';
     const ok = side === target;
     const nextCorrect = correct + (ok ? 1 : 0); const nextErrors = errors + (ok ? 0 : 1); const nextRts = [...rts, Math.round(performance.now() - started.current)];
     setCorrect(nextCorrect); setErrors(nextErrors); setRts(nextRts);
-    schedule(() => { if (round === specs.length - 1) onFinish(resultFor('count', nextCorrect, specs.length, nextRts, nextErrors)); else { setPhase('blank'); setLocked(false); setRound(round + 1); } }, 150);
+    schedule(() => { if (round === specs.length - 1) onFinish(resultFor('count', nextCorrect, specs.length, nextRts, nextErrors)); else { answerResolvedRef.current = false; setPhase('blank'); setLocked(false); setRound(round + 1); } }, 150);
   }
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.repeat) return; if (event.key === 'ArrowLeft') choose('left'); if (event.key === 'ArrowRight') choose('right'); };
+    const onKey = (event: KeyboardEvent) => { if (event.repeat) return; if (['ArrowLeft','ArrowRight'].includes(event.key)) event.preventDefault(); if (event.key === 'ArrowLeft') choose('left'); if (event.key === 'ArrowRight') choose('right'); };
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
   });
   return <GameFrame gameId="count" current={round + 1} total={specs.length} helper={phase === 'blank' ? '시선을 가운데에 둡니다.' : phase === 'show' ? `${formatPace(config.paceMs)} 동안 양쪽의 개수만 비교합니다.` : '단어가 사라진 뒤 더 많았던 쪽을 선택합니다.'} onClose={onClose}>
-    {phase === 'blank' ? <div className="count-fixation" aria-label="다음 문제 준비">＋</div> : <div className={`count-wrap phase-${phase}`}>{phase === 'show' && <div className="time-strip"><i key={round} style={{ '--duration': `${config.paceMs}ms` } as CSSProperties} /></div>}<div className="count-board"><button disabled={phase !== 'answer' || locked} aria-label="왼쪽 선택" onClick={() => choose('left')}>{phase === 'show' ? <CountCloud word={pair[0]} count={spec.left} offset={round} /> : <div className="count-hidden">?</div>}<span>{phase === 'answer' ? '← 왼쪽' : ' '}</span></button><i /><button disabled={phase !== 'answer' || locked} aria-label="오른쪽 선택" onClick={() => choose('right')}>{phase === 'show' ? <CountCloud word={pair[1]} count={spec.right} offset={round + 3} /> : <div className="count-hidden">?</div>}<span>{phase === 'answer' ? '오른쪽 →' : ' '}</span></button></div></div>}
+    {phase === 'blank' ? <div className="count-fixation" aria-label="다음 문제 준비">＋</div> : <div className={`count-wrap phase-${phase}`}>{(phase === 'show' || (phase === 'answer' && mode === 'simulation')) && <DeadlineBar key={`${round}-${phase}`} duration={phase === 'show' ? config.paceMs : answerLimit} label={phase === 'show' ? '단어 제시시간' : '응답 제한시간'} />}<div className="count-board"><button disabled={phase !== 'answer' || locked} aria-label="왼쪽 선택" onClick={() => choose('left')}>{phase === 'show' ? <CountCloud word={pair[0]} count={spec.left} offset={round} /> : <div className="count-hidden">?</div>}<span>{phase === 'answer' ? '← 왼쪽' : ' '}</span></button><i /><button disabled={phase !== 'answer' || locked} aria-label="오른쪽 선택" onClick={() => choose('right')}>{phase === 'show' ? <CountCloud word={pair[1]} count={spec.right} offset={round + 3} /> : <div className="count-hidden">?</div>}<span>{phase === 'answer' ? '오른쪽 →' : ' '}</span></button></div></div>}
   </GameFrame>;
 }
 
@@ -1083,6 +1170,8 @@ function MouseGame({ onFinish, onClose, config }: GameProps & { config: Practice
   const started = useRef(0);
   const redRt = useRef(0);
   const transitionGuard = useRef(false);
+  const decisionResolvedRef = useRef(false);
+  const decisionTimeoutRef = useRef<number | null>(null);
   const schedule = useManagedTimeout();
   const trial = trials[round];
   const catCells = [trial.red, trial.blue, ...trial.cats];
@@ -1096,7 +1185,9 @@ function MouseGame({ onFinish, onClose, config }: GameProps & { config: Practice
   }, [round, config.paceMs]);
 
   function decide(caught: boolean | null, confidence: number) {
-    if (locked || transitionGuard.current) return;
+    if (locked || transitionGuard.current || decisionResolvedRef.current || (stage !== 'red' && stage !== 'blue')) return;
+    decisionResolvedRef.current = true;
+    if (decisionTimeoutRef.current !== null) { window.clearTimeout(decisionTimeoutRef.current); decisionTimeoutRef.current = null; }
     if (stage === 'red') {
       transitionGuard.current = true;
       setRedAnswer(caught); setRedConfidence(confidence); redRt.current = Math.round(performance.now() - started.current); setStage('blue'); started.current = performance.now();
@@ -1117,8 +1208,14 @@ function MouseGame({ onFinish, onClose, config }: GameProps & { config: Practice
 
   useEffect(() => {
     if (stage !== 'red' && stage !== 'blue') return;
-    const timer = window.setTimeout(() => decide(null, 0), decisionMs);
-    return () => window.clearTimeout(timer);
+    decisionResolvedRef.current = false;
+    decisionTimeoutRef.current = window.setTimeout(() => {
+      decisionTimeoutRef.current = null;
+      decide(null, 0);
+    }, decisionMs);
+    return () => {
+      if (decisionTimeoutRef.current !== null) { window.clearTimeout(decisionTimeoutRef.current); decisionTimeoutRef.current = null; }
+    };
     // Every red/blue decision receives its own fixed deadline.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage]);
@@ -1131,14 +1228,21 @@ function MouseGame({ onFinish, onClose, config }: GameProps & { config: Practice
   return (
     <GameFrame gameId="mouse" current={round + 1} total={trials.length} helper="생쥐 → 빈 격자 → 일반 고양이 → 색 표식 → 빨강·파랑 판단" onClose={onClose}>
       {stage === 'memory' || stage === 'blank' || stage === 'cats' || stage === 'highlight' ? <div className="mouse-layout">
-        <div className="mouse-board-pro">{Array.from({ length: 36 }, (_, cell) => { const mouse = stage === 'memory' && trial.mice.includes(cell); const cat = (stage === 'cats' || stage === 'highlight') && catCells.includes(cell); const red = stage === 'highlight' && cell === trial.red; const blue = stage === 'highlight' && cell === trial.blue; return <div className={`${mouse ? 'mouse' : ''} ${red ? 'red' : ''} ${blue ? 'blue' : ''} ${cat && !red && !blue ? 'cat' : ''}`} key={cell}>{mouse ? '🐭' : cat ? '🐈' : ''}</div>; })}</div>
+        <div className="mouse-board-pro" role="grid" aria-label={stage === 'memory' ? '생쥐 위치 기억 격자' : stage === 'blank' ? '빈 기억 격자' : '고양이 위치 확인 격자'} aria-rowcount={6} aria-colcount={6}>{Array.from({ length: 36 }, (_, cell) => {
+          const mouse = stage === 'memory' && trial.mice.includes(cell);
+          const cat = (stage === 'cats' || stage === 'highlight') && catCells.includes(cell);
+          const red = stage === 'highlight' && cell === trial.red;
+          const blue = stage === 'highlight' && cell === trial.blue;
+          const contents = mouse ? '생쥐' : red ? '빨간 고양이' : blue ? '파란 고양이' : cat ? '고양이' : '빈칸';
+          return <div role="gridcell" aria-rowindex={Math.floor(cell / 6) + 1} aria-colindex={(cell % 6) + 1} aria-label={`${Math.floor(cell / 6) + 1}행 ${(cell % 6) + 1}열 ${contents}`} className={`${mouse ? 'mouse' : ''} ${red ? 'red' : ''} ${blue ? 'blue' : ''} ${cat && !red && !blue ? 'cat' : ''}`} key={cell}>{mouse ? '🐭' : cat ? '🐈' : ''}</div>;
+        })}</div>
         <div className="mouse-actions"><span>{stage === 'memory' ? '위치 기억' : stage === 'blank' ? '기억 유지' : stage === 'cats' ? '고양이 확인' : '색 표식 확인'}</span><h3>{stage === 'memory' ? '생쥐가 있던 칸을 기억하세요.' : stage === 'blank' ? '빈 격자에서도 위치를 유지하세요.' : stage === 'cats' ? '같은 수의 고양이 위치를 확인하세요.' : '빨강·파랑 고양이 위치를 대조하세요.'}</h3><p className="auto-next">잠시 후 자동으로 다음 단계로 이동합니다.</p></div>
       </div> : <div className={`cat-decision ${stage}`}>
-        <div className="time-strip decision-time"><i key={`${round}-${stage}`} style={{ '--duration': `${decisionMs}ms` } as CSSProperties} /></div>
+        <DeadlineBar key={`${round}-${stage}`} duration={decisionMs} label={`${stage === 'red' ? '빨간' : '파란'} 고양이 응답 제한시간`} className="decision-time" />
         <div className="target-cat"><span>{stage === 'red' ? '빨간 고양이' : '파란 고양이'}</span><i>🐈</i><h3>생쥐를 잡았나요?</h3></div>
         <div className="decision-groups">
-          <section><b>← 놓쳤다</b><div>{decisionButtons.slice(0,4).map((button, index) => <button className="missed" disabled={locked} onClick={() => decide(button.caught, button.confidence)} key={index}><b>{button.label}</b><span>확신 {button.confidence}</span></button>)}</div></section>
-          <section><b>잡았다 →</b><div>{decisionButtons.slice(4).map((button, index) => <button className="caught" disabled={locked} onClick={() => decide(button.caught, button.confidence)} key={index}><b>{button.label}</b><span>확신 {button.confidence}</span></button>)}</div></section>
+          <section aria-label="놓쳤다 응답"><b>← 놓쳤다</b><div>{decisionButtons.slice(0,4).map((button, index) => <button className="missed" aria-label={`${stage === 'red' ? '빨간' : '파란'} 고양이 · 놓쳤다 · ${button.label} · 확신 ${button.confidence}`} disabled={locked} onClick={() => decide(button.caught, button.confidence)} key={index}><b>{button.label}</b><span>확신 {button.confidence}</span></button>)}</div></section>
+          <section aria-label="잡았다 응답"><b>잡았다 →</b><div>{decisionButtons.slice(4).map((button, index) => <button className="caught" aria-label={`${stage === 'red' ? '빨간' : '파란'} 고양이 · 잡았다 · ${button.label} · 확신 ${button.confidence}`} disabled={locked} onClick={() => decide(button.caught, button.confidence)} key={index}><b>{button.label}</b><span>확신 {button.confidence}</span></button>)}</div></section>
         </div>
       </div>}
     </GameFrame>
