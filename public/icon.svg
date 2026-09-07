@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="NINEFLOW LAB">
+  <defs>
+    <linearGradient id="surface" x1="8" y1="5" x2="56" y2="59" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2769E8"/>
+      <stop offset="1" stop-color="#17449F"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="17" y1="16" x2="48" y2="49" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9DF1DD"/>
+      <stop offset="1" stop-color="#4FC9B1"/>
+    </linearGradient>
+  </defs>
+  <rect x="3" y="3" width="58" height="58" rx="17" fill="url(#surface)"/>
+  <path d="M18 45V19h7l14 16V19h7v26h-7L25 29v16h-7Z" fill="#fff"/>
+  <circle cx="18" cy="18" r="4" fill="url(#accent)"/>
+  <circle cx="46" cy="46" r="4" fill="#FFCA63"/>
+</svg>

@@ -1,18 +1,54 @@
 export type AppointmentKind = 'day' | 'location' | 'food' | 'bus';
-export type AppointmentTrial = { kind: AppointmentKind; title: string; people: string[][]; choices: string[]; answer: string };
+export type AppointmentRoundNumber = 1 | 2 | 3 | 4;
 
-const baseTrials: readonly AppointmentTrial[] = [
-  { kind: 'day', title: '세 사람이 모두 가능한 요일', people: [['월','수','금'],['화','수','토'],['수','금','일']], choices: ['월','수','금','토','일'], answer: '수' },
-  { kind: 'location', title: '세 사람이 모두 선호한 장소', people: [['A1','B2','D4'],['B2','C1','C4'],['A4','B2','D1']], choices: ['A1','B2','C4','D1'], answer: 'B2' },
-  { kind: 'food', title: '세 사람이 모두 선호한 메뉴', people: [['우동','탕수육','초밥'],['장어','탕수육','돈가스'],['탕수육','만두','회']], choices: ['우동','탕수육','돈가스','만두','회'], answer: '탕수육' },
-  { kind: 'bus', title: '아무도 탑승하지 않은 버스', people: [['81','549'],['25','73'],['9','48']], choices: ['81','324','73','9','48'], answer: '324' },
-];
+export type AppointmentRound = {
+  number: AppointmentRoundNumber;
+  kind: AppointmentKind;
+  label: string;
+  shortLabel: string;
+  instruction: string;
+  answerRule: 'common' | 'unseen';
+};
 
-const domains: Record<AppointmentKind, string[]> = {
-  day: ['월','화','수','목','금','토','일'],
-  location: Array.from({ length: 16 }, (_, index) => `${String.fromCharCode(65 + Math.floor(index / 4))}${(index % 4) + 1}`),
-  food: ['우동','탕수육','초밥','장어','돈가스','만두','회'],
-  bus: ['12','27','34','48','63','75','91','104','208','316','427','539','642','781','905'],
+export type AppointmentTrial = {
+  kind: AppointmentKind;
+  round: AppointmentRoundNumber;
+  roundLabel: string;
+  title: string;
+  people: string[][];
+  choices: string[];
+  answer: string;
+  itemsPerPerson: number;
+  questionInRound: number;
+  questionsInRound: number;
+};
+
+export const APPOINTMENT_ROUNDS: readonly AppointmentRound[] = [
+  { number: 1, kind: 'day', label: '공통 선호 요일', shortLabel: '요일', instruction: '세 사람 모두가 가능한 요일을 고르세요.', answerRule: 'common' },
+  { number: 2, kind: 'location', label: '공통 선호 위치', shortLabel: '위치', instruction: '세 사람 모두가 고른 4×4 지도의 위치를 찾으세요.', answerRule: 'common' },
+  { number: 3, kind: 'food', label: '공통 선호 메뉴', shortLabel: '메뉴', instruction: '세 사람 모두가 고른 메뉴를 찾으세요.', answerRule: 'common' },
+  { number: 4, kind: 'bus', label: '미탑승 버스', shortLabel: '버스', instruction: '세 사람이 한 번도 이용하지 않은 버스 번호를 고르세요.', answerRule: 'unseen' },
+] as const;
+
+export const APPOINTMENT_KIND_ORDER = APPOINTMENT_ROUNDS.map((round) => round.kind);
+export const APPOINTMENT_SIMULATION_QUESTIONS_PER_ROUND = 5;
+export const APPOINTMENT_SIMULATION_TOTAL_QUESTIONS = APPOINTMENT_ROUNDS.length * APPOINTMENT_SIMULATION_QUESTIONS_PER_ROUND;
+
+export const APPOINTMENT_WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'] as const;
+export const APPOINTMENT_LOCATIONS = Array.from({ length: 16 }, (_, index) => `${String.fromCharCode(65 + Math.floor(index / 4))}${(index % 4) + 1}`);
+export const APPOINTMENT_FOODS = [
+  '우동', '탕', '김밥', '스테이크', '빵', '탕수육',
+  '전', '장어', '볶음밥', '돈까스', '떡볶이', '순대',
+  '곱창', '햄버거', '초밥', '국', '치킨', '짜장',
+  '만두', '짬뽕', '피자', '족발', '생선', '회',
+] as const;
+
+const BUS_NUMBERS = ['1', '5', '9', '12', '19', '25', '48', '57', '61', '73', '81', '87', '104', '208', '316', '427', '530', '642', '791', '905'];
+
+const domains: Record<Exclude<AppointmentKind, 'bus'>, readonly string[]> = {
+  day: APPOINTMENT_WEEKDAYS,
+  location: APPOINTMENT_LOCATIONS,
+  food: APPOINTMENT_FOODS,
 };
 
 function createRandom(seed: number) {
@@ -32,39 +68,116 @@ function shuffled<T>(items: readonly T[], random: () => number) {
   return result;
 }
 
-function balancedSequence<T>(items: readonly T[], length: number, random: () => number) {
-  const result: T[] = [];
-  while (result.length < length) result.push(...shuffled(items, random));
-  return result.slice(0, length);
+function buildAnswerSchedule(domain: readonly string[], count: number, random: () => number) {
+  const answers: string[] = [];
+  while (answers.length < count) {
+    const nextCycle = shuffled(domain, random);
+    if (answers.length > 0 && nextCycle.length > 1 && answers.at(-1) === nextCycle[0]) {
+      nextCycle.push(nextCycle.shift()!);
+    }
+    answers.push(...nextCycle.slice(0, count - answers.length));
+  }
+  return answers;
 }
 
-function remapTrial(trial: AppointmentTrial, random: () => number): AppointmentTrial {
-  const sourceValues = [...new Set([...trial.people.flat(), ...trial.choices, trial.answer])];
-  const targetValues = shuffled(domains[trial.kind], random).slice(0, sourceValues.length);
-  const mapping = new Map(sourceValues.map((value, index) => [value, targetValues[index]]));
-  const mapValue = (value: string) => mapping.get(value)!;
+function uniqueCommon(values: string[][]) {
+  return values[0].filter((value) => values.slice(1).every((items) => items.includes(value)));
+}
+
+function buildCommonPeople(domain: readonly string[], answer: string, itemCount: number, random: () => number) {
+  const decoys = domain.filter((value) => value !== answer);
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const people = Array.from({ length: 3 }, () => shuffled(decoys, random).slice(0, itemCount - 1).concat(answer));
+    if (uniqueCommon(people).length === 1) return people.map((items) => shuffled(items, random));
+  }
+  throw new Error('유일한 교집합을 가진 약속 문항을 만들 수 없습니다.');
+}
+
+function buildCommonTrial(round: AppointmentRound, questionInRound: number, questionsInRound: number, answer: string, random: () => number): AppointmentTrial {
+  if (round.kind === 'bus') throw new Error('버스 라운드는 미탑승 규칙으로 생성해야 합니다.');
+  const domain = domains[round.kind];
+  const harderFrom = Math.max(1, Math.ceil(questionsInRound * 0.6));
+  const itemsPerPerson = questionInRound > harderFrom ? 4 : 3;
+  const people = buildCommonPeople(domain, answer, itemsPerPerson, random);
+  let choices: string[];
+  if (round.kind === 'day') choices = [...APPOINTMENT_WEEKDAYS];
+  else if (round.kind === 'location') choices = [...APPOINTMENT_LOCATIONS];
+  else {
+    const shownDecoys = [...new Set(people.flat())].filter((value) => value !== answer);
+    const fallback = domain.filter((value) => value !== answer && !shownDecoys.includes(value));
+    choices = shuffled([answer, ...shuffled(shownDecoys, random).slice(0, 5), ...shuffled(fallback, random)], random).slice(0, 6);
+    if (!choices.includes(answer)) choices[0] = answer;
+  }
   return {
-    ...trial,
-    people: trial.people.map((values) => values.map(mapValue)),
-    choices: shuffled(trial.choices.map(mapValue), random),
-    answer: mapValue(trial.answer),
+    kind: round.kind,
+    round: round.number,
+    roundLabel: round.label,
+    title: round.instruction,
+    people,
+    choices,
+    answer,
+    itemsPerPerson,
+    questionInRound,
+    questionsInRound,
   };
 }
 
-export function buildAppointmentTrials(quantity: number, seed: number): AppointmentTrial[] {
-  if (!Number.isInteger(quantity) || quantity < 1) throw new RangeError('약속 세트 수는 1 이상의 정수여야 합니다.');
+function buildBusTrial(round: AppointmentRound, questionInRound: number, questionsInRound: number, answer: string, random: () => number): AppointmentTrial {
+  const choices = [answer, ...shuffled(BUS_NUMBERS.filter((value) => value !== answer), random).slice(0, 5)];
+  const seen = shuffled(choices.slice(1), random);
+  const people = [
+    [seen[0], seen[1]],
+    [seen[2], seen[3]],
+    [seen[4], seen[Math.floor(random() * 4)]],
+  ].map((items) => shuffled(items, random));
+  return {
+    kind: 'bus',
+    round: round.number,
+    roundLabel: round.label,
+    title: round.instruction,
+    people,
+    choices: shuffled(choices, random),
+    answer,
+    itemsPerPerson: 2,
+    questionInRound,
+    questionsInRound,
+  };
+}
+
+export function buildAppointmentTrials(questionsPerRound: number, seed: number, selectedRounds: readonly AppointmentKind[] = APPOINTMENT_KIND_ORDER): AppointmentTrial[] {
+  if (!Number.isInteger(questionsPerRound) || questionsPerRound < 1) throw new RangeError('라운드당 문항 수는 1 이상의 정수여야 합니다.');
+  const selected = new Set(selectedRounds);
+  if (!selected.size || [...selected].some((kind) => !APPOINTMENT_KIND_ORDER.includes(kind))) throw new RangeError('연습할 라운드를 하나 이상 올바르게 선택해야 합니다.');
   const random = createRandom(seed);
-  return balancedSequence(baseTrials, quantity, random).map((trial) => remapTrial(trial, random));
+  return APPOINTMENT_ROUNDS
+    .filter((round) => selected.has(round.kind))
+    .flatMap((round) => {
+      const domain = round.kind === 'bus' ? BUS_NUMBERS : domains[round.kind];
+      const answers = buildAnswerSchedule(domain, questionsPerRound, random);
+      return Array.from({ length: questionsPerRound }, (_, index) => {
+      const questionInRound = index + 1;
+      return round.kind === 'bus'
+        ? buildBusTrial(round, questionInRound, questionsPerRound, answers[index], random)
+        : buildCommonTrial(round, questionInRound, questionsPerRound, answers[index], random);
+      });
+    });
 }
 
 export function validateAppointmentTrial(trial: AppointmentTrial) {
   const errors: string[] = [];
   if (!trial.choices.includes(trial.answer)) errors.push('정답이 선택지에 없습니다.');
+  if (trial.people.length !== 3) errors.push('세 사람의 정보가 모두 필요합니다.');
+  if (trial.people.some((values) => values.length !== trial.itemsPerPerson)) errors.push('사람별 제시 항목 수가 난도 정보와 다릅니다.');
   if (trial.kind === 'bus') {
-    if (trial.people.flat().includes(trial.answer)) errors.push('NOT 정답을 누군가 이미 보았습니다.');
+    if (trial.people.some((values) => new Set(values).size !== values.length)) errors.push('한 사람에게 같은 버스가 중복 제시되었습니다.');
+    if (trial.people.flat().includes(trial.answer)) errors.push('NOT 정답을 누군가 이미 이용했습니다.');
+    const unseenChoices = trial.choices.filter((value) => !trial.people.flat().includes(value));
+    if (unseenChoices.length !== 1 || unseenChoices[0] !== trial.answer) errors.push('선택지 중 미탑승 버스가 하나가 아닙니다.');
   } else {
-    const common = trial.people[0].filter((value) => trial.people.slice(1).every((values) => values.includes(value)));
+    const common = uniqueCommon(trial.people);
     if (common.length !== 1 || common[0] !== trial.answer) errors.push('세 사람의 유일한 교집합과 정답이 다릅니다.');
   }
+  if (trial.kind === 'day' && trial.choices.join(',') !== APPOINTMENT_WEEKDAYS.join(',')) errors.push('요일 선택지는 월요일부터 일요일까지 고정 순서여야 합니다.');
+  if (trial.kind === 'location' && trial.choices.join(',') !== APPOINTMENT_LOCATIONS.join(',')) errors.push('위치 선택지는 4×4 전체 격자여야 합니다.');
   return errors;
 }

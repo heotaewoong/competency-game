@@ -14,14 +14,15 @@
 
 ## 1. 가장 중요한 버전 경고
 
-- JOBDA 공개 튜토리얼 번들은 게임 코드 `RPS, MRT, PM, RMT, PCT2, OTN, FNB, HAS, WNC` **9개**를 노출한다.
-- 같은 공개 튜토리얼 랜딩의 문구에는 “총 8개 게임”이 남아 있다.
+- 2023 JOBDA 공개 레거시 튜토리얼 번들은 게임 코드 `RPS, MRT, PM, RMT, PCT2, OTN, FNB, HAS, WNC` **9개**를 노출한다.
+- 구 역량검사 연습 랜딩의 문구에는 “총 8개 게임”이 남아 있다.
 - 따라서 구현은 9개 모듈을 지원하되, 실제 기업 응시는 배정 버전·검사 코드에 따라 일부 모듈이 빠질 수 있다는 안내를 보여줘야 한다.
 - 공식 공개 페이지는 “구 역량검사 연습”으로 표시되므로, 픽셀 단위 복제품이나 현재 실전과 동일하다는 표현은 피한다.
+- [2024 JAINWON 공개 기업자료](https://recruit.jobda.im/hubfs/TREND%20REPORT_HR%20%EA%B3%A0%EB%AF%BC%EC%9E%88%EC%8A%B5%EB%8B%88%EB%8B%A4_2%ED%8E%B8.pdf)는 9개 게임을 모두 4분으로 제시한다. 2023 레거시 시간과 충돌하므로 실제 응시에서는 기업 초대 안내를 우선한다.
 
 ## 2. 공개 mechanics: 9개 게임
 
-| 코드 | 게임 | 공식 공개 내용 | 시간/입력 | 구현 가능한 핵심 상태 |
+| 코드 | 게임 | 2023 공개 레거시 내용 | 2023 시간/입력 | 구현 가능한 핵심 상태 |
 |---|---|---|---|---|
 | RPS | 가위바위보 | 총 3라운드. 1R 나의 관점, 2R 상대 관점, 3R 두 관점이 무작위로 제시된다. 목표 관점에 따라 이기기/지기를 판단하고 가위·바위·보를 방향키 ←·↓·→로 입력한다. | 약 3분 / 키보드 | `RULE_CUE → HAND_STIMULUS → KEY_RESPONSE → NEXT` |
 | MRT | 도형 회전하기 | 글자 또는 도형의 전·후 모양을 보고 좌45°, 우45°, 좌우반전, 상하반전을 조합한다. 회전 1회는 45°이며 최대 클릭 횟수가 있다. | 약 6분 / 마우스 | `PUZZLE_READY → COMPOSE_TRANSFORMS → SUBMIT → EVALUATE` |
@@ -35,7 +36,7 @@
 
 ### 2.1 게임별 공개 mechanics 근거 매핑
 
-각 행의 시간·조작·공식 팁은 [공개 튜토리얼 번들](https://jobda.acca.ai/static/chunk/js/tutorial.a83495cf0f099a48faad.js)에서 확인했고, 아래 공식 글·영상으로 실제 화면과 라운드 설명을 교차 확인했다.
+각 행의 시간·조작·팁은 [2023 공개 레거시 튜토리얼 번들](https://jobda.acca.ai/static/chunk/js/tutorial.a83495cf0f099a48faad.js)에서 확인했고, 아래 2023 개발사 공개 글·영상으로 실제 화면과 라운드 설명을 교차 확인했다.
 
 | 게임 | JOBDA 공식 글 | 잡다 공식 영상 |
 |---|---|---|
@@ -49,7 +50,7 @@
 | 고양이 술래잡기 | <https://www.jobda.im/info/342> | <https://www.youtube.com/watch?v=kwptjPJRXRQ> |
 | 개수 비교하기 | <https://www.jobda.im/info/343> | <https://www.youtube.com/watch?v=GpFOO5wc2d0> |
 
-모든 시간은 공개 튜토리얼 카드의 “약” 표기다. 문항 수, 자극 노출시간, 오답 피드백, 점수식은 공개되지 않았다.
+모든 시간은 2023 공개 레거시 카드의 “약” 표기다. 2024 공개 기업자료는 9개 모두 4분으로 달라 현행 설정으로 단정할 수 없다. 문항 수, 자극 노출시간, 오답 피드백, 점수식은 공개되지 않았다.
 
 ## 3. 구현 사양: 도형 회전하기
 
@@ -90,9 +91,9 @@ clickBudget: configurable
 - 최소 연산 보너스, 오답 감점, 부분점수 식.
 - 공식 영상의 8개 슬롯과 5×5/도형 디자인은 2023 공개 영상 관찰값이며 현재 기업 배정 버전의 보장은 아니다.
 
-### 3.4 로컬 노트의 관련 이미지
+### 3.4 로컬 노트의 관련 이미지(저장소 미포함)
 
-첨부 루트: `C:\obsidian_valut_real_v1\1000.Attached file\`
+다음 파일은 원 작성 노트의 외부 첨부 폴더에 있으며 이 저장소에는 포함하지 않는다.
 
 - 공식 영상 캡처로 노트에 배치된 파일: `Pasted image 20260827220411.png`, `Pasted image 20260827220439.png`, `Pasted image 20260827220451.png`, `Pasted image 20260827220535.png`, `Pasted image 20260828110148.png`, `Pasted image 20260828110103.png`, `Pasted image 20260828110354.png`, `Pasted image 20260828110838.png`.
 - 후기 도식(비공식): `JOBDA-kimmalcha-rotation-anchor.png`, `JOBDA-kimmalcha-rotation-pattern-1.png`, `JOBDA-kimmalcha-rotation-pattern-2.png`.
@@ -127,7 +128,7 @@ clickBudget: configurable
 
 - 공식 영상 캡처로 노트에 배치된 파일: `Pasted image 20260827221613.png`, `Pasted image 20260827221231.png`, `Pasted image 20260828174506.png`, `Pasted image 20260827221355.png`, `Pasted image 20260827221410.png`, `Pasted image 20260827221632.png`.
 - 후기 도식(비공식): `JOBDA-kimmalcha-appointment-day-location.png`, `JOBDA-kimmalcha-appointment-food-bus.png`.
-- “1–3R 소거, 4R 누적”은 현재 공개 튜토리얼 번들에도 적힌 공식 팁이다. 다만 후기에서 제안하는 암기 약어는 개인 전략이다.
+- “1–3R 소거, 4R 누적”은 2023 공개 레거시 튜토리얼 번들에도 적힌 개발사 공개 팁이다. 다만 후기에서 제안하는 암기 약어는 개인 전략이다.
 
 ## 5. 구현 사양: 길 만들기
 
@@ -178,7 +179,7 @@ maxScoreCondition = functionalCorrect && placedFenceCount == targetFenceCount
 
 | 항목 | 검증 상태 | 제품에 쓰는 방식 |
 |---|---|---|
-| 게임 이름·대략 시간·입력 도구·공식 팁 | 현재 공개 튜토리얼 번들에서 확인 | 사실로 표시하되 “약”, “공개 연습 기준”을 붙인다. |
+| 게임 이름·대략 시간·입력 도구·개발사 공개 팁 | 2023 공개 레거시 번들에서 확인 | 사실로 표시하되 “2023 레거시”, “약”을 붙이고 현행 초대 안내를 우선한다. |
 | 2023 공식 영상의 구체적 UI | 잡다 공식 채널 영상에서 확인 | 레거시 참고로 사용하고 최신 실전 동일성을 주장하지 않는다. |
 | 5×5 보드, 8개 변환 슬롯, 전/후반 자극 증가 | 공식 영상 화면 관찰 | 설정 가능한 기본값으로만 둔다. |
 | 문항 수·노출 밀리초·난수 분포·정확한 점수식 | 공개 확인 불가 | 하드코딩하지 않고 임의 연습 난이도라고 표시한다. |
@@ -197,8 +198,8 @@ maxScoreCondition = functionalCorrect && placedFenceCount == targetFenceCount
 | # | 범주 | 등급 | 정확한 URL | 한 줄 설계 시사점 |
 |---:|---|:---:|---|---|
 | 1 | JOBDA 공식 | A1 | <https://www.jobda.im/acc/tutorial> | 공개 튜토리얼의 과제 구성·연습 진입점과 구 버전 표기를 확인한다. |
-| 2 | JOBDA 공식 | A1 | <https://jobda.acca.ai/tutorial> | 실제 공개 튜토리얼 앱의 현재 카드·과제 흐름을 기준으로 구현 범위를 맞춘다. |
-| 3 | JOBDA 공식 | A1 | <https://jobda.acca.ai/static/chunk/js/tutorial.a83495cf0f099a48faad.js> | 9개 게임 코드, 공식 소요시간, 조작 도구, 설명과 팁을 기계적으로 대조한다. |
+| 2 | JOBDA 공식 | A1 | <https://jobda.acca.ai/tutorial> | 2023 공개 레거시 튜토리얼의 카드·과제 흐름을 참고하되 현행 실전과 동일하다고 보지 않는다. |
+| 3 | JOBDA 공식 | A1 | <https://jobda.acca.ai/static/chunk/js/tutorial.a83495cf0f099a48faad.js> | 2023 공개 레거시의 9개 게임 코드, 당시 소요시간, 조작 도구, 설명과 팁을 대조한다. |
 | 4 | JOBDA 공식 | A1 | <https://www.youtube.com/playlist?list=PLRvhT8gNnOeoZNbmGq7GjImm7CC7e7-XU> | 잡다 공식 게임 해설 영상 묶음의 출처와 순서를 확인한다. |
 | 5 | JOBDA 공식 | A1 | <https://www.jobda.im/info/335> | 가위바위보의 공식 해설·영상 연결을 기준으로 규칙 표현을 제한한다. |
 | 6 | JOBDA 공식 | A1 | <https://www.jobda.im/info/336> | 도형 회전하기의 공식 해설·영상 연결을 기준으로 회전/반전 UI를 검증한다. |
@@ -328,7 +329,7 @@ maxScoreCondition = functionalCorrect && placedFenceCount == targetFenceCount
 
 ## 8. 파일·검증 메모
 
-- 원본 노트 `C:\obsidian_valut_real_v1\02. Area\자기계발\면접 및 자소서\역량평가\역량검사 게임 파헤치기.md`는 이 조사에서 수정하지 않았다.
+- 원본 개인 노트는 이 조사에서 수정하지 않았으며 이 저장소에 포함하지 않았다.
 - 로컬 이미지 파일 존재 여부와 노트의 임베드 참조를 대조했다.
 - JOBDA 공개 API `/post/335`–`/post/343`에서 공식 제목과 YouTube ID를 대조했다.
 - 공개 페이지/연습/디자인 URL은 2026-08-28에 응답 여부를 확인했고, DOI·PMC·표준·규정 URL은 영구 식별자 또는 공식 원문 주소를 사용했다.

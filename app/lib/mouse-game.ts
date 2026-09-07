@@ -6,6 +6,18 @@ export type MouseTrial = {
   redCaught: boolean;
   blueCaught: boolean;
 };
+export type MouseLoad = 'progressive' | 'foundation' | 'challenge';
+
+export const MOUSE_DECISION_OPTIONS = [
+  { key: '1', caught: false, confidence: 4, label: '매우 확실' },
+  { key: '2', caught: false, confidence: 3, label: '확실' },
+  { key: '3', caught: false, confidence: 2, label: '조금 확실' },
+  { key: '4', caught: false, confidence: 1, label: '불확실' },
+  { key: '5', caught: true, confidence: 1, label: '불확실' },
+  { key: '6', caught: true, confidence: 2, label: '조금 확실' },
+  { key: '7', caught: true, confidence: 3, label: '확실' },
+  { key: '8', caught: true, confidence: 4, label: '매우 확실' },
+] as const;
 
 type MouseTemplate = Omit<MouseTrial, 'redCaught' | 'blueCaught'>;
 
@@ -64,14 +76,14 @@ function applyOutcome(template: MouseTemplate, redCaught: boolean, blueCaught: b
   return { ...template, mice, cats, redCaught, blueCaught };
 }
 
-export function buildMouseTrials(quantity: number, seed: number): MouseTrial[] {
+export function buildMouseTrials(quantity: number, seed: number, load: MouseLoad = 'progressive'): MouseTrial[] {
   if (!Number.isInteger(quantity) || quantity < 1) throw new RangeError('고양이 라운드 수는 1 이상의 정수여야 합니다.');
   const random = createRandom(seed);
   const templatePlan = balancedSequence(templates, quantity, random);
   const outcomePlan = balancedSequence(outcomes, quantity, random);
   return templatePlan.map((template, index) => {
     const progress = quantity === 1 ? 0 : index / (quantity - 1);
-    const itemCount = 6 + Math.round(progress * 4);
+    const itemCount = load === 'foundation' ? 6 + Math.round(progress) : load === 'challenge' ? 9 + Math.round(progress) : 6 + Math.round(progress * 4);
     return applyOutcome(template, outcomePlan[index].redCaught, outcomePlan[index].blueCaught, itemCount, random);
   });
 }

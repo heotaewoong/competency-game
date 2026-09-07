@@ -1,11 +1,13 @@
 export type RpsChoice = 'scissors' | 'rock' | 'paper';
 export type RpsPerspective = 'player' | 'opponent';
+export type RpsFocus = 'full' | 'player' | 'opponent' | 'mixed';
+export type RpsPhase = '내 패 찾기' | '상대 패 찾기' | '관점 혼합';
 
 export type RpsTrial = {
   shown: RpsChoice;
   unknown: RpsPerspective;
   answer: RpsChoice;
-  phase: '내 패 찾기' | '상대 패 찾기' | '관점 혼합';
+  phase: RpsPhase;
 };
 
 const choices: readonly RpsChoice[] = ['scissors', 'rock', 'paper'];
@@ -35,10 +37,12 @@ function balancedSequence<T>(items: readonly T[], length: number, random: () => 
   return result.slice(0, length);
 }
 
-export function buildRpsTrials(quantity: number, seed: number): RpsTrial[] {
-  if (!Number.isInteger(quantity) || quantity < 3) throw new RangeError('가위바위보 문항 수는 3 이상의 정수여야 합니다.');
+export function buildRpsTrials(quantity: number, seed: number, focus: RpsFocus = 'full'): RpsTrial[] {
+  const minimum = focus === 'full' ? 3 : 1;
+  if (!Number.isInteger(quantity) || quantity < minimum) throw new RangeError(`가위바위보 문항 수는 ${minimum} 이상의 정수여야 합니다.`);
   const random = createRandom(seed);
-  const phaseIndexes = Array.from({ length: quantity }, (_, index) => Math.min(2, Math.floor((index * 3) / quantity)));
+  const focusedPhase = focus === 'player' ? 0 : focus === 'opponent' ? 1 : focus === 'mixed' ? 2 : null;
+  const phaseIndexes = Array.from({ length: quantity }, (_, index) => focusedPhase ?? Math.min(2, Math.floor((index * 3) / quantity)));
   const shownByPhase = [0, 1, 2].map((phase) => balancedSequence(choices, phaseIndexes.filter((value) => value === phase).length, random));
   const mixedCount = phaseIndexes.filter((value) => value === 2).length;
   const mixedPerspectives = balancedSequence<RpsPerspective>(['player', 'opponent'], mixedCount, random);

@@ -1,8 +1,9 @@
 export const NBACK_GLYPH_COUNT = 15;
 export const NBACK_GLYPHS_PER_GROUP = 3;
 export const NBACK_GROUP_COUNT = NBACK_GLYPH_COUNT / NBACK_GLYPHS_PER_GROUP;
-export const NBACK_REAL_N2_PROBLEM_COUNT = 23;
-export const NBACK_REAL_N23_PROBLEM_COUNT = 24;
+// 기업별 현행 총 문항 수는 공개되지 않았다. 아래 값은 공개 레거시 가이드의 약 3분 흐름을 참고한 독립 훈련용 고정값이다.
+export const NBACK_SIMULATION_N2_PROBLEM_COUNT = 23;
+export const NBACK_SIMULATION_N23_PROBLEM_COUNT = 24;
 
 export type NBackTask = 'n2' | 'n23';
 export type NBackSessionMode = NBackTask | 'real';
@@ -92,7 +93,11 @@ function shuffled<T>(items: readonly T[], random: RandomSource) {
 }
 
 function balancedPlan(answers: readonly NBackDecision[], length: number, random: RandomSource) {
-  return shuffled(Array.from({ length }, (_, index) => answers[index % answers.length]), random);
+  const fullCycles = Math.floor(length / answers.length);
+  const remainder = length % answers.length;
+  const plan = answers.flatMap((answer) => Array.from({ length: fullCycles }, () => answer));
+  plan.push(...shuffled(answers, random).slice(0, remainder));
+  return shuffled(plan, random);
 }
 
 function pick<T>(items: readonly T[], random: RandomSource) {
@@ -209,8 +214,8 @@ export function buildNBackSession(options: NBackSessionOptions) {
   const random = createRandom(options.seed);
   if (options.mode === 'real') {
     return [
-      ...buildRound('n2', options.group, NBACK_REAL_N2_PROBLEM_COUNT, 1, random),
-      ...buildRound('n23', options.round2Group ?? options.group, NBACK_REAL_N23_PROBLEM_COUNT, 2, random),
+      ...buildRound('n2', options.group, NBACK_SIMULATION_N2_PROBLEM_COUNT, 1, random),
+      ...buildRound('n23', options.round2Group ?? options.group, NBACK_SIMULATION_N23_PROBLEM_COUNT, 2, random),
     ];
   }
   return buildRound(options.mode, options.group, options.problemCount!, options.mode === 'n2' ? 1 : 2, random);
@@ -256,7 +261,7 @@ export function validateNBackSession(trials: readonly NBackTrial[]) {
     const group = ordered[0]?.group;
     for (const trial of ordered) {
       if (trial.group !== group || Math.floor(trial.variant / NBACK_GLYPHS_PER_GROUP) !== group) {
-        errors.push(`round ${round}: 선택한 3개 도형 세트 밖의 자극이 섞였습니다.`);
+        errors.push(`round ${round}: 선택한 3개 도형 묶음 밖의 자극이 섞였습니다.`);
       }
       const expected = classifyNBackDecision(sequence, trial.position, trial.task);
       if (expected === 'ambiguous') errors.push(`round ${round}, position ${trial.position}: 2-back·3-back 정답이 중복됩니다.`);

@@ -26,4 +26,13 @@ test('물음표 위치에 맞는 이기는 관계를 정답으로 만든다', ()
 
 test('잘못된 문항 수를 거부한다', () => {
   assert.throws(() => buildRpsTrials(2, 1), RangeError);
+  assert.equal(buildRpsTrials(1, 1, 'player').length, 1);
+});
+
+test('연습 집중 유형은 선택한 공식 라운드만 만든다', () => {
+  assert.ok(buildRpsTrials(9, 4, 'player').every((trial) => trial.phase === '내 패 찾기' && trial.unknown === 'player'));
+  assert.ok(buildRpsTrials(9, 4, 'opponent').every((trial) => trial.phase === '상대 패 찾기' && trial.unknown === 'opponent'));
+  const mixed = buildRpsTrials(12, 4, 'mixed');
+  assert.ok(mixed.every((trial) => trial.phase === '관점 혼합'));
+  assert.deepEqual(new Set(mixed.map((trial) => trial.unknown)), new Set(['player', 'opponent']));
 });

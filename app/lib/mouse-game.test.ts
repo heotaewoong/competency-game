@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildMouseTrials, validateMouseTrials } from './mouse-game.ts';
+import { MOUSE_DECISION_OPTIONS, buildMouseTrials, validateMouseTrials } from './mouse-game.ts';
+
+test('1~8 응답키는 놓쳤다에서 찾았다 방향으로 대칭적인 확신도를 가진다', () => {
+  assert.deepEqual(MOUSE_DECISION_OPTIONS.map(({ key }) => key), ['1', '2', '3', '4', '5', '6', '7', '8']);
+  assert.deepEqual(MOUSE_DECISION_OPTIONS.map(({ caught }) => caught), [false, false, false, false, true, true, true, true]);
+  assert.deepEqual(MOUSE_DECISION_OPTIONS.map(({ confidence }) => confidence), [4, 3, 2, 1, 1, 2, 3, 4]);
+});
 
 test('같은 시드는 같은 고양이 라운드를 만든다', () => {
   assert.deepEqual(buildMouseTrials(20, 20260829), buildMouseTrials(20, 20260829));
@@ -36,4 +42,13 @@ test('빨강의 반대가 항상 파랑 정답인 누출 패턴을 제거한다'
 
 test('잘못된 라운드 수를 거부한다', () => {
   assert.throws(() => buildMouseTrials(0, 1), RangeError);
+});
+
+test('연습 부하 설정은 기초 6~7개와 고부하 9~10개로 나눈다', () => {
+  const foundation = buildMouseTrials(20, 28, 'foundation');
+  const challenge = buildMouseTrials(20, 28, 'challenge');
+  assert.ok(foundation.every((trial) => trial.mice.length >= 6 && trial.mice.length <= 7));
+  assert.ok(challenge.every((trial) => trial.mice.length >= 9 && trial.mice.length <= 10));
+  assert.deepEqual(validateMouseTrials(foundation), []);
+  assert.deepEqual(validateMouseTrials(challenge), []);
 });
