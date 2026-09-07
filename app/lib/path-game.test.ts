@@ -44,7 +44,7 @@ test('T와 B 비교, 교차·평행 조합, 평행 우선 유형이 모두 출�
   assert.ok(metas.some((meta) => meta.orderHint === 'parallel-first'));
 });
 
-test('공개 공략 영상의 12개 대표 조합을 독자 문항으로 모두 포함한다', () => {
+test('비공식 개인 공략의 12개 대표 조합을 독자 문항으로 모두 포함한다', () => {
   const originals = allPathPuzzles().filter((puzzle) => puzzle.id.endsWith('-v0'));
   const signature = (puzzle: PathPuzzle) => {
     const meta = pathPuzzleMeta(puzzle);

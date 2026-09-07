@@ -88,7 +88,7 @@ test('생성한 모든 문제에는 1~3단계의 실제 최소 해답이 있다'
     assert.equal(puzzles.length, 30);
     for (const puzzle of puzzles) {
       assert.ok(puzzle.optimal.length >= 1 && puzzle.optimal.length <= 3);
-      if (puzzle.kind === 'tiles') assert.equal(puzzle.pattern?.length, 25);
+      if (puzzle.kind === 'tiles') assert.equal(puzzle.pattern?.length, 16);
       assert.equal(rotationShapeMatches(puzzle, puzzle.optimal), true);
       assert.equal(shortestRotationSolution(puzzle, puzzle.target).length, puzzle.optimal.length);
       assert.deepEqual(puzzle.optimal, rotationTransformDefinition(puzzle.transformId).sequence);

@@ -5,7 +5,7 @@ import type { GameId } from '../lib/game-data';
 import { POTION_INGREDIENTS } from '../lib/potion-game';
 import Image from 'next/image';
 
-const tilePattern = [1,0,0,0,1, 1,1,0,1,0, 0,1,1,0,0, 1,0,1,0,1, 0,0,0,1,0];
+const tilePattern = [1,0,0,1, 1,1,0,0, 0,1,1,0, 1,0,0,0];
 
 function TileGrid({ rotated = false }: { rotated?: boolean }) {
   return (

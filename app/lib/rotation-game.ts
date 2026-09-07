@@ -74,7 +74,9 @@ export type RotationTransformGroup = {
 type RotationBase = Omit<RotationPuzzle, 'id' | 'transformId' | 'target' | 'optimal'>;
 
 export const ROTATION_LETTERS = ['F', 'G', 'J', 'L', 'P', 'R', 'Q'] as const;
-export const ROTATION_TILE_GRID_SIZE = 5;
+// The developer-published 2023 walkthrough shows a 4 x 4 tile board in round 2.
+// Keep the training patterns original, but preserve that publicly visible board size.
+export const ROTATION_TILE_GRID_SIZE = 4;
 export const IDENTITY_MATRIX: RotationMatrix = [1, 0, 0, 1];
 const ROOT_HALF = Math.SQRT1_2;
 
@@ -86,14 +88,14 @@ export const rotationOperations: RotationOperation[] = [
 ];
 
 const tilePatterns: Array<{ id: string; pattern: number[] }> = [
-  { id: 'tile-a', pattern: [1,0,0,0,1, 1,1,0,1,0, 0,1,1,0,0, 1,0,1,0,1, 0,0,0,1,0] },
-  { id: 'tile-b', pattern: [1,0,1,0,0, 0,1,0,0,1, 1,1,0,1,0, 0,1,1,0,0, 1,0,0,1,1] },
-  { id: 'tile-c', pattern: [0,1,0,0,1, 1,1,0,1,0, 0,1,0,0,0, 1,0,1,1,0, 0,0,1,0,1] },
-  { id: 'tile-d', pattern: [1,1,0,0,0, 0,1,1,0,1, 1,0,0,0,0, 0,1,0,1,1, 1,0,0,1,0] },
-  { id: 'tile-e', pattern: [0,1,1,0,0, 1,0,0,0,1, 1,1,0,1,0, 0,0,1,0,0, 1,0,1,1,0] },
-  { id: 'tile-f', pattern: [1,0,1,1,0, 0,0,1,0,1, 1,0,0,1,0, 0,1,0,0,1, 1,0,1,0,0] },
-  { id: 'tile-g', pattern: [0,0,1,0,1, 1,1,0,1,0, 0,1,0,0,1, 1,0,1,1,0, 0,1,0,0,0] },
-  { id: 'tile-h', pattern: [1,0,0,0,0, 0,1,1,0,1, 1,0,1,1,0, 0,1,0,0,1, 1,0,0,1,0] },
+  { id: 'tile-a', pattern: [1,0,0,1, 1,1,0,0, 0,1,1,0, 1,0,0,0] },
+  { id: 'tile-b', pattern: [1,0,1,0, 0,1,0,0, 1,1,0,1, 0,0,1,0] },
+  { id: 'tile-c', pattern: [0,1,0,1, 1,1,0,0, 0,1,0,0, 1,0,1,1] },
+  { id: 'tile-d', pattern: [1,1,0,0, 0,1,1,0, 1,0,0,0, 0,1,0,1] },
+  { id: 'tile-e', pattern: [0,1,1,0, 1,0,0,1, 1,1,0,0, 0,0,1,0] },
+  { id: 'tile-f', pattern: [1,0,1,1, 0,0,1,0, 1,0,0,1, 0,1,0,0] },
+  { id: 'tile-g', pattern: [0,0,1,0, 1,1,0,1, 0,1,0,0, 1,0,1,0] },
+  { id: 'tile-h', pattern: [1,0,0,0, 0,1,1,0, 1,0,1,1, 0,1,0,0] },
 ];
 
 export function multiplyRotationMatrix(left: RotationMatrix, right: RotationMatrix): RotationMatrix {

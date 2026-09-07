@@ -119,7 +119,7 @@ function storageMessage(outcome: PersistSessionResultsResult) {
 export default function Home() {
   const [activeGame, setActiveGame] = useState<GameId | null>(null);
   const [results, setResults] = useState<SessionResult[]>([]);
-  const [gameOrder, setGameOrder] = useState<GameOrder>('perceived');
+  const [gameOrder, setGameOrder] = useState<GameOrder>('published');
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [guideGameId, setGuideGameId] = useState<GameId | null>(null);
   const [reviewSessionId, setReviewSessionId] = useState<string | null>(null);
@@ -405,12 +405,12 @@ export default function Home() {
         <div className="game-order-toolbar">
           <span>정렬</span>
           <div className="game-order-actions" role="group" aria-label="게임 표시 순서">
-            <button type="button" aria-pressed={gameOrder === 'perceived'} onClick={() => changeGameOrder('perceived')}>체감 어려운 순</button>
-            <button type="button" aria-pressed={gameOrder === 'published'} onClick={() => changeGameOrder('published')}>게임 번호순</button>
+            <button type="button" aria-pressed={gameOrder === 'published'} onClick={() => changeGameOrder('published')}>공개 게임 번호순</button>
+            <button type="button" aria-pressed={gameOrder === 'perceived'} onClick={() => changeGameOrder('perceived')}>후기 체감순</button>
           </div>
           <details className="difficulty-source"><summary>난이도 기준</summary><div className="difficulty-source-panel"><b>2024 공개자료 등급과 체감 순위를 분리했습니다.</b><p>카드의 상·중·하는 2024 JAINWON 공개 기업자료 기준입니다. 현행 기업 초대의 등급이나 공식 1~9위는 공개되지 않았으며, 체감 순서는 여러 공개 후기에 반복된 경향을 합친 연습 우선순위라 개인차가 있습니다.</p><div><a href={DIFFICULTY_SOURCE_URL} target="_blank" rel="noreferrer">2024 공개자료 등급 ↗</a>{DIFFICULTY_REVIEW_URLS.map((source) => <a key={source.href} href={source.href} target="_blank" rel="noreferrer">{source.label} ↗</a>)}</div></div></details>
           <button type="button" className="guide-library-button" onClick={() => setGuideGameId(orderedGames[0]?.id ?? 'rotation')}>규칙·예시·팁 전체 보기 <span>→</span></button>
-          <p className="sr-only" aria-live="polite">{gameOrder === 'perceived' ? '수험자 체감 난이도가 높은 순으로 배열했습니다.' : '게임 번호순으로 배열했습니다.'}</p>
+          <p className="sr-only" aria-live="polite">{gameOrder === 'perceived' ? '비공식 수험자 후기의 체감 난이도가 높은 순으로 배열했습니다.' : '공개 자료의 게임 번호순으로 배열했습니다.'}</p>
         </div>
 
         <div className="game-grid">
@@ -424,7 +424,7 @@ export default function Home() {
                 <div className="game-card-content">
                   <div className="card-top">
                     <span>{game.no} · 전략게임</span>
-                    <div className="card-badges"><span className="perceived-rank">체감 {perceivedDifficultyRank.get(game.id)}위</span><em className={`difficulty-badge difficulty-${game.difficulty === '상' ? 'high' : game.difficulty === '중' ? 'mid' : 'low'}`}>2024 자료 {game.difficulty}</em></div>
+                    <div className="card-badges"><span className="perceived-rank">후기 체감 {perceivedDifficultyRank.get(game.id)}위</span><em className={`difficulty-badge difficulty-${game.difficulty === '상' ? 'high' : game.difficulty === '중' ? 'mid' : 'low'}`}>2024 자료 {game.difficulty}</em></div>
                   </div>
                   <GameThumbnail gameId={game.id} />
                   <div className="card-copy">

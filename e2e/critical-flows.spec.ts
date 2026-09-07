@@ -89,7 +89,7 @@ async function openRotation(page: Page) {
   await page.getByRole('button', { name: /도형 회전하기, 난이도 중, 설정 열기/ }).click();
   const stage = page.locator('section[data-game="rotation"]');
   await expect(stage.getByLabel('문제 수 현재 값')).toHaveText('1');
-  await stage.getByRole('button', { name: /^연습 시작/ }).click();
+  await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
   await expect(page.locator('.game-workspace.game-rotation')).toBeVisible({ timeout: 8_000 });
   return stage;
 }
@@ -183,7 +183,7 @@ test('약속 정하기의 실제 더블클릭은 친구 한 명만 이동한다'
   const stage = page.locator('section[data-game="appointment"]');
   await stage.getByText('시간 제한 없이 연습', { exact: true }).click();
   await expect(stage.getByRole('checkbox', { name: /시간 제한 없이 연습/ })).toBeChecked();
-  await stage.getByRole('button', { name: /^연습 시작/ }).click();
+  await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
   const beginRound = page.getByRole('button', { name: '이 라운드 시작' });
   await expect(beginRound).toBeVisible({ timeout: 8_000 });
   await beginRound.click();
@@ -230,7 +230,7 @@ test('길 만들기 연습은 경로가 맞아도 울타리 수가 다르면 같
   await page.getByRole('button', { name: /길 만들기, 난이도 상, 설정 열기/ }).click();
   const stage = page.locator('section[data-game="path"]');
   await expect(stage.getByRole('checkbox', { name: /시간 제한 없이 연습/ })).toBeChecked();
-  await stage.getByRole('button', { name: /^연습 시작/ }).click();
+  await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
   await expect(page.locator('.path-shell')).toBeVisible({ timeout: 8_000 });
 
   const choice = (cell: number, orientation: 'slash' | 'backslash') => page.locator(`.path-fence-choice[data-cell="${cell}"][data-orientation="${orientation}"]`);

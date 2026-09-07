@@ -1,6 +1,6 @@
 # AI 역량검사 게임 벤치마크·근거 인벤토리
 
-> 검증일: 2026-08-28 (Asia/Seoul)  
+> 검증일: 2026-09-08 (Asia/Seoul)
 > 목적: 공개적으로 확인 가능한 JOBDA 게임 mechanics와 인지과제·채용평가·접근성 근거를 분리해, 연습용 사이트 구현에 사용할 수 있는 기준을 남긴다.  
 > 주의: 이 문서는 **연습 서비스 설계용 근거 목록**이다. JOBDA의 비공개 문항, 채점식, 난수 생성, 평가모형을 복제하거나 추정하는 사양서가 아니다.
 
@@ -19,6 +19,8 @@
 - 따라서 구현은 9개 모듈을 지원하되, 실제 기업 응시는 배정 버전·검사 코드에 따라 일부 모듈이 빠질 수 있다는 안내를 보여줘야 한다.
 - 공식 공개 페이지는 “구 역량검사 연습”으로 표시되므로, 픽셀 단위 복제품이나 현재 실전과 동일하다는 표현은 피한다.
 - [2024 JAINWON 공개 기업자료](https://recruit.jobda.im/hubfs/TREND%20REPORT_HR%20%EA%B3%A0%EB%AF%BC%EC%9E%88%EC%8A%B5%EB%8B%88%EB%8B%A4_2%ED%8E%B8.pdf)는 9개 게임을 모두 4분으로 제시한다. 2023 레거시 시간과 충돌하므로 실제 응시에서는 기업 초대 안내를 우선한다.
+- [현행 응시 안내](https://www.jobda.im/acca/test)는 전체 검사 약 80분과 큰 검사 범주만 공개한다. 게임별 현재 문항 수·시간·점수식은 공개값으로 단정하지 않는다.
+- [2026 JOBDA Upgrade Report v8.4.0](https://contents.h.place/hubfs/Readme%20%EB%8B%A4%EC%9A%B4%EB%A1%9C%EB%93%9C%20%ED%8C%8C%EC%9D%BC/%EC%97%85%EB%8D%B0%EC%9D%B4%ED%8A%B8%20%EB%A6%AC%ED%8F%AC%ED%8A%B8/%5B%EC%97%AD%EA%B2%80%5D%20Upgrade%20Report_v8.4.0%201.pdf)는 과제 설명·연습과 실전 응시를 분리한 흐름을 보여준다. 구현은 이 정보 구조만 참고하고 화면·브랜드·자산은 독립적으로 설계한다.
 
 ## 2. 공개 mechanics: 9개 게임
 
@@ -27,12 +29,12 @@
 | RPS | 가위바위보 | 총 3라운드. 1R 나의 관점, 2R 상대 관점, 3R 두 관점이 무작위로 제시된다. 목표 관점에 따라 이기기/지기를 판단하고 가위·바위·보를 방향키 ←·↓·→로 입력한다. | 약 3분 / 키보드 | `RULE_CUE → HAND_STIMULUS → KEY_RESPONSE → NEXT` |
 | MRT | 도형 회전하기 | 글자 또는 도형의 전·후 모양을 보고 좌45°, 우45°, 좌우반전, 상하반전을 조합한다. 회전 1회는 45°이며 최대 클릭 횟수가 있다. | 약 6분 / 마우스 | `PUZZLE_READY → COMPOSE_TRANSFORMS → SUBMIT → EVALUATE` |
 | PM | 약속 정하기 | 세 친구의 요일·장소·메뉴·버스 정보를 순차 기억한다. 1–3R은 모두가 고른 항목, 4R은 누구도 타지 않은 버스를 고른다. | 약 4분 / 마우스 | `SHOW_1 → SHOW_2 → SHOW_3 → QUERY → CHOOSE` |
-| RMT | 길 만들기 | 모든 교통수단이 지정 손님에게 가도록 진행 방향을 90° 바꾸는 울타리를 최소 개수로 설치한다. 경로는 겹쳐도 되고 난이도와 차량 수가 증가한다. | 약 3분 / 마우스 | `BOARD_READY → EDIT_FENCES → SUBMIT → SIMULATE` |
+| RMT | 길 만들기 | 모든 교통수단이 지정 손님에게 가도록 진행 방향을 90° 바꾸는 울타리를 최소 개수로 설치한다. 경로는 겹쳐도 되고 난이도와 차량 수가 증가한다. | 레거시 카드 약 3분·공식 영상 5분 / 마우스 | `BOARD_READY → EDIT_FENCES → SUBMIT → SIMULATE` |
 | PCT2 | 마법약 만들기 | 네 재료 조합을 보고 빨간/파란 약 중 더 가능성 높은 결과를 학습한다. 결과는 100% 결정적이지 않고 개별 카드가 아니라 전체 조합이 결과를 좌우한다. | 약 6분 / 마우스 | `SHOW_COMBO → PREDICT → STOCHASTIC_FEEDBACK → UPDATE` |
 | OTN | 숫자 누르기 | 총 2라운드. 1R은 제시 숫자, 2R은 1–9 숫자를 규칙에 따라 누른다. 숫자판 배열이 바뀌며 건너뛰기·두 번 누르기 규칙이 있다. | 약 3분 / 마우스 | `SHOW_RULE → SHOW_SIGNAL → CLICK_SEQUENCE → NEXT` |
 | FNB | 도형 순서 기억하기 | 총 2라운드. 1R은 현재 도형을 두 번째 전과, 2R은 두 번째/세 번째 전 조건에 맞춰 비교한다. | 약 3분 / 키보드 | `STREAM_STIMULUS → N_BACK_DECISION → UPDATE_BUFFER` |
 | HAS | 고양이 술래잡기 | 생쥐 위치를 기억해 고양이가 생쥐를 찾았는지 판단하고, 그 판단에 대한 확신도도 응답한다. 진행할수록 쥐와 고양이 수가 늘어난다. | 약 4분 / 마우스 | `ENCODE_MICE → SHOW_CATS → HIT_DECISION → CONFIDENCE` |
-| WNC | 개수 비교하기 | 좌우에 나타난 두 단어군 중 **개수가 더 많았던 단어**를 선택한다. 글자 크기·의미가 아니라 개수가 기준이며 수가 많고 비슷해진다. | 약 3분 / 마우스 | `BRIEF_DISPLAY → MASK/QUERY → LEFT_OR_RIGHT → NEXT` |
+| WNC | 개수 비교하기 | 좌우에 나타난 두 단어군 중 **개수가 더 많았던 단어**를 선택한다. 글자 크기·의미가 아니라 개수가 기준이며 수가 많고 비슷해진다. 공식 영상은 단어 1초 제시·생각 3초를 안내한다. | 약 3분 / 마우스 | `BRIEF_DISPLAY → MASK/QUERY → LEFT_OR_RIGHT → NEXT` |
 
 ### 2.1 게임별 공개 mechanics 근거 매핑
 
@@ -50,7 +52,7 @@
 | 고양이 술래잡기 | <https://www.jobda.im/info/342> | <https://www.youtube.com/watch?v=kwptjPJRXRQ> |
 | 개수 비교하기 | <https://www.jobda.im/info/343> | <https://www.youtube.com/watch?v=GpFOO5wc2d0> |
 
-모든 시간은 2023 공개 레거시 카드의 “약” 표기다. 2024 공개 기업자료는 9개 모두 4분으로 달라 현행 설정으로 단정할 수 없다. 문항 수, 자극 노출시간, 오답 피드백, 점수식은 공개되지 않았다.
+게임별 표의 기본 총시간은 2023 공개 레거시 카드의 “약” 표기다. 다만 길 만들기는 같은 시기 공식 영상에서 5분으로 안내해 카드의 약 3분과 상충한다. 2024 공개 기업자료도 9개 모두 4분으로 달라 현행 설정으로 단정할 수 없다. 문항 수, 오답 피드백, 점수식과 대부분의 세부 자극 노출시간은 공개되지 않았다. 개수 비교하기는 2023 공식 영상에서 단어 1초 제시·생각 3초를 별도로 공개한다.
 
 ## 3. 구현 사양: 도형 회전하기
 
@@ -89,7 +91,7 @@ clickBudget: configurable
 - 실제 최신 실전의 문항 수, 글자/패턴 라운드 순서, 라운드별 시간.
 - `하나 지움`·`전체 초기화`가 클릭 예산을 차감하는지, 예산이 문항/라운드/전체 중 어느 범위에서 초기화되는지.
 - 최소 연산 보너스, 오답 감점, 부분점수 식.
-- 공식 영상의 8개 슬롯과 5×5/도형 디자인은 2023 공개 영상 관찰값이며 현재 기업 배정 버전의 보장은 아니다.
+- 공식 영상의 8개 슬롯과 4×4 격자 도형 디자인은 2023 공개 영상 관찰값이며 현재 기업 배정 버전의 보장은 아니다.
 
 ### 3.4 로컬 노트의 관련 이미지(저장소 미포함)
 
@@ -181,8 +183,8 @@ maxScoreCondition = functionalCorrect && placedFenceCount == targetFenceCount
 |---|---|---|
 | 게임 이름·대략 시간·입력 도구·개발사 공개 팁 | 2023 공개 레거시 번들에서 확인 | 사실로 표시하되 “2023 레거시”, “약”을 붙이고 현행 초대 안내를 우선한다. |
 | 2023 공식 영상의 구체적 UI | 잡다 공식 채널 영상에서 확인 | 레거시 참고로 사용하고 최신 실전 동일성을 주장하지 않는다. |
-| 5×5 보드, 8개 변환 슬롯, 전/후반 자극 증가 | 공식 영상 화면 관찰 | 설정 가능한 기본값으로만 둔다. |
-| 문항 수·노출 밀리초·난수 분포·정확한 점수식 | 공개 확인 불가 | 하드코딩하지 않고 임의 연습 난이도라고 표시한다. |
+| 길 만들기 5×5 보드, 도형 회전 4×4 격자·8개 변환 슬롯, 전/후반 자극 증가 | 공식 영상 화면 관찰 | 레거시 공개 화면값으로 표시하고 최신 실전 동일성을 주장하지 않는다. |
+| 문항 수·대부분의 노출 밀리초·난수 분포·정확한 점수식 | 공개 확인 불가 | 개수 비교 1초 제시·3초 생각처럼 명시된 예외 외에는 하드코딩하지 않고 임의 연습 난이도라고 표시한다. |
 | 도형 이름 붙이기, 손가락 암기, 특정 패턴 공식 | 후기·개인 전략 | “연습 팁”으로만 제공하고 합격 보장 표현을 금지한다. |
 | N-back·정신회전·계획·확률학습·메타인지의 측정 근거 | 동료심사 문헌 존재 | 연습 로그와 피드백 설계에 사용하되 JOBDA 채점식으로 오인하지 않는다. |
 | 연습 점수 상승 = 실제 직무역량 상승 | 근거 불충분 | 숙련/재검사 효과와 일반화 한계를 함께 고지한다. |
@@ -214,11 +216,11 @@ maxScoreCondition = functionalCorrect && placedFenceCount == targetFenceCount
 | 15 | JOBDA 공식 영상 | A1 | <https://www.youtube.com/watch?v=yu5-fuA2jC0> | 도형 회전하기의 4개 변환 버튼, 답안 슬롯, 초기화·제출 UI를 참고한다. |
 | 16 | JOBDA 공식 영상 | A1 | <https://www.youtube.com/watch?v=FTo_F_Yz4g4> | 약속 정하기의 요일·16칸 장소·메뉴·버스 자극과 선택 화면을 참고한다. |
 | 17 | JOBDA 공식 영상 | A1 | <https://www.youtube.com/watch?v=GpNCcqaxrL4> | 길 만들기의 5×5 보드, 울타리 방향, 클릭/정답 울타리 수 UI를 참고한다. |
-| 18 | JOBDA 공식 영상 | A1 | <https://www.youtube.com/watch?v=qTKFQYPUg2Y> | 마법약 만들기의 네 조합과 확률적 피드백 화면을 참고한다. |
+| 18 | JOBDA 공식 영상 | A1 | <https://www.youtube.com/watch?v=qTKFQYPUg2Y> | 마법약 만들기의 네 재료 조합과 확률적 피드백 화면을 참고한다. |
 | 19 | JOBDA 공식 영상 | A1 | <https://www.youtube.com/watch?v=lb34gWLkExw> | 숫자 누르기의 숫자판 재배치와 억제 규칙 화면을 참고한다. |
 | 20 | JOBDA 공식 영상 | A1 | <https://www.youtube.com/watch?v=SrZq-Qv-5dU> | 도형 순서 기억하기의 연속 자극과 키보드 판단 흐름을 참고한다. |
 | 21 | JOBDA 공식 영상 | A1 | <https://www.youtube.com/watch?v=kwptjPJRXRQ> | 고양이 술래잡기의 위치 판단 뒤 확신도 응답 흐름을 참고한다. |
-| 22 | JOBDA 공식 영상 | A1 | <https://www.youtube.com/watch?v=GpFOO5wc2d0> | 개수 비교하기의 좌우 단어군 노출과 선택 흐름을 참고한다. |
+| 22 | JOBDA 공식 영상 | A1 | <https://www.youtube.com/watch?v=GpFOO5wc2d0> | 개수 비교하기의 좌우 단어군, 1초 제시·3초 생각, 선택 흐름을 참고한다. |
 | 23 | JOBDA 공식 API | A1 | <https://api.jobda.im/post/335> | 가위바위보 공식 글 제목과 영상 ID의 정본 메타데이터를 확인한다. |
 | 24 | JOBDA 공식 API | A1 | <https://api.jobda.im/post/336> | 도형 회전하기 공식 글 제목과 영상 ID를 확인한다. |
 | 25 | JOBDA 공식 API | A1 | <https://api.jobda.im/post/337> | 약속 정하기 공식 글 제목과 영상 ID를 확인한다. |
@@ -239,7 +241,7 @@ maxScoreCondition = functionalCorrect && placedFenceCount == targetFenceCount
 | 40 | MIDAS 공식 연구 | A1 | <https://contents.h.place/acca/labnote/37/ai-competency-0> | 역량검사 개발 철학과 과제 해석의 공식 설명을 확인한다. |
 | 41 | MIDAS 공식 연구 | A1 | <https://contents.h.place/acca/labnote/31/gamification> | 게임화가 측정과 응시 경험에 미치는 공식 설명을 설계 근거로 사용한다. |
 | 42 | MIDAS 공식 연구 | A1 | <https://contents.h.place/acca/labnote/6/lie-detection> | 반응 패턴과 솔직성 설명을 참고하되 비공개 탐지 규칙은 구현하지 않는다. |
-| 43 | MIDAS 공식 PDF | A1 | <https://contents.h.place/hubfs/Readme%20%EB%8B%A4%EC%9A%B4%EB%A1%9C%EB%93%9C%20%ED%8C%8C%EC%9D%BC/%EC%97%85%EB%8D%B0%EC%9D%B4%ED%8A%B8%20%EB%A6%AC%ED%8F%AC%ED%8A%B8/%5B%EC%97%AD%EA%B2%80%5D%20Upgrade%20Report_v8.4.0%201.pdf> | 버전별 검사 변화가 있음을 전제로 게임 구성을 설정 가능하게 만든다. |
+| 43 | MIDAS 공식 PDF | A1 | <https://contents.h.place/hubfs/Readme%20%EB%8B%A4%EC%9A%B4%EB%A1%9C%EB%93%9C%20%ED%8C%8C%EC%9D%BC/%EC%97%85%EB%8D%B0%EC%9D%B4%ED%8A%B8%20%EB%A6%AC%ED%8F%AC%ED%8A%B8/%5B%EC%97%AD%EA%B2%80%5D%20Upgrade%20Report_v8.4.0%201.pdf> | 2026 과제 설명·연습과 실전 응시가 분리된 정보 구조를 참고하되 시각 자산은 독립 설계한다. |
 | 44 | JOBDA Recruit 공식 PDF | A1 | <https://recruit.jobda.im/hubfs/TREND%20REPORT_HR%20%EA%B3%A0%EB%AF%BC%EC%9E%88%EC%8A%B5%EB%8B%88%EB%8B%A4_2%ED%8E%B8.pdf> | 채용 담당자 관점의 활용 맥락을 확인해 연습 서비스의 설명 문구를 조정한다. |
 | 45 | MIDAS 공식 API 문서 | A1 | <https://midasinhelp.readme.io/reference/%EC%97%AD%EA%B2%80%EC%84%BC%ED%84%B0-%EF%B8%8F-jobda-%EA%B2%B0%EA%B3%BC-%EB%B6%88%EB%9F%AC%EC%98%A4%EA%B8%B0-%EA%B4%80%EB%A6%AC%EC%9E%90%EC%9A%A9> | 공식 결과 연동 API의 존재만 확인하고 비공개 평가값을 모사하지 않는다. |
 | 46 | JOBDA Recruit 공식 PDF | A1 | <https://recruit.jobda.im/hubfs/Readme%20%EB%8B%A4%EC%9A%B4%EB%A1%9C%EB%93%9C%20%ED%8C%8C%EC%9D%BC/%EC%9E%90%EB%A3%8C%EC%8B%A4/%EC%97%AD%EA%B2%80%EC%84%BC%ED%84%B0%20%EC%9D%91%EC%8B%9C%EC%9E%90%20%EA%B0%80%EC%9D%B4%EB%93%9C.pdf> | 응시 전 환경 점검과 진행 안내를 온보딩 체크리스트에 반영한다. |

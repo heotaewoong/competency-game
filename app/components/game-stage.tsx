@@ -167,11 +167,11 @@ const DEFAULT_ROTATION_PREFERENCES: RotationPreferences = {
   contentMode: 'mixed',
   selectedLetters: [...ROTATION_LETTERS],
   selectedTransforms: [...ROTATION_TRANSFORM_IDS],
-  showPreview: true,
+  showPreview: false,
 };
 const ROTATION_CONTENT_OPTIONS: ReadonlyArray<{ id: RotationContentMode; label: string; description: string }> = [
   { id: 'letters', label: '알파벳', description: '선택한 글자만 반복' },
-  { id: 'tiles', label: '격자 도형', description: '5×5 패턴 집중' },
+  { id: 'tiles', label: '격자 도형', description: '4×4 패턴 집중' },
   { id: 'mixed', label: '혼합', description: '두 유형 번갈아 출제' },
 ];
 const ROTATION_ONLY_TRANSFORMS = rotationTransformDefinitions.filter((definition) => definition.groupId.startsWith('turn-')).map((definition) => definition.id);
@@ -1009,12 +1009,13 @@ export function GameStage({ gameId, onClose, onSwitch, onSave }: { gameId: GameI
     setPhase('play');
   }
 
-  function startSession() {
+  function startSession(nextMode: SessionMode = sessionMode) {
     visibilityPausedRef.current = false;
     setVisibilityPaused(false);
     setVisibilityPauseCount(0);
     finishedRun.current = false;
     setSaveNotice('');
+    setSessionMode(nextMode);
     setPrepCountdown(gameId === 'nback' ? null : 3);
     setPhase('play');
   }
@@ -1030,30 +1031,46 @@ export function GameStage({ gameId, onClose, onSwitch, onSave }: { gameId: GameI
               <div className="intro-heading">
                 <div><p>{game.no} · {game.skill}</p><h2>{game.title}</h2><span>{game.rounds}</span></div>
               </div>
+              <ol className="intro-flow" aria-label="시작 전 확인 순서">
+                <li><span>1</span><div><b>과제 이해</b><small>목표·조작 확인</small></div></li>
+                <li><span>2</span><div><b>방식 선택</b><small>맞춤 또는 실전형</small></div></li>
+                <li><span>3</span><div><b>훈련 시작</b><small>결과·복습 저장</small></div></li>
+              </ol>
               <div className={`intro-config-grid ${gameId === 'nback' ? 'has-nback-map' : ''}`.trim()}>
                 <div className="intro-config-main">
-                  <div className="intro-rule"><b>연습 규칙</b><p>{game.rule}</p></div>
+                  <section className="intro-rule" aria-labelledby={`${gameId}-task-goal`}>
+                    <div className="intro-rule-head"><b id={`${gameId}-task-goal`}>과제 목표</b><span>공개 구조 기반</span></div>
+                    <p>{game.rule}</p>
+                    <dl className="intro-task-brief">
+                      <div><dt>응답 방식</dt><dd>{game.input}</dd></div>
+                      <div><dt>진행 순서</dt><dd>{game.rounds}</dd></div>
+                      <div><dt>연습 기준</dt><dd>{game.focus}</dd></div>
+                    </dl>
+                  </section>
                   <details className="intro-details">
-                    <summary>게임 정보 더 보기</summary>
+                    <summary>공개 근거와 시간 보기</summary>
                     <dl className="stage-meta">
-                      <div><dt>조작</dt><dd>{game.input}</dd></div>
-                      <div><dt>유형</dt><dd>{game.rounds}</dd></div>
-                      <div><dt>연습 포인트</dt><dd>{game.focus}</dd></div>
-                      <div><dt>예상 시간</dt><dd>{game.time}</dd></div>
+                      <div><dt>공개 시간 자료</dt><dd>{game.time}</dd></div>
+                      <div><dt>규칙 근거</dt><dd>2023 개발사 공개 해설</dd></div>
+                      <div><dt>화면 흐름</dt><dd>2026 설명·연습 분리 구조</dd></div>
+                      <div><dt>최종 기준</dt><dd>기업 초대 화면 안내</dd></div>
                     </dl>
                   </details>
                   <ModeSelector mode={sessionMode} onChange={setSessionMode} />
                   {sessionMode === 'practice'
-                    ? <><SessionSettings gameId={gameId} value={practiceConfig} onChange={savePracticeConfig} guidedPacing={guidedPacing} onGuidedPacingChange={saveGuidedPacing} /><FocusedPracticeOptions gameId={gameId} value={focusedPractice} onChange={saveFocusedPractice} />{gameId === 'rotation' && <RotationPracticeOptions value={rotationPreferences} onChange={saveRotationPreferences} />}{gameId === 'appointment' && <AppointmentPracticeOptions value={appointmentPreferences} onChange={saveAppointmentPreferences} />}{gameId === 'nback' && <NBackPracticeOptions value={nbackPreferences} onChange={saveNBackPreferences} />}</>
+                    ? <><SessionSettings gameId={gameId} value={practiceConfig} onChange={savePracticeConfig} guidedPacing={guidedPacing} onGuidedPacingChange={saveGuidedPacing} /><details className="advanced-settings practice-advanced-settings"><summary><span><b>세부 훈련 설정</b><small>유형·힌트·난이도를 더 정교하게 조절합니다</small></span><em>설정 열기</em></summary><div className="advanced-settings-content"><FocusedPracticeOptions gameId={gameId} value={focusedPractice} onChange={saveFocusedPractice} />{gameId === 'rotation' && <RotationPracticeOptions value={rotationPreferences} onChange={saveRotationPreferences} />}{gameId === 'appointment' && <AppointmentPracticeOptions value={appointmentPreferences} onChange={saveAppointmentPreferences} />}{gameId === 'nback' && <NBackPracticeOptions value={nbackPreferences} onChange={saveNBackPreferences} />}</div></details></>
                     : <SimulationPreset gameId={gameId} />}
                 </div>
                 {gameId === 'nback' && <aside className="nback-intro-column">{sessionMode === 'simulation' ? <NBackSimulationDiagram /> : <NBackIntroDiagram task={nbackPreferences.task} />}</aside>}
               </div>
               {gameId === 'nback' && sessionMode === 'practice' && <details className="advanced-settings"><summary><span><b>도형 이름표 설정</b><small>한 글자 암기명 15개와 표시 여부</small></span><em>설정 열기</em></summary><GlyphNameLegend names={glyphMnemonics} onChange={saveGlyphMnemonics} showDuringPlay={showGlyphNames} onShowDuringPlayChange={saveGlyphVisibility} /></details>}
-              <small>{sessionMode === 'practice' ? '속도·분량·이름표를 조절하며 익히는 모드입니다.' : '2023 개발사 공개 레거시 조작 흐름을 바탕으로 만든 시뮬레이션입니다. 비공개 문항·타이밍·채점식과 동일함을 뜻하지 않습니다.'}</small>
-              <div className="intro-actions">
-                <a href={`https://www.jobda.im/info/${officialInfo[gameId]}`} target="_blank" rel="noreferrer">JOBDA 공개 레거시 해설 ↗</a>
-                <button className="stage-start" onClick={startSession}>{sessionMode === 'practice' ? '연습 시작' : '실전형 연습 시작'} <span>→</span></button>
+              <aside className="intro-evidence-boundary" aria-label="공식 자료와 독립 훈련의 경계"><b>{sessionMode === 'practice' ? '맞춤 연습' : '독립 실전형 프리셋'}</b><p>{sessionMode === 'practice' ? '공개된 과제 목표와 조작을 익히는 모드입니다. 분량·속도·힌트는 이 앱의 연습 설정입니다.' : '2023 개발사 공개 레거시 흐름을 바탕으로 재구성했습니다. 비공개 문항·타이밍·채점식과 동일함을 뜻하지 않습니다.'} 실제 응시에서는 기업 초대 화면을 우선하세요.</p></aside>
+            </div>
+            <div className="intro-actions">
+              <a href={`https://www.jobda.im/info/${officialInfo[gameId]}`} target="_blank" rel="noreferrer"><span>공식 공개 해설</span><small>2023 레거시 ↗</small></a>
+              <div className="intro-start-options" aria-label="시작 방식 바로 선택">
+                <button className={`stage-start stage-start-practice ${sessionMode === 'practice' ? 'is-selected' : ''}`.trim()} type="button" onClick={() => startSession('practice')}><span>설명·연습 시작</span><small>{sessionMode === 'practice' ? '선택한 내 설정으로 시작' : '맞춤 연습으로 바로 전환'}</small></button>
+                <button className={`stage-start stage-start-simulation ${sessionMode === 'simulation' ? 'is-selected' : ''}`.trim()} type="button" onClick={() => startSession('simulation')}><span>실전형 연습 시작</span><small>{sessionMode === 'simulation' ? '선택한 고정 프리셋으로 시작' : '실전형으로 바로 전환'}</small></button>
               </div>
             </div>
           </>
@@ -1200,12 +1217,12 @@ function FocusedPracticeOptions({ gameId, value, onChange }: { gameId: GameId; v
         {options.map((option, index) => <button type="button" role="radio" aria-checked={selected === option.value} tabIndex={selected === option.value ? 0 : -1} className={selected === option.value ? 'active' : ''} key={option.value} onClick={() => select(option.value)} onKeyDown={(event) => navigateOption(event, index)}><b>{option.label}</b><small>{option.description}</small></button>)}
       </div>
       {gameId === 'path' && <div className="path-focus-formula" aria-label="길 만들기 유형 계산법"><span><b>T = B</b><small>기본형</small></span><span><b>T &lt; B</b><small>공유형</small></span><span><b>T &gt; B</b><small>우회형</small></span><p><b>B 계산</b> 교차쌍 × 1 + 평행쌍 × 2 · 직진쌍 × 0</p><p><b>조작 수</b> 공개 화면에는 클릭 가능 횟수가 있지만 정확한 차감·복원 규칙은 확인되지 않아, 이 도구는 제한 대신 실제 조작 수를 기록합니다.</p></div>}
-      {gameId === 'path' && <details className="path-type-index"><summary><span><b>12개 대표 조합표</b><small>공개 공략 영상의 유형 구성을 규칙만 정리</small></span><i aria-hidden="true" /></summary><div>
+      {gameId === 'path' && <details className="path-type-index"><summary><span><b>12개 대표 조합표</b><small>비공식 개인 공략의 유형을 독립 훈련용으로 정리</small></span><i aria-hidden="true" /></summary><div>
         <section><b>기본 · T=B</b><p><span>C3 · T3</span><span>P2 · T4</span><span>C1P2 · T5</span><span>C2P1 · T4</span></p></section>
         <section><b>공유 · T&lt;B</b><p><span>C2P1 · T2</span><span>C2P1 · T3</span><span>P3 · T5</span><span>C1P2 · T3</span></p></section>
         <section><b>추가 · T&gt;B</b><p><span>C2 · T3</span><span>P2 · T5</span></p></section>
         <section><b>평행 먼저</b><p><span>C1P1 · T5</span><span>C1P1 · T4</span></p></section>
-        <footer><span>C=교차쌍 · P=평행쌍 · T=목표 울타리</span><a href="https://www.youtube.com/watch?v=UDYLBG__Jeg" target="_blank" rel="noreferrer">참고 영상 ↗</a></footer>
+        <footer><span>C=교차쌍 · P=평행쌍 · T=목표 울타리</span><a href="https://www.youtube.com/watch?v=UDYLBG__Jeg" target="_blank" rel="noreferrer">비공식 참고 영상 ↗</a></footer>
       </div></details>}
       {gameId === 'potion' && <label className="focused-practice-toggle"><span><b>누적 근거 힌트</b><small>연습 중 같은 조합의 파랑·빨강 관찰 횟수를 표시합니다.</small></span><input type="checkbox" checked={value.potion.showEvidence} onChange={(event) => onChange({ ...value, potion: { ...value.potion, showEvidence: event.target.checked } })} /><i aria-hidden="true" /></label>}
     </section>
@@ -1219,10 +1236,10 @@ function SimulationPreset({ gameId }: { gameId: GameId }) {
         <div><span><b>실전형 흐름 고정 설정</b><small>세션 시작 후 변경할 수 없습니다</small></span><em>훈련용 6 MIN</em></div>
         <dl>
           <div><dt>1단계</dt><dd>알파벳 · 3분</dd></div>
-          <div><dt>2단계</dt><dd>5×5 격자 · 3분</dd></div>
+          <div><dt>2단계</dt><dd>4×4 격자 · 3분</dd></div>
           <div><dt>도움 표시</dt><dd>미리보기·정오 숨김</dd></div>
         </dl>
-        <p>2023 개발사 영상은 약 6분, 2024 JAINWON 공개 기업자료는 4분으로 서로 다릅니다. 이 도구는 서로 다른 두 공개 자료의 조작을 충분히 연습하도록 6분을 쓰며, 실제 응시에서는 기업 초대 안내를 우선하세요.</p>
+        <p>2023 개발사 영상은 약 6분, 2024 JAINWON 공개 기업자료는 4분으로 서로 다릅니다. 이 도구는 공개 영상의 두 단계 흐름을 연습하도록 6분을 쓰며, 문항마다 다시 주어지는 20회 조작 한도는 범위가 공개되지 않은 독립 훈련값입니다. 실제 응시에서는 기업 초대 안내를 우선하세요.</p>
       </section>
     );
   }
@@ -1257,7 +1274,7 @@ function SimulationPreset({ gameId }: { gameId: GameId }) {
   const config = simulationConfig(gameId);
   const publicFlow = gameId === 'rps' ? '내 패 → 상대 패 → 관점 혼합'
     : gameId === 'path' ? '최소 울타리 계획 → 경로 제출'
-    : gameId === 'potion' ? '14개 독립 조합 반복 → 성공·실패 피드백'
+    : gameId === 'potion' ? '4가지 재료 조합 반복 → 성공·실패 피드백'
     : gameId === 'number' ? '점등 숫자 → 건너뛰기·두 번 누르기'
     : gameId === 'count' ? '좌우 단어 개수 비교'
     : gameId === 'mouse' ? '생쥐 → 고양이 → 빨강 → 파랑'
@@ -2130,8 +2147,8 @@ function RotationGame({ onFinish, onClose, config, preferences, onPreviewChange 
       index: reviewIndex,
       status,
       errorCodes: [...new Set(errorCodes)],
-      title: `${currentPuzzle.kind === 'letter' ? '알파벳' : '5×5 격자'} ${currentRound + 1}번 · ${rotationTransformGroup(rotationTransformDefinition(currentPuzzle.transformId).groupId).label}`,
-      prompt: `${currentPuzzle.kind === 'letter' ? `알파벳 ${currentPuzzle.letter}` : '5×5 격자 도형'} · ${rotationTransformDefinition(currentPuzzle.transformId).label}`,
+      title: `${currentPuzzle.kind === 'letter' ? '알파벳' : '4×4 격자'} ${currentRound + 1}번 · ${rotationTransformGroup(rotationTransformDefinition(currentPuzzle.transformId).groupId).label}`,
+      prompt: `${currentPuzzle.kind === 'letter' ? `알파벳 ${currentPuzzle.letter}` : '4×4 격자 도형'} · ${rotationTransformDefinition(currentPuzzle.transformId).label}`,
       expected: `최소 조작 예시 ${rotationSequenceText(currentPuzzle.optimal)}`,
       selected: rotationSequenceText(finalSequence),
       explanation,
@@ -2305,7 +2322,7 @@ function RotationGame({ onFinish, onClose, config, preferences, onPreviewChange 
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const currentPhase = simulationPhase === 'letters' ? '알파벳' : '5×5 격자 도형';
+  const currentPhase = simulationPhase === 'letters' ? '알파벳' : '4×4 격자 도형';
   const sequenceStatus = `${sequence.length}/8단계 · ${remaining}/20회 남음`;
   function changePreviewSource(source: RotationReplaySource) {
     setPreviewSource(source);
@@ -2328,19 +2345,19 @@ function RotationGame({ onFinish, onClose, config, preferences, onPreviewChange 
     onPreviewChange(next);
     setAnnouncement(next ? '단계별 과정 예시를 켰습니다.' : '단계별 과정 예시를 숨겼습니다. 제출 후 최소 풀이 예시는 계속 표시됩니다.');
   }
-  const accessibleRotationStatus = announcement || `${mode === 'simulation' ? currentPhase : `${round + 1}번 문제`} 시작. ${puzzle.kind === 'letter' ? `알파벳 ${puzzle.letter}` : '5×5 격자 도형'}, 목표 방향은 ${rotationMatrixDescription(puzzle.target)}`;
+  const accessibleRotationStatus = announcement || `${mode === 'simulation' ? currentPhase : `${round + 1}번 문제`} 시작. ${puzzle.kind === 'letter' ? `알파벳 ${puzzle.letter}` : '4×4 격자 도형'}, 목표 방향은 ${rotationMatrixDescription(puzzle.target)}`;
   return (
     <GameFrame gameId="rotation" current={mode === 'simulation' ? (simulationPhase === 'letters' ? 1 : 2) : round + 1} total={mode === 'simulation' ? 2 : puzzles.length} helper="1·2 회전 · 3·4 반전 · Backspace 지움 · Delete 초기화 · Enter 제출" feedback={feedback} statusMessage={accessibleRotationStatus} onClose={onClose}>
       <div className="rotation-stage-layout">
-        {mode === 'simulation' ? <div className="rotation-phase-banner"><span>실전형 단계 {simulationPhase === 'letters' ? '1' : '2'} / 2</span><b>{currentPhase}</b><small>3분 연습 구간 · 가능한 만큼 정확하게 해결하세요</small></div> : <div className="rotation-practice-banner"><b>{puzzle.kind === 'letter' ? '알파벳' : '5×5 격자 도형'}</b>{review ? <span className="rotation-review-preview-label">제출 후 최소 풀이 예시</span> : <button type="button" data-game-shortcut-ignore aria-pressed={preferences.showPreview} onClick={(event) => { toggleProcessPreview(); restoreGameShortcutFocus(event.currentTarget); }}><span>조작 과정 예시</span><b>{preferences.showPreview ? '켜짐' : '꺼짐'}</b></button>}<small>비대칭 특징 2곳 → 45° 눈금 → 거울상</small></div>}
+        {mode === 'simulation' ? <div className="rotation-phase-banner"><span>실전형 단계 {simulationPhase === 'letters' ? '1' : '2'} / 2</span><b>{currentPhase}</b><small>3분 훈련 구간 · 문항별 20회는 앱 자체 한도</small></div> : <div className="rotation-practice-banner"><b>{puzzle.kind === 'letter' ? '알파벳' : '4×4 격자 도형'}</b>{review ? <span className="rotation-review-preview-label">제출 후 최소 풀이 예시</span> : <button type="button" data-game-shortcut-ignore aria-pressed={preferences.showPreview} onClick={(event) => { toggleProcessPreview(); restoreGameShortcutFocus(event.currentTarget); }}><span>조작 과정 예시</span><b>{preferences.showPreview ? '켜짐' : '꺼짐'}</b></button>}<small>비대칭 특징 2곳 → 45° 눈금 → 거울상</small></div>}
       {!review && (guidedPacing ? <p className="guided-pacing-note" role="status">시간 제한 없이 연습 중 · 조작을 확인한 뒤 직접 제출하세요</p> : <DeadlineBar key={mode === 'simulation' ? simulationPhase : round} duration={mode === 'simulation' ? ROTATION_PHASE_MS : config.paceMs} label={mode === 'simulation' ? `${currentPhase} 단계 남은 시간` : '문제 제한시간'} />)}
       <div className="rotation-comparison">
-        <article className={processPreviewEnabled ? 'is-preview' : ''}><span>{processPreviewEnabled ? `${previewSource === 'optimal' ? '최소 과정' : '현재 풀이'} · ${boundedPreviewStep}/${replaySequence.length}` : '시작'}</span><RotationShape puzzle={puzzle} matrix={previewMatrix} label={`${processPreviewEnabled ? `${boundedPreviewStep}단계 누적 조작이 반영된` : '시작'} ${puzzle.kind === 'letter' ? `알파벳 ${puzzle.letter}` : '5×5 격자 도형'}. 현재 방향은 ${rotationMatrixDescription(previewMatrix)}`} /></article>
+        <article className={processPreviewEnabled ? 'is-preview' : ''}><span>{processPreviewEnabled ? `${previewSource === 'optimal' ? '최소 과정' : '현재 풀이'} · ${boundedPreviewStep}/${replaySequence.length}` : '시작'}</span><RotationShape puzzle={puzzle} matrix={previewMatrix} label={`${processPreviewEnabled ? `${boundedPreviewStep}단계 누적 조작이 반영된` : '시작'} ${puzzle.kind === 'letter' ? `알파벳 ${puzzle.letter}` : '4×4 격자 도형'}. 현재 방향은 ${rotationMatrixDescription(previewMatrix)}`} /></article>
         <b aria-hidden="true">→</b>
-        <article><span>목표</span><RotationShape puzzle={puzzle} matrix={puzzle.target} label={`목표 ${puzzle.kind === 'letter' ? `알파벳 ${puzzle.letter}` : '5×5 격자 도형'}. 목표 방향은 ${rotationMatrixDescription(puzzle.target)}`} /></article>
+        <article><span>목표</span><RotationShape puzzle={puzzle} matrix={puzzle.target} label={`목표 ${puzzle.kind === 'letter' ? `알파벳 ${puzzle.letter}` : '4×4 격자 도형'}. 목표 방향은 ${rotationMatrixDescription(puzzle.target)}`} /></article>
       </div>
       <div className="rotation-controls">
-        <div className="rotation-control-head"><div><b>변환 선택</b><small>최대 8단계 · 조작·지움·초기화 합계 20회</small></div><span className={remaining <= 5 ? 'is-low' : ''}>{sequenceStatus}</span></div>
+        <div className="rotation-control-head"><div><b>변환 선택</b><small>최대 8단계 · 앱 훈련값은 문항마다 조작 20회</small></div><span className={remaining <= 5 ? 'is-low' : ''}>{sequenceStatus}</span></div>
         <div className="rotation-op-grid">{rotationOperations.map((operation) => <button type="button" key={operation.id} disabled={locked || remaining === 0 || sequence.length >= 8} onClick={(event) => { addOperation(operation.id); restoreGameShortcutFocus(event.currentTarget); }} aria-label={`${operation.key}번 ${operation.label}`}><kbd>{operation.key}</kbd><b aria-hidden="true">{operation.short}</b><span>{operation.label}</span></button>)}</div>
         {processPreviewEnabled ? (
           <RotationProcessPreview
@@ -2830,7 +2847,11 @@ function PathGame({ onFinish, onClose, config }: GameProps & { config: PracticeC
   return (
     <GameFrame gameId="path" current={round + 1} total={puzzles.length} helper="넓은 화면에서는 / 또는 \\ 방향을 직접 선택하고, 작은 화면에서는 칸 전체를 눌러 없음 → / → \\ 순서로 바꿉니다." feedback={feedback} statusMessage={statusMessage} onClose={onClose}>
       {guidedPacing ? <p className="guided-pacing-note" role="status">시간 제한 없이 연습 중 · 경로를 완성한 뒤 직접 확인하세요</p> : <DeadlineBar key={round} duration={config.paceMs} label="문제 제한시간" />}
-      <div className="path-toolbar"><span>현재 조작 기록 <b>{clicks}</b></span><span>정답 울타리 수 <b>{puzzle.target}</b></span>{mode === 'practice' && <span className={`path-type-chip ${puzzleMeta.interaction}`}><b>{interactionLabel}</b> T {puzzle.target} {comparison} B {puzzleMeta.baseFenceCount}<small>{pairLabel}{puzzleMeta.orderHint === 'parallel-first' ? ' · 평행 먼저' : ''}</small></span>}<button disabled={locked} onClick={resetPath}>전체 초기화</button></div>
+      <section className="path-control-panel" aria-label="길 만들기 풀이 상태와 제출">
+        <header><span>PUZZLE CONTROL</span><b>울타리 계획</b><p>같은 색의 차량과 손님을 연결한 뒤, 목표 울타리 수에 맞춰 확인하세요.</p></header>
+        <div className="path-toolbar"><span>현재 조작 기록 <b>{clicks}</b></span><span>정답 울타리 수 <b>{puzzle.target}</b></span>{mode === 'practice' && <span className={`path-type-chip ${puzzleMeta.interaction}`}><b>{interactionLabel}</b> T {puzzle.target} {comparison} B {puzzleMeta.baseFenceCount}<small>{pairLabel}{puzzleMeta.orderHint === 'parallel-first' ? ' · 평행 먼저' : ''}</small></span>}<button disabled={locked} onClick={resetPath}>전체 초기화</button></div>
+        <button className="path-submit primary-submit" disabled={locked || checking} onKeyDown={(event) => { if (event.repeat) event.preventDefault(); }} onClick={(event) => { if (event.detail > 1) return; submit(); }}>{checking ? '경로 확인 중…' : '경로 확인'}</button>
+      </section>
       <p className="sr-only">{puzzle.vehicles.map(pathVehicleSummary).join('. ')}</p>
       <p id="path-keyboard-help" className="sr-only">Tab 키로 격자에 한 번 진입한 뒤 방향키로 칸을 이동합니다. 슬래시 키와 백슬래시 키로 울타리 방향을 바꾸고 Enter 또는 Space로 선택합니다. Home과 End는 행의 처음과 끝, Control Home과 Control End는 격자의 처음과 끝으로 이동합니다.</p>
       <div className="path-shell">
@@ -2851,7 +2872,6 @@ function PathGame({ onFinish, onClose, config }: GameProps & { config: PracticeC
         <div className="edge-column right">{Array.from({ length: 5 }, (_, index) => <EdgeMarker side="right" index={index} vehicles={puzzle.vehicles} key={index} />)}</div>
         <div className="edge-row bottom">{Array.from({ length: 5 }, (_, index) => <EdgeMarker side="bottom" index={index} vehicles={puzzle.vehicles} key={index} />)}</div>
       </div>
-      <button className="path-submit primary-submit" disabled={locked || checking} onKeyDown={(event) => { if (event.repeat) event.preventDefault(); }} onClick={(event) => { if (event.detail > 1) return; submit(); }}>{checking ? '경로 확인 중…' : '경로 확인'}</button>
     </GameFrame>
   );
 }

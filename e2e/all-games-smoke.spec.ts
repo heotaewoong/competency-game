@@ -75,7 +75,7 @@ test.describe('9개 게임 모바일 시작·종료 스모크', () => {
       await expect(stage).toHaveAttribute('role', 'dialog');
       await expect(stage.getByRole('heading', { name: game.title })).toBeVisible();
       await expect(stage.getByLabel(`${game.quantityLabel} 현재 값`)).toHaveText(String(game.quantity));
-      await stage.getByRole('button', { name: /^연습 시작/ }).click();
+      await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
 
       const workspace = page.locator(`.game-workspace.game-${game.id}`);
       await expect(workspace).toBeVisible({ timeout: 10_000 });
