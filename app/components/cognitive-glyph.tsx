@@ -19,9 +19,9 @@ export const glyphDefaultMnemonics = ['세','원','네','네','원','다','네',
 
 // 공식 명칭을 뜻하지 않는, 모양을 구분하기 위한 설명형 이름.
 export const glyphShapeNames = [
-  '삼각형','원','정사각형','사다리꼴','모래시계',
-  '오각형','마름모','나비형','별','겹사각형',
-  '쌍삼각형','계단형','맞댄삼각형','네잎꽃','지그재그',
+  '삼각형','원','정사각형','사다리꼴','모래시계형',
+  '방패형','마름모','마주 본 반원','별','이어진 사각형',
+  '두 역삼각형','계단형','쌓인 삼각형','대각 네잎꽃','세 마름모',
 ] as const;
 
 function polygon(ctx: CanvasRenderingContext2D, points: Array<[number, number]>) {
@@ -64,24 +64,28 @@ function drawGlyph(ctx: CanvasRenderingContext2D, variant: number, color: string
   } else if (normalized === 6) {
     polygon(ctx, [[50,10],[90,50],[50,90],[10,50]]); fill();
   } else if (normalized === 7) {
-    ctx.beginPath(); ctx.moveTo(50,50); ctx.arc(50,50,36,Math.PI/2,Math.PI*1.5); ctx.closePath(); fill();
-    ctx.beginPath(); ctx.moveTo(50,50); ctx.arc(50,50,36,-Math.PI/2,Math.PI/2); ctx.closePath(); fill();
+    ctx.beginPath(); ctx.moveTo(16,16); ctx.lineTo(16,84); ctx.arc(16,50,34,Math.PI/2,-Math.PI/2,true); ctx.closePath(); fill();
+    ctx.beginPath(); ctx.moveTo(84,16); ctx.lineTo(84,84); ctx.arc(84,50,34,Math.PI/2,-Math.PI/2,false); ctx.closePath(); fill();
   } else if (normalized === 8) {
     star(ctx,50,50,42,18,5); fill();
   } else if (normalized === 9) {
-    ctx.fillRect(12,14,43,43); ctx.fillRect(45,47,43,43);
+    ctx.fillRect(14,14,36,36); ctx.fillRect(50,50,36,36);
   } else if (normalized === 10) {
-    polygon(ctx, [[12,16],[47,16],[36,88]]); fill(); polygon(ctx, [[53,16],[88,16],[64,88]]); fill();
+    polygon(ctx, [[16,16],[48,16],[32,84]]); fill(); polygon(ctx, [[52,16],[84,16],[68,84]]); fill();
   } else if (normalized === 11) {
-    polygon(ctx, [[10,88],[10,70],[23,70],[23,52],[35,52],[35,34],[43,34],[43,16],[57,16],[57,34],[65,34],[65,52],[77,52],[77,70],[90,70],[90,88]]); fill();
+    polygon(ctx, [[15,87],[15,69],[24,69],[24,51],[32,51],[32,33],[41,33],[41,15],[59,15],[59,33],[68,33],[68,51],[76,51],[76,69],[85,69],[85,87]]); fill();
   } else if (normalized === 12) {
-    polygon(ctx, [[12,47],[50,12],[88,47]]); fill(); polygon(ctx, [[12,53],[88,53],[50,88]]); fill();
+    polygon(ctx, [[15,50],[50,14],[85,50]]); fill(); polygon(ctx, [[15,86],[50,50],[85,86]]); fill();
   } else if (normalized === 13) {
     ctx.save(); ctx.translate(50,50);
-    for (let index=0; index<4; index+=1) { ctx.rotate(Math.PI/2); ctx.beginPath(); ctx.ellipse(0,-23,13,31,0,0,TAU); fill(); }
+    for (let index=0; index<4; index+=1) {
+      ctx.save(); ctx.rotate(Math.PI/4 + index*Math.PI/2); ctx.beginPath(); ctx.ellipse(0,-20,8,25,0,0,TAU); fill(); ctx.restore();
+    }
     ctx.restore();
   } else {
-    polygon(ctx, [[10,20],[24,10],[38,35],[51,10],[64,35],[78,10],[91,20],[78,88],[64,63],[51,88],[38,63],[24,88]]); fill();
+    polygon(ctx, [[27,10],[47,50],[27,90],[7,50]]); fill();
+    polygon(ctx, [[50,10],[70,50],[50,90],[30,50]]); fill();
+    polygon(ctx, [[73,10],[93,50],[73,90],[53,50]]); fill();
   }
 }
 

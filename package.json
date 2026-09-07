@@ -9,7 +9,15 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "test": "npm run test:rotation && npm run test:nback && npm run test:rps && npm run test:appointment && npm run test:path && npm run test:count && npm run test:mouse",
+    "test:rps": "node --test --experimental-strip-types app/lib/rps-game.test.ts",
+    "test:mouse": "node --test --experimental-strip-types app/lib/mouse-game.test.ts",
+    "test:count": "node --test --experimental-strip-types app/lib/count-game.test.ts",
+    "test:appointment": "node --test --experimental-strip-types app/lib/appointment-game.test.ts",
+    "test:path": "node --test --experimental-strip-types app/lib/path-game.test.ts",
+    "test:rotation": "node --test --experimental-strip-types app/lib/rotation-game.test.ts",
+    "test:nback": "node --test --experimental-strip-types app/lib/nback-game.test.ts"
   },
   "dependencies": {
     "next": "^16.3.3",
