@@ -82,6 +82,25 @@ test('P형·b형으로 중복되던 샌드위치 공식은 두 대각선 상태�
   assert.equal(sameRotationMatrix(rotationTransformDefinition('mirror-diagonal-down').matrix, [0, 1, 1, 0]), true);
 });
 
+test('수학 좌표 y=x·y=-x 축대칭은 좌45° 샌드위치 공식과 정확히 일치한다', () => {
+  const yEqualsX = matrixForRotationSequence(['left', 'flip-x', 'right']);
+  const yEqualsNegativeX = matrixForRotationSequence(['left', 'flip-y', 'right']);
+
+  // CSS 행렬은 화면의 아래쪽이 +y이므로 ↗축 y=x가 [0,-1,-1,0]으로 렌더링된다.
+  assert.equal(sameRotationMatrix(yEqualsX, [0, -1, -1, 0]), true);
+  assert.equal(sameRotationMatrix(yEqualsX, rotationTransformDefinition('mirror-diagonal-up').matrix), true);
+  assert.equal(rotationTransformDefinition('mirror-diagonal-up').alternateFormula, 'L45 → LR → R45');
+
+  assert.equal(sameRotationMatrix(yEqualsNegativeX, [0, 1, 1, 0]), true);
+  assert.equal(sameRotationMatrix(yEqualsNegativeX, rotationTransformDefinition('mirror-diagonal-down').matrix), true);
+  assert.equal(rotationTransformDefinition('mirror-diagonal-down').alternateFormula, 'L45 → UD → R45');
+});
+
+test('같은 방향 45° 세 번은 해당 방향 135° 목표와 일치한다', () => {
+  assert.equal(sameRotationMatrix(matrixForRotationSequence(['left', 'left', 'left']), rotationTransformDefinition('turn-left-135').matrix), true);
+  assert.equal(sameRotationMatrix(matrixForRotationSequence(['right', 'right', 'right']), rotationTransformDefinition('turn-right-135').matrix), true);
+});
+
 test('생성한 모든 문제에는 1~3단계의 실제 최소 해답이 있다', () => {
   for (const mode of ['letters', 'tiles', 'mixed'] as const) {
     const puzzles = buildRotationPuzzles(30, 20260828, mode, ROTATION_LETTERS);

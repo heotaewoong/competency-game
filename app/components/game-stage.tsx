@@ -1025,6 +1025,9 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
     setPhase('play');
   }
 
+  const selectedAppointmentRounds = APPOINTMENT_ROUNDS.filter((round) => appointmentPreferences.selectedRounds.includes(round.kind));
+  const appointmentPracticeSummary = `선택: ${selectedAppointmentRounds.map((round) => round.kind === 'bus' ? round.label : round.shortLabel).join(' · ')} · 총 ${selectedAppointmentRounds.length * practiceConfig.quantity}문항`;
+
   return (
     <div className="stage-backdrop" role="presentation">
       <section ref={panelRef} className="stage-panel" data-game={gameId} role={overlayOpen ? undefined : 'dialog'} aria-modal={overlayOpen ? undefined : true} aria-label={overlayOpen ? undefined : `${game.title} ${sessionMode === 'practice' ? '연습' : '실전형 연습'}`} tabIndex={-1}>
@@ -1065,7 +1068,11 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
                   <RuleCheck gameId={gameId} onCompletionChange={setRuleCheckComplete} />
                   <ModeSelector mode={sessionMode} onChange={setSessionMode} />
                   {sessionMode === 'practice'
-                    ? <><SessionSettings gameId={gameId} value={practiceConfig} onChange={savePracticeConfig} guidedPacing={guidedPacing} onGuidedPacingChange={saveGuidedPacing} /><details className="advanced-settings practice-advanced-settings"><summary><span><b>세부 훈련 설정</b><small>유형·힌트·난이도를 더 정교하게 조절합니다</small></span><em>설정 열기</em></summary><div className="advanced-settings-content"><FocusedPracticeOptions gameId={gameId} value={focusedPractice} onChange={saveFocusedPractice} />{gameId === 'rotation' && <RotationPracticeOptions value={rotationPreferences} onChange={saveRotationPreferences} />}{gameId === 'appointment' && <AppointmentPracticeOptions value={appointmentPreferences} onChange={saveAppointmentPreferences} />}{gameId === 'nback' && <NBackPracticeOptions value={nbackPreferences} onChange={saveNBackPreferences} />}</div></details></>
+                    ? <>
+                        <SessionSettings gameId={gameId} value={practiceConfig} onChange={savePracticeConfig} guidedPacing={guidedPacing} onGuidedPacingChange={saveGuidedPacing} />
+                        {gameId === 'appointment' && <AppointmentPracticeOptions value={appointmentPreferences} questionsPerRound={practiceConfig.quantity} onChange={saveAppointmentPreferences} />}
+                        {gameId !== 'appointment' && <details className="advanced-settings practice-advanced-settings"><summary><span><b>세부 훈련 설정</b><small>유형·힌트·난이도를 더 정교하게 조절합니다</small></span><em>설정 열기</em></summary><div className="advanced-settings-content"><FocusedPracticeOptions gameId={gameId} value={focusedPractice} onChange={saveFocusedPractice} />{gameId === 'rotation' && <RotationPracticeOptions value={rotationPreferences} onChange={saveRotationPreferences} />}{gameId === 'nback' && <NBackPracticeOptions value={nbackPreferences} onChange={saveNBackPreferences} />}</div></details>}
+                      </>
                     : <SimulationPreset gameId={gameId} />}
                 </div>
                 {gameId === 'nback' && <aside className="nback-intro-column">{sessionMode === 'simulation' ? <NBackSimulationDiagram /> : <NBackIntroDiagram task={nbackPreferences.task} />}</aside>}
@@ -1076,7 +1083,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
             <div className="intro-actions">
               <a href={`https://www.jobda.im/info/${officialInfo[gameId]}`} target="_blank" rel="noreferrer"><span>공식 공개 해설</span><small>2023 레거시 ↗</small></a>
               <div className="intro-start-options" aria-label="시작 방식 바로 선택">
-                <button className={`stage-start stage-start-practice ${sessionMode === 'practice' ? 'is-selected' : ''}`.trim()} type="button" onClick={() => startSession('practice')}><span>설명·연습 시작</span><small>{sessionMode === 'practice' ? '선택한 내 설정으로 시작' : '맞춤 연습으로 바로 전환'}</small></button>
+                <button className={`stage-start stage-start-practice ${sessionMode === 'practice' ? 'is-selected' : ''}`.trim()} type="button" onClick={() => startSession('practice')}><span>설명·연습 시작</span><small>{gameId === 'appointment' ? appointmentPracticeSummary : sessionMode === 'practice' ? '선택한 내 설정으로 시작' : '맞춤 연습으로 바로 전환'}</small></button>
                 <button className={`stage-start stage-start-simulation ${sessionMode === 'simulation' ? 'is-selected' : ''}`.trim()} type="button" onClick={() => startSession('simulation')}><span>실전형 연습 시작</span><small>{ruleCheckComplete ? '규칙 확인 완료 · 고정 프리셋' : sessionMode === 'simulation' ? '무점수 예제는 선택 사항입니다' : '실전형으로 바로 전환'}</small></button>
               </div>
             </div>
@@ -1521,27 +1528,33 @@ function RotationStrategyGuide() {
   );
 }
 
-function AppointmentPracticeOptions({ value, onChange }: { value: AppointmentPreferences; onChange: (value: AppointmentPreferences) => void }) {
+function AppointmentPracticeOptions({ value, questionsPerRound, onChange }: { value: AppointmentPreferences; questionsPerRound: number; onChange: (value: AppointmentPreferences) => void }) {
   const selected = new Set(value.selectedRounds);
+  const selectedLabels = APPOINTMENT_ROUNDS
+    .filter((round) => selected.has(round.kind))
+    .map((round) => round.kind === 'bus' ? round.label : round.shortLabel);
   function toggle(kind: AppointmentKind) {
     const next = selected.has(kind) ? value.selectedRounds.filter((item) => item !== kind) : [...value.selectedRounds, kind];
     if (next.length) onChange({ selectedRounds: APPOINTMENT_KIND_ORDER.filter((item) => next.includes(item)) });
   }
   return (
     <section className="appointment-practice-options" aria-labelledby="appointment-round-picker-title">
-      <header><span><b id="appointment-round-picker-title">연습할 라운드</b><small>하나만 골라도 되고, 여러 개를 이어서 연습해도 됩니다</small></span><button type="button" onClick={() => onChange(DEFAULT_APPOINTMENT_PREFERENCES)}>전체 선택</button></header>
-      <div className="appointment-round-picker">
+      <header>
+        <span><i>맞춤 연습 필수 설정</i><b id="appointment-round-picker-title">연습할 게임 선택</b><small>요일·위치·메뉴·미탑승 버스 중 원하는 유형만 고르세요. 최소 1개는 유지됩니다.</small></span>
+        <div><em>{value.selectedRounds.length} / 4 선택</em><button type="button" onClick={() => onChange(DEFAULT_APPOINTMENT_PREFERENCES)}>전체 4개</button></div>
+      </header>
+      <div className="appointment-round-picker" role="group" aria-label="약속 정하기 연습 유형">
         {APPOINTMENT_ROUNDS.map((round) => (
           <article className={selected.has(round.kind) ? 'is-selected' : ''} key={round.kind}>
             <label>
-              <input type="checkbox" checked={selected.has(round.kind)} disabled={selected.size === 1 && selected.has(round.kind)} onChange={() => toggle(round.kind)} />
-              <span><small>ROUND {round.number}</small><b>{round.shortLabel}</b><em>{round.answerRule === 'common' ? '세 사람의 공통 항목' : '한 번도 안 나온 번호'}</em></span>
+              <input type="checkbox" aria-label={`${round.kind === 'bus' ? round.label : round.shortLabel} 연습 포함`} checked={selected.has(round.kind)} disabled={selected.size === 1 && selected.has(round.kind)} title={selected.size === 1 && selected.has(round.kind) ? '연습 유형을 최소 1개 선택해야 합니다.' : undefined} onChange={() => toggle(round.kind)} />
+              <span><small>ROUND {round.number}</small><b>{round.kind === 'bus' ? round.label : round.shortLabel}</b><em>{round.answerRule === 'common' ? '세 사람의 공통 항목' : '한 번도 안 나온 번호'}</em></span>
             </label>
-            <button type="button" aria-label={`${round.number}라운드 ${round.shortLabel}만 선택`} onClick={() => onChange({ selectedRounds: [round.kind] })}>이것만</button>
+            <button type="button" aria-label={`${round.number}라운드 ${round.kind === 'bus' ? round.label : round.shortLabel}만 연습`} onClick={() => onChange({ selectedRounds: [round.kind] })}>이것만 연습</button>
           </article>
         ))}
       </div>
-      <p><b>{value.selectedRounds.length}개 라운드 · 총 {value.selectedRounds.length} × 라운드당 문항 수</b>로 진행하며, 여러 라운드를 고르면 언제나 1→2→3→4 순서를 따릅니다.</p>
+      <p aria-live="polite"><span><b>선택: {selectedLabels.join(' · ')}</b><small>여러 개를 고르면 1→2→3→4 공식 순서로 진행합니다.</small></span><em>총 {value.selectedRounds.length * questionsPerRound}문항</em></p>
     </section>
   );
 }

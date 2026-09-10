@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { games } from './game-data.ts';
+import { rotationGuideTips } from './rotation-guide.ts';
 import { strategyGuides } from './strategy-guide.ts';
 
 test('9개 게임은 각각 하나의 완성된 전략 가이드를 가진다', () => {
@@ -23,5 +24,22 @@ test('모든 가이드는 판단 순서·예시·팁·실수·3단계 훈련을 
     for (const item of [...guide.tips, ...guide.mistakes, ...guide.drills]) {
       assert.ok(item.title.trim().length > 0 && item.body.trim().length > 0, `${guide.gameId}: 빈 가이드 항목 금지`);
     }
+  }
+});
+
+test('도형 회전 가이드는 135° 묶음과 두 대각선 축 샌드위치 공식을 명시한다', () => {
+  const rotationGuide = strategyGuides.find((guide) => guide.gameId === 'rotation');
+  assert.ok(rotationGuide);
+  const tips = rotationGuide.tips.map((tip) => `${tip.title} ${tip.body}`).join(' ');
+
+  for (const token of ['45° 세 칸 = 135°', 'y=x(↗축 대칭)', '좌45° → 좌우 반전 → 우45°', 'y=-x(↘축 대칭)', '좌45° → 상하 반전 → 우45°']) {
+    assert.ok(tips.includes(token), `도형 회전 팁에 ${token} 포함`);
+  }
+});
+
+test('도형 회전 상세 팁도 수학 좌표 축과 입력 공식을 같은 방향으로 안내한다', () => {
+  const detailedTips = rotationGuideTips.map((tip) => `${tip.title} ${tip.criterion} ${tip.steps} ${tip.example}`).join(' ');
+  for (const token of ['L135 = L45×3', 'R135 = R45×3', 'y=x(↗)', 'L45→LR→R45', 'y=-x(↘)', 'L45→UD→R45']) {
+    assert.ok(detailedTips.includes(token), `도형 회전 상세 팁에 ${token} 포함`);
   }
 });

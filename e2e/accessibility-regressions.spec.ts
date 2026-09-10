@@ -426,12 +426,14 @@ test('작은 화면의 핵심 설정과 N-back 헤더는 44px 터치 영역을 �
 
   await page.getByRole('button', { name: /약속 정하기, 난이도 상, 설정 열기/ }).click();
   const appointmentStage = page.locator('section[data-game="appointment"]');
-  await appointmentStage.locator('.practice-advanced-settings > summary').click();
+  await expect(appointmentStage.getByRole('region', { name: '연습할 게임 선택' })).toBeVisible();
   const roundLabel = appointmentStage.locator('.appointment-round-picker label').first();
   const roundInput = roundLabel.locator('input');
+  const onlyButton = appointmentStage.getByRole('button', { name: '1라운드 요일만 연습' });
   await expect(roundLabel).toBeVisible();
   expect((await roundLabel.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
   expect((await roundInput.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(20);
+  expect((await onlyButton.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
   await appointmentStage.getByRole('button', { name: '연습 닫기' }).click();
 
   await page.getByRole('button', { name: /길 만들기, 난이도 상, 설정 열기/ }).click();

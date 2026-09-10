@@ -116,6 +116,9 @@ test('짧은 가로 화면에서 전략 탭과 중첩 모달 포커스가 정확
   const guide = page.getByRole('dialog', { name: '전략게임 가이드' });
   const tabs = guide.getByRole('tablist', { name: '가이드를 볼 게임' });
   const panel = guide.getByRole('tabpanel');
+  await expect(panel).toContainText('45° 세 칸 = 135°');
+  await expect(panel).toContainText('y=x(↗축 대칭)은 좌45° → 좌우 반전 → 우45°');
+  await expect(panel).toContainText('y=-x(↘축 대칭)은 좌45° → 상하 반전 → 우45°');
   await expect(tabs).toHaveAttribute('aria-orientation', 'horizontal');
   await expect.poll(() => panel.evaluate((element) => element.clientHeight)).toBeGreaterThan(100);
 
@@ -198,6 +201,37 @@ test('약속 정하기의 실제 더블클릭은 친구 한 명만 이동한다'
   await page.waitForTimeout(450);
   await expect(counter).toHaveText('2 / 3');
   await expect(page.locator('.appointment-question')).toBeHidden();
+});
+
+test('약속 정하기는 시작 전에 네 유형을 바로 고르고 선택한 유형만 연습한다', async ({ page }) => {
+  await seedFocusedGameSettings(page);
+  await page.setViewportSize({ width: 844, height: 360 });
+  await page.goto('/');
+  await page.getByRole('button', { name: /약속 정하기, 난이도 상, 설정 열기/ }).click();
+
+  let stage = page.locator('section[data-game="appointment"]');
+  const picker = stage.getByRole('region', { name: '연습할 게임 선택' });
+  await expect(picker).toBeVisible();
+  await expect(picker.getByRole('checkbox')).toHaveCount(4);
+  for (const label of ['요일', '위치', '메뉴', '미탑승 버스']) await expect(picker.getByRole('checkbox', { name: `${label} 연습 포함` })).toBeVisible();
+  await picker.getByRole('button', { name: '4라운드 미탑승 버스만 연습' }).click();
+  await expect(picker.getByRole('checkbox', { name: '미탑승 버스 연습 포함' })).toBeChecked();
+  await expect(picker.getByRole('checkbox', { name: '요일 연습 포함' })).not.toBeChecked();
+  await expect(picker).toContainText('선택: 미탑승 버스');
+  await expect(picker).toContainText('총 1문항');
+  await expect(stage.getByRole('button', { name: /^설명·연습 시작/ })).toContainText('선택: 미탑승 버스 · 총 1문항');
+  await expect.poll(() => page.evaluate((key) => JSON.parse(window.localStorage.getItem(key) ?? 'null'), APPOINTMENT_KEY)).toEqual({ selectedRounds: ['bus'] });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+
+  await stage.getByRole('button', { name: '연습 닫기' }).click();
+  await page.getByRole('button', { name: /약속 정하기, 난이도 상, 설정 열기/ }).click();
+  stage = page.locator('section[data-game="appointment"]');
+  await expect(stage.getByRole('checkbox', { name: '미탑승 버스 연습 포함' })).toBeChecked();
+  await expect(stage.getByRole('checkbox', { name: '미탑승 버스 연습 포함' })).toBeDisabled();
+  await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
+  const roundIntro = page.locator('.appointment-round-intro');
+  await expect(roundIntro).toContainText('ROUND 4 / 4', { timeout: 8_000 });
+  await expect(roundIntro).toContainText('미탑승 버스');
 });
 
 test('시간 제한 없는 연습 설정은 해당 게임에만 저장되고 다시 열어도 유지된다', async ({ page }) => {

@@ -2441,6 +2441,55 @@ body {
 .advanced-settings-content > .focused-practice-options,
 .advanced-settings-content > .rotation-practice-options,
 .advanced-settings-content > .appointment-practice-options { margin: 8px 0 0; }
+.appointment-practice-options {
+  border-color: #a9cec7;
+  background: linear-gradient(145deg, #f8fcfb, #edf8f5);
+  box-shadow: 0 8px 22px rgba(35, 123, 118, .08);
+}
+.appointment-practice-options > header > span > i {
+  color: #237b76;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.appointment-practice-options > header > div { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+.appointment-practice-options > header > div > em {
+  padding: 5px 8px;
+  border-radius: 999px;
+  color: #226a62;
+  background: #dff1ed;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+  white-space: nowrap;
+}
+.appointment-round-picker article { transition: border-color .16s ease, background .16s ease, box-shadow .16s ease; }
+.appointment-round-picker article:not(.is-selected) { border-style: dashed; background: rgba(255, 255, 255, .72); }
+.appointment-round-picker article.is-selected label b { color: #155f58; }
+.appointment-round-picker article > button { font-size: 9px; }
+.appointment-practice-options > p {
+  padding-top: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid #d1e6e1;
+}
+.appointment-practice-options > p > span { min-width: 0; display: grid; gap: 2px; }
+.appointment-practice-options > p > span > small { color: #60736f; font-size: 8px; line-height: 1.45; }
+.appointment-practice-options > p > em {
+  padding: 6px 9px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  color: #fff;
+  background: #237b76;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+  white-space: nowrap;
+}
 .intro-evidence-boundary {
   margin-top: 13px;
   padding: 11px 13px;
@@ -2586,6 +2635,10 @@ body {
   .intro-task-brief { grid-template-columns: 1fr; }
   .intro-task-brief > div + div { border-left: 0; border-top: 1px solid #e0e4ee; }
   .intro-evidence-boundary { grid-template-columns: 1fr; }
+  .appointment-practice-options > header { align-items: flex-start; flex-wrap: wrap; }
+  .appointment-practice-options > header > div { width: 100%; justify-content: space-between; }
+  .appointment-practice-options > p { align-items: flex-start; flex-direction: column; }
+  .appointment-practice-options > p > em { align-self: stretch; text-align: center; }
   .path-control-panel { padding: 12px; }
 }
 

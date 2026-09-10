@@ -124,7 +124,7 @@ export const rotationTransformGroups: readonly RotationTransformGroup[] = [
   { id: 'mirror-lr', label: '좌우 반전', compact: 'LR', description: '세로축을 기준으로 거울상', tip: '위아래 위치는 유지되고 좌우 순서만 바뀌는지 봅니다.' },
   { id: 'mirror-ud', label: '상하 반전', compact: 'UD', description: '가로축을 기준으로 거울상', tip: '좌우 위치는 유지되고 위아래 순서만 바뀌는지 봅니다.' },
   { id: 'mirror-oblique', label: '기울어진 반전', compact: '45°+반전', description: '45° 회전 뒤 좌우·상하 반전하는 네 상태', tip: '화면 기준 22.5°·67.5°·112.5°·157.5° 축입니다. 45° 기울기를 맞춘 뒤 남은 거울상을 고릅니다.' },
-  { id: 'mirror-diagonal', label: '대각선 반전', compact: '90°+반전', description: '두 대각선 축에 대한 거울상 두 상태', tip: '90° 회전+반전 또는 45°-반전-역45° 샌드위치를 씁니다.' },
+  { id: 'mirror-diagonal', label: '대각선 반전', compact: '90°+반전', description: '두 대각선 축에 대한 거울상 두 상태', tip: '수학 좌표(위가 +y)에서 y=x는 L45→LR→R45, y=-x는 L45→UD→R45입니다.' },
 ] as const;
 
 const rotationTransformBlueprints: ReadonlyArray<Omit<RotationTransformDefinition, 'matrix'>> = [
@@ -141,8 +141,8 @@ const rotationTransformBlueprints: ReadonlyArray<Omit<RotationTransformDefinitio
   { id: 'mirror-oblique-left-ud', groupId: 'mirror-oblique', label: 'L45 뒤 상하 반전', compact: 'L45·UD', formula: 'L45 → UD', sequence: ['left', 'flip-y'] },
   { id: 'mirror-oblique-right-lr', groupId: 'mirror-oblique', label: 'R45 뒤 좌우 반전', compact: 'R45·LR', formula: 'R45 → LR', sequence: ['right', 'flip-x'] },
   { id: 'mirror-oblique-right-ud', groupId: 'mirror-oblique', label: 'R45 뒤 상하 반전', compact: 'R45·UD', formula: 'R45 → UD', sequence: ['right', 'flip-y'] },
-  { id: 'mirror-diagonal-down', groupId: 'mirror-diagonal', label: '↘축 대각선 반전', compact: '↘ 대칭', formula: 'L45 → L45 → UD', alternateFormula: 'L45 → UD → R45', sequence: ['left', 'left', 'flip-y'] },
-  { id: 'mirror-diagonal-up', groupId: 'mirror-diagonal', label: '↗축 대각선 반전', compact: '↗ 대칭', formula: 'L45 → L45 → LR', alternateFormula: 'L45 → LR → R45', sequence: ['left', 'left', 'flip-x'] },
+  { id: 'mirror-diagonal-down', groupId: 'mirror-diagonal', label: '↘축 대각선 반전 (y=-x)', compact: '↘ 대칭', formula: 'L45 → L45 → UD', alternateFormula: 'L45 → UD → R45', sequence: ['left', 'left', 'flip-y'] },
+  { id: 'mirror-diagonal-up', groupId: 'mirror-diagonal', label: '↗축 대각선 반전 (y=x)', compact: '↗ 대칭', formula: 'L45 → L45 → LR', alternateFormula: 'L45 → LR → R45', sequence: ['left', 'left', 'flip-x'] },
 ];
 
 export const rotationTransformDefinitions: readonly RotationTransformDefinition[] = rotationTransformBlueprints.map((definition) => ({
