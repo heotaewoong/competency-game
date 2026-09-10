@@ -9,6 +9,9 @@ import { CognitiveGlyph, glyphDefaultMnemonics, glyphShapeNames } from './cognit
 import { PotionFlask, PotionIngredientGlyph } from './potion-visuals';
 import { CatMarker, MouseMarker } from './mouse-visuals';
 import { NBackIntroDiagram, NBackLagRail, NBackSimulationDiagram } from './nback-visuals';
+import { RPS_ASSET_PATHS } from '../lib/essential-assets';
+import { RuleCheck } from './rule-check';
+import { ReadinessCenter, currentAccessibilityProfile, type SavedReadinessSummary } from './readiness-center';
 import { games, getGame, type GameId, type SessionResult } from '../lib/game-data';
 import {
   NBACK_GROUP_COUNT,
@@ -568,7 +571,7 @@ function progressUnitForGame(gameId: GameId, mode: SessionMode) {
   return '문제';
 }
 
-export function GameStage({ gameId, onClose, onSwitch, onSave }: { gameId: GameId; onClose: () => void; onSwitch: (gameId: GameId) => void; onSave: (result: SessionResult) => string }) {
+export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecked }: { gameId: GameId; onClose: () => void; onSwitch: (gameId: GameId) => void; onSave: (result: SessionResult) => string; onReadinessChecked?: (summary: SavedReadinessSummary) => void }) {
   const [phase, setPhase] = useState<'intro' | 'play' | 'result'>('intro');
   const [result, setResult] = useState<SessionResult | null>(null);
   const [run, setRun] = useState(0);
@@ -578,12 +581,14 @@ export function GameStage({ gameId, onClose, onSwitch, onSave }: { gameId: GameI
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [strategyGuideOpen, setStrategyGuideOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [readinessOpen, setReadinessOpen] = useState(false);
   const [saveNotice, setSaveNotice] = useState('');
   const [pendingAction, setPendingAction] = useState<PendingSessionAction | null>(null);
   const [sessionMode, setSessionMode] = useState<SessionMode>('practice');
   const [guidedPacing, setGuidedPacing] = useState(false);
   const [visibilityPaused, setVisibilityPaused] = useState(false);
   const [visibilityPauseCount, setVisibilityPauseCount] = useState(0);
+  const [ruleCheckComplete, setRuleCheckComplete] = useState(false);
   const [glyphMnemonics, setGlyphMnemonics] = useState<string[]>([...glyphDefaultMnemonics]);
   const [showGlyphNames, setShowGlyphNames] = useState(true);
   const [practiceConfig, setPracticeConfig] = useState<PracticeConfig>(() => defaultPracticeConfig(gameId));
@@ -600,7 +605,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave }: { gameId: GameI
   const overlayOpenRef = useRef(false);
   const visibilityPausedRef = useRef(false);
   const game = getGame(gameId);
-  const overlayOpen = switcherOpen || feedbackOpen || strategyGuideOpen || reviewOpen || pendingAction !== null || visibilityPaused;
+  const overlayOpen = switcherOpen || feedbackOpen || strategyGuideOpen || reviewOpen || readinessOpen || pendingAction !== null || visibilityPaused;
   const sessionPaused = overlayOpen;
 
   usePausableTimeout(
@@ -984,7 +989,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave }: { gameId: GameI
     const visibilityDetail: Record<string, string | number> = visibilityPauseCount > 0
       ? { visibilityPauses: visibilityPauseCount, comparisonStatus: '탭 이탈로 참고용' }
       : { visibilityPauses: 0 };
-    const completed: SessionResult = { ...raw, detail: { ...raw.detail, ...practiceDetail, ...rotationDetail, ...appointmentDetail, ...guidedPacingDetail, ...focusDetail, ...nbackDetail, ...nbackAssistanceDetail, ...visibilityDetail, sessionMode: sessionMode === 'practice' ? '연습 모드' : '실전형 연습' }, id: newSessionResultId(gameId), completedAt: new Date().toISOString() };
+    const completed: SessionResult = { ...raw, detail: { ...raw.detail, ...practiceDetail, ...rotationDetail, ...appointmentDetail, ...guidedPacingDetail, ...focusDetail, ...nbackDetail, ...nbackAssistanceDetail, ...visibilityDetail, accessibilityProfile: currentAccessibilityProfile(), ruleCheckStatus: ruleCheckComplete ? '완료' : '미완료', sessionMode: sessionMode === 'practice' ? '연습 모드' : '실전형 연습' }, id: newSessionResultId(gameId), completedAt: new Date().toISOString() };
     visibilityPausedRef.current = false;
     setVisibilityPaused(false);
     setResult(completed);
@@ -1026,15 +1031,16 @@ export function GameStage({ gameId, onClose, onSwitch, onSave }: { gameId: GameI
         <div className="stage-content" inert={overlayOpen ? true : undefined} aria-hidden={overlayOpen ? true : undefined}>
         {phase === 'intro' && (
           <>
-            <div className="stage-intro-toolbar"><div><button className="stage-tool-switch" type="button" aria-label="게임 바꾸기" onClick={openGameSwitcher}>게임 바꾸기</button><button className="stage-tool-guide" type="button" aria-label={`${game.title} 공략 보기`} onClick={() => setStrategyGuideOpen(true)}>공략 보기</button><button className="stage-tool-report" type="button" aria-label="문제 신고" onClick={openFeedback}>문제 신고</button></div><button className="stage-close session-close" aria-label={`${sessionMode === 'practice' ? '연습' : '실전형 연습'} 닫기`} onClick={requestClose}>×</button></div>
+            <div className="stage-intro-toolbar"><div><button className="stage-tool-switch" type="button" aria-label="게임 바꾸기" onClick={openGameSwitcher}>게임 바꾸기</button><button className="stage-tool-guide" type="button" aria-label={`${game.title} 공략 보기`} onClick={() => setStrategyGuideOpen(true)}>공략 보기</button><button className="stage-tool-ready" type="button" aria-label="응시 준비센터 열기" onClick={() => setReadinessOpen(true)}>준비 점검</button><button className="stage-tool-report" type="button" aria-label="문제 신고" onClick={openFeedback}>문제 신고</button></div><button className="stage-close session-close" aria-label={`${sessionMode === 'practice' ? '연습' : '실전형 연습'} 닫기`} onClick={requestClose}>×</button></div>
             <div className="stage-intro">
               <div className="intro-heading">
                 <div><p>{game.no} · {game.skill}</p><h2>{game.title}</h2><span>{game.rounds}</span></div>
               </div>
               <ol className="intro-flow" aria-label="시작 전 확인 순서">
                 <li><span>1</span><div><b>과제 이해</b><small>목표·조작 확인</small></div></li>
-                <li><span>2</span><div><b>방식 선택</b><small>맞춤 또는 실전형</small></div></li>
-                <li><span>3</span><div><b>훈련 시작</b><small>결과·복습 저장</small></div></li>
+                <li><span>2</span><div><b>무점수 예제</b><small>규칙 2문항 확인</small></div></li>
+                <li><span>3</span><div><b>방식 선택</b><small>맞춤 또는 실전형</small></div></li>
+                <li><span>4</span><div><b>훈련 시작</b><small>결과·복습 저장</small></div></li>
               </ol>
               <div className={`intro-config-grid ${gameId === 'nback' ? 'has-nback-map' : ''}`.trim()}>
                 <div className="intro-config-main">
@@ -1056,6 +1062,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave }: { gameId: GameI
                       <div><dt>최종 기준</dt><dd>기업 초대 화면 안내</dd></div>
                     </dl>
                   </details>
+                  <RuleCheck gameId={gameId} onCompletionChange={setRuleCheckComplete} />
                   <ModeSelector mode={sessionMode} onChange={setSessionMode} />
                   {sessionMode === 'practice'
                     ? <><SessionSettings gameId={gameId} value={practiceConfig} onChange={savePracticeConfig} guidedPacing={guidedPacing} onGuidedPacingChange={saveGuidedPacing} /><details className="advanced-settings practice-advanced-settings"><summary><span><b>세부 훈련 설정</b><small>유형·힌트·난이도를 더 정교하게 조절합니다</small></span><em>설정 열기</em></summary><div className="advanced-settings-content"><FocusedPracticeOptions gameId={gameId} value={focusedPractice} onChange={saveFocusedPractice} />{gameId === 'rotation' && <RotationPracticeOptions value={rotationPreferences} onChange={saveRotationPreferences} />}{gameId === 'appointment' && <AppointmentPracticeOptions value={appointmentPreferences} onChange={saveAppointmentPreferences} />}{gameId === 'nback' && <NBackPracticeOptions value={nbackPreferences} onChange={saveNBackPreferences} />}</div></details></>
@@ -1070,7 +1077,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave }: { gameId: GameI
               <a href={`https://www.jobda.im/info/${officialInfo[gameId]}`} target="_blank" rel="noreferrer"><span>공식 공개 해설</span><small>2023 레거시 ↗</small></a>
               <div className="intro-start-options" aria-label="시작 방식 바로 선택">
                 <button className={`stage-start stage-start-practice ${sessionMode === 'practice' ? 'is-selected' : ''}`.trim()} type="button" onClick={() => startSession('practice')}><span>설명·연습 시작</span><small>{sessionMode === 'practice' ? '선택한 내 설정으로 시작' : '맞춤 연습으로 바로 전환'}</small></button>
-                <button className={`stage-start stage-start-simulation ${sessionMode === 'simulation' ? 'is-selected' : ''}`.trim()} type="button" onClick={() => startSession('simulation')}><span>실전형 연습 시작</span><small>{sessionMode === 'simulation' ? '선택한 고정 프리셋으로 시작' : '실전형으로 바로 전환'}</small></button>
+                <button className={`stage-start stage-start-simulation ${sessionMode === 'simulation' ? 'is-selected' : ''}`.trim()} type="button" onClick={() => startSession('simulation')}><span>실전형 연습 시작</span><small>{ruleCheckComplete ? '규칙 확인 완료 · 고정 프리셋' : sessionMode === 'simulation' ? '무점수 예제는 선택 사항입니다' : '실전형으로 바로 전환'}</small></button>
               </div>
             </div>
           </>
@@ -1082,6 +1089,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave }: { gameId: GameI
         {feedbackOpen && <FeedbackDialog initialGameId={gameId} sessionMode={sessionMode === 'practice' ? '연습 모드' : '실전형 연습'} nested onClose={() => setFeedbackOpen(false)} />}
         {strategyGuideOpen && <StrategyGuideDialog initialGameId={gameId} nested onClose={() => setStrategyGuideOpen(false)} />}
         {reviewOpen && result && <ReviewDialog results={[result]} initialSessionId={result.id} nested onClose={() => setReviewOpen(false)} onPracticeGame={() => { setReviewOpen(false); restart('practice'); }} />}
+        {readinessOpen && <ReadinessCenter gameId={gameId} onChecked={onReadinessChecked} onClose={() => setReadinessOpen(false)} />}
         {pendingAction && <SessionActionConfirmation action={pendingAction} onCancel={() => setPendingAction(null)} onConfirm={confirmPendingAction} />}
         {visibilityPaused && <VisibilityPauseDialog count={visibilityPauseCount} onResume={resumeVisibilityPause} />}
       </section>
@@ -1748,9 +1756,9 @@ function ResultView({ result, mode, storageNotice, onClose, onRestart, onOpenGui
 }
 
 const rpsChoices = [
-  { id: 'scissors', label: '가위', key: '←', image: '/assets/rps/scissors.svg' },
-  { id: 'rock', label: '바위', key: '↓', image: '/assets/rps/rock.svg' },
-  { id: 'paper', label: '보', key: '→', image: '/assets/rps/paper.svg' },
+  { id: 'scissors', label: '가위', key: '←', image: RPS_ASSET_PATHS.scissors },
+  { id: 'rock', label: '바위', key: '↓', image: RPS_ASSET_PATHS.rock },
+  { id: 'paper', label: '보', key: '→', image: RPS_ASSET_PATHS.paper },
 ] as const;
 const rpsChoiceLabels: Record<RpsChoice, string> = { scissors: '가위', rock: '바위', paper: '보' };
 function RpsGame({ onFinish, onClose, config }: GameProps & { config: PracticeConfig }) {

@@ -35,6 +35,15 @@ test('시간 제한 설정이 다르거나 탭 이탈이 있으면 동일 조건
   assert.equal(interrupted, null);
 });
 
+test('접근성 표시 프로필이 다르면 같은 게임 설정이어도 별도 기록으로 비교한다', () => {
+  const detail = { sessionMode: '연습 모드', quantity: 20, paceMs: 3000, practiceFocus: 'full', guidedPacing: '설정 제한시간 적용' };
+  const standard = getResultComparisonKey(result('rps', { ...detail, accessibilityProfile: 'standard|standard|system' }));
+  const highContrast = getResultComparisonKey(result('rps', { ...detail, accessibilityProfile: 'high|standard|system' }));
+  const legacy = getResultComparisonKey(result('rps', detail));
+  assert.notEqual(standard, highContrast);
+  assert.notEqual(standard, legacy);
+});
+
 test('고정 실전형은 게임별로 필요한 프리셋 메타를 검증한다', () => {
   const simulation = { sessionMode: '실전형 연습', quantity: 30, paceMs: 4500, simulationPresetVersion: SIMULATION_PRESET_VERSION };
   assert.equal(getResultComparisonKey(result('rps', { sessionMode: '실전형 연습' })), null);

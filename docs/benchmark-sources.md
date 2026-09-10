@@ -1,6 +1,6 @@
 # AI 역량검사 게임 벤치마크·근거 인벤토리
 
-> 검증일: 2026-09-08 (Asia/Seoul)
+> 검증일: 2026-09-10 (Asia/Seoul)
 > 목적: 공개적으로 확인 가능한 JOBDA 게임 mechanics와 인지과제·채용평가·접근성 근거를 분리해, 연습용 사이트 구현에 사용할 수 있는 기준을 남긴다.  
 > 주의: 이 문서는 **연습 서비스 설계용 근거 목록**이다. JOBDA의 비공개 문항, 채점식, 난수 생성, 평가모형을 복제하거나 추정하는 사양서가 아니다.
 
@@ -21,6 +21,27 @@
 - [2024 JAINWON 공개 기업자료](https://recruit.jobda.im/hubfs/TREND%20REPORT_HR%20%EA%B3%A0%EB%AF%BC%EC%9E%88%EC%8A%B5%EB%8B%88%EB%8B%A4_2%ED%8E%B8.pdf)는 9개 게임을 모두 4분으로 제시한다. 2023 레거시 시간과 충돌하므로 실제 응시에서는 기업 초대 안내를 우선한다.
 - [현행 응시 안내](https://www.jobda.im/acca/test)는 전체 검사 약 80분과 큰 검사 범주만 공개한다. 게임별 현재 문항 수·시간·점수식은 공개값으로 단정하지 않는다.
 - [2026 JOBDA Upgrade Report v8.4.0](https://contents.h.place/hubfs/Readme%20%EB%8B%A4%EC%9A%B4%EB%A1%9C%EB%93%9C%20%ED%8C%8C%EC%9D%BC/%EC%97%85%EB%8D%B0%EC%9D%B4%ED%8A%B8%20%EB%A6%AC%ED%8F%AC%ED%8A%B8/%5B%EC%97%AD%EA%B2%80%5D%20Upgrade%20Report_v8.4.0%201.pdf)는 과제 설명·연습과 실전 응시를 분리한 흐름을 보여준다. 구현은 이 정보 구조만 참고하고 화면·브랜드·자산은 독립적으로 설계한다.
+- 같은 2026 보고서의 가위바위보 설명 화면은 `4라운드·4분·난이도 중`이지만 2023 레거시는 `3라운드·약 3분`, 2024 자료는 `4분·난이도 하`다. 공개되지 않은 네 번째 라운드를 임의 구현하지 않고 버전 충돌을 고지한다.
+- [2026 공식 관리자 검사 설정 가이드](https://contents.h.place/h.servicedesk/knowledgebase/%EC%A0%84%ED%98%95-%EC%95%88%EB%82%B4-%EC%A0%84%EC%B2%B4-%EB%8C%80%EC%83%81%EC%9E%90-%EC%95%88%EB%82%B4-0-0-0-2-0-1-0-0-0-0-0-0-0-0-0-0-0-0-0-0-0-0)는 게임이 포함되지 않는 검사 상품도 안내한다. 기업 초대 구성에 따라 게임이 없거나 일부만 포함될 수 있다.
+
+## 1.1 글로벌 후보자 경험 벤치마크
+
+고유 게임 규칙·문항·화면은 복제하지 않고 후보자 경험 원칙만 반영한다.
+
+| 공식 제품 자료 | 공개 확인 내용 | 이 앱의 독립 구현 |
+|---|---|---|
+| [Harver/pymetrics](https://harver.com/gamified-assessments/) | 12개 이상 게임형 경험, 평균 약 25분, 직관적 과제와 완료 직후 결과 피드백 | 개인 연습 결과와 문항별 오류 피드백. 공식 점수·채용 예측 아님을 고정 고지 |
+| [Arctic Shores 후보자 안내](https://www.arcticshores.com/candidate-guidance) | 연습 과제 완료, 본 평가 지침 확인, 기술환경 준비 | 독립 무점수 규칙 확인 2문항과 응시 준비센터 |
+| [Aon 온라인 평가 준비](https://www.aon.com/en/capabilities/talent-and-rewards/prepare-for-your-online-assessment) | 설명·예제·핵심 요약 뒤 시간제한 평가 | 과제 이해 → 무점수 예제 → 방식 선택 → 훈련 시작의 공통 흐름 |
+| [SHL 접근성 안내](https://support.shl.com/viewArticle.html?c=10_91_13_&d=SHL-Client-Article-3&hl=en) | 확대·색상·키보드·보조기술과 편의지원 안내 | 고대비·큰 글자·움직임 줄이기·키보드 직접 확인. 실제 편의지원은 기관 문의로 분리 |
+| [Criteria Cognify](https://www.criteriacorp.com/files/Criteria-Overview-Cognify.pdf) | 3개 게임·튜토리얼 포함·약 10분·3개 하위 결과 | 게임별 규칙 확인, 집중 유형 추천, 개인 기록 비교 |
+
+제품 적용 원칙:
+
+1. 무점수 예제는 공개 목표를 이해했는지만 확인하며 경쟁사의 실제 문항·시각물·대본을 사용하지 않는다.
+2. 준비센터는 화면, 브라우저 온라인 신호(서비스 도달성 보장 아님), 로컬 저장, 입력 API, 핵심 리소스를 확인하고 클릭·키보드는 사용자가 직접 시험한다.
+3. 고대비·큰 글자·움직임 줄이기 설정은 연습 결과의 `accessibilityProfile`에 남겨 다른 표시 조건의 기록을 섞지 않는다.
+4. 버전 JSON 백업·원자적 검증·병합 가져오기로 브라우저 교체와 사이트 데이터 삭제 위험을 줄인다.
 
 ## 2. 공개 mechanics: 9개 게임
 

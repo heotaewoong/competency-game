@@ -7,6 +7,7 @@ type ComparisonDetailKey =
   | 'rotationContent' | 'rotationLetters' | 'rotationTargetIds' | 'previewUsed'
   | 'appointmentRounds' | 'guidedPacing'
   | 'nbackTask' | 'nbackGroupSetting' | 'nbackProgression' | 'nbackNameLabels' | 'nbackMnemonics'
+  | 'accessibilityProfile'
   | 'simulationPresetVersion';
 
 const comparisonDetailKeys: readonly ComparisonDetailKey[] = [
@@ -14,6 +15,7 @@ const comparisonDetailKeys: readonly ComparisonDetailKey[] = [
   'rotationContent', 'rotationLetters', 'rotationTargetIds', 'previewUsed',
   'appointmentRounds', 'guidedPacing',
   'nbackTask', 'nbackGroupSetting', 'nbackProgression', 'nbackNameLabels', 'nbackMnemonics',
+  'accessibilityProfile',
   'simulationPresetVersion',
 ];
 

@@ -9,7 +9,10 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // The timer-heavy game flows share one production server. Running them in
+  // parallel makes animation and countdown assertions measure host contention
+  // instead of product behavior, especially when Chromium and WebKit overlap.
+  workers: 1,
   reporter: process.env.CI
     ? [['line'], ['html', { open: 'never' }]]
     : [['list'], ['html', { open: 'never' }]],
@@ -34,7 +37,16 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      testIgnore: '**/mobile-webkit.spec.ts',
       use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'mobile-safari',
+      testMatch: '**/mobile-webkit.spec.ts',
+      use: {
+        ...devices['iPhone 13'],
+        viewport: { width: 390, height: 844 },
+      },
     },
   ],
 });

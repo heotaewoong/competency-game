@@ -15,7 +15,7 @@
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:report": "playwright show-report",
-    "test": "npm run test:rotation && npm run test:nback && npm run test:rps && npm run test:appointment && npm run test:path && npm run test:potion && npm run test:number && npm run test:count && npm run test:mouse && npm run test:feedback && npm run test:guides && npm run test:review && npm run test:storage && npm run test:timers && npm run test:glyphs && npm run test:practice-config && npm run test:comparison && npm run test:recommendation && npm run test:display",
+    "test": "npm run test:rotation && npm run test:nback && npm run test:rps && npm run test:appointment && npm run test:path && npm run test:potion && npm run test:number && npm run test:count && npm run test:mouse && npm run test:feedback && npm run test:guides && npm run test:review && npm run test:storage && npm run test:timers && npm run test:glyphs && npm run test:practice-config && npm run test:comparison && npm run test:recommendation && npm run test:display && npm run test:readiness && npm run test:onboarding && npm run test:backup && npm run test:envelope",
     "test:rps": "node --test --experimental-strip-types app/lib/rps-game.test.ts",
     "test:mouse": "node --test --experimental-strip-types app/lib/mouse-game.test.ts",
     "test:count": "node --test --experimental-strip-types app/lib/count-game.test.ts",
@@ -34,7 +34,11 @@
     "test:practice-config": "node --test --experimental-strip-types app/lib/practice-config-storage.test.ts",
     "test:comparison": "node --test --experimental-strip-types app/lib/result-comparison.test.ts",
     "test:recommendation": "node --test --experimental-strip-types app/lib/training-recommendation.test.ts",
-    "test:display": "node --test --experimental-strip-types app/lib/result-display.test.ts"
+    "test:display": "node --test --experimental-strip-types app/lib/result-display.test.ts",
+    "test:readiness": "node --test --experimental-strip-types app/lib/readiness.test.ts",
+    "test:onboarding": "node --test --experimental-strip-types app/lib/game-onboarding.test.ts",
+    "test:backup": "node --test --experimental-strip-types app/lib/practice-backup.test.ts",
+    "test:envelope": "node --test --experimental-strip-types app/lib/result-envelope.test.ts"
   },
   "dependencies": {
     "next": "^16.3.3",

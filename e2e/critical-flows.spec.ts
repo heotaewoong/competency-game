@@ -1,7 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import { REVIEW_SCHEMA_VERSION } from '../app/lib/review-data';
 
-const RESULTS_KEY = 'nineflow-practice-results-v2';
+const RESULTS_STORAGE_PREFIX = 'nineflow-practice-results-v4:';
+const LEGACY_RESULTS_KEY = 'nineflow-practice-results-v2';
+const RESULTS_GENERATION_KEY = 'nineflow-practice-results-generation-v1';
 const FUTURE_REVIEW_BACKUP_KEY = 'nineflow-practice-results-future-backup';
 const CONFIG_KEY = 'nineflow-practice-config-v1';
 const PACING_KEY = 'nineflow-practice-pacing-v1';
@@ -273,9 +275,11 @@ test('회전 조작 뒤 과정 보기 토글이 문제와 입력을 초기화하
 
 test('작은 세로·가로 화면에서도 복습 상세는 내부에서 스크롤된다', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
-  await page.addInitScript(({ key, fixture }) => {
-    window.localStorage.setItem(key, JSON.stringify(fixture));
-  }, { key: RESULTS_KEY, fixture: rotationReviewFixture });
+  await page.addInitScript(({ prefix, generationKey, fixture }) => {
+    const generation = 'e2e-review-generation';
+    window.localStorage.setItem(generationKey, generation);
+    window.localStorage.setItem(`${prefix}${generation}`, JSON.stringify({ version: 4, generation, results: fixture }));
+  }, { prefix: RESULTS_STORAGE_PREFIX, generationKey: RESULTS_GENERATION_KEY, fixture: rotationReviewFixture });
   await page.goto('/');
 
   await page.getByRole('navigation', { name: '빠른 메뉴' }).getByRole('button', { name: '복습' }).click();
@@ -301,13 +305,18 @@ test('저장 공간 쓰기가 실패해도 완료 결과와 복습 동작은 유
   await seedFocusedGameSettings(page);
   await page.goto('/');
   await openRotation(page);
+  const activeResultsKey = await page.evaluate(({ prefix, generationKey }) => {
+    const generation = window.localStorage.getItem(generationKey);
+    if (!generation) throw new Error('활성 결과 저장 세대가 없습니다.');
+    return `${prefix}${generation}`;
+  }, { prefix: RESULTS_STORAGE_PREFIX, generationKey: RESULTS_GENERATION_KEY });
   await page.evaluate((resultsKey) => {
     const original = Storage.prototype.setItem;
     Storage.prototype.setItem = function setItem(key: string, value: string) {
       if (key === resultsKey) throw new DOMException('Quota exceeded', 'QuotaExceededError');
       return original.call(this, key, value);
     };
-  }, RESULTS_KEY);
+  }, activeResultsKey);
 
   await page.getByRole('button', { name: '1번 왼쪽 45° 회전' }).click();
   await page.getByRole('button', { name: /답안 제출/ }).click();
@@ -317,7 +326,24 @@ test('저장 공간 쓰기가 실패해도 완료 결과와 복습 동작은 유
   await expect(page.getByRole('status')).toContainText('브라우저 저장 공간을 사용할 수 없습니다');
   await expect(page.getByRole('button', { name: '다시 연습' })).toBeVisible();
   await expect(page.getByRole('button', { name: '문항별 복습' })).toBeVisible();
-  await expect.poll(() => page.evaluate((key) => JSON.parse(window.localStorage.getItem(key) ?? '[]'), RESULTS_KEY)).toEqual([]);
+  await expect.poll(() => page.evaluate(({ prefix, generationKey }) => {
+    const generation = window.localStorage.getItem(generationKey);
+    const activeKey = generation ? `${prefix}${generation}` : '';
+    const envelope = JSON.parse((activeKey && window.localStorage.getItem(activeKey)) || 'null') as {
+      version?: number;
+      generation?: string;
+      results?: unknown[];
+    } | null;
+    return {
+      version: envelope?.version,
+      generationMatches: Boolean(generation && envelope?.generation === generation),
+      results: envelope?.results,
+    };
+  }, { prefix: RESULTS_STORAGE_PREFIX, generationKey: RESULTS_GENERATION_KEY })).toEqual({
+    version: 4,
+    generationMatches: true,
+    results: [],
+  });
 });
 
 test('결과 화면에서 연 복습창은 배경 컨트롤을 접근성 트리에서 차단한다', async ({ page }) => {
@@ -360,14 +386,14 @@ test('더 새로운 복습 스키마는 회전 연습 완료 후에도 원본 �
   }]);
   await page.addInitScript(({ resultsKey, raw }) => {
     window.localStorage.setItem(resultsKey, raw);
-  }, { resultsKey: RESULTS_KEY, raw: futurePayloadRaw });
+  }, { resultsKey: LEGACY_RESULTS_KEY, raw: futurePayloadRaw });
   await page.goto('/');
 
   await expect(page.getByRole('status')).toContainText('현재 앱보다 새 형식의 복습 기록을 감지해 원본을 별도 백업했습니다');
   await expect.poll(() => page.evaluate(({ resultsKey, backupKey }) => ({
     primary: window.localStorage.getItem(resultsKey),
     backup: window.localStorage.getItem(backupKey),
-  }), { resultsKey: RESULTS_KEY, backupKey: FUTURE_REVIEW_BACKUP_KEY })).toEqual({
+  }), { resultsKey: LEGACY_RESULTS_KEY, backupKey: FUTURE_REVIEW_BACKUP_KEY })).toEqual({
     primary: futurePayloadRaw,
     backup: futurePayloadRaw,
   });
@@ -383,7 +409,7 @@ test('더 새로운 복습 스키마는 회전 연습 완료 후에도 원본 �
   await expect.poll(() => page.evaluate(({ resultsKey, backupKey }) => ({
     primary: window.localStorage.getItem(resultsKey),
     backup: window.localStorage.getItem(backupKey),
-  }), { resultsKey: RESULTS_KEY, backupKey: FUTURE_REVIEW_BACKUP_KEY })).toEqual({
+  }), { resultsKey: LEGACY_RESULTS_KEY, backupKey: FUTURE_REVIEW_BACKUP_KEY })).toEqual({
     primary: futurePayloadRaw,
     backup: futurePayloadRaw,
   });

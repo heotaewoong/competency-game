@@ -549,10 +549,14 @@ test('탭 이탈은 준비와 문제 타이머를 멈추고 명시적 재개를 
 
   const preparationCountdown = page.locator('.game-preparation > b');
   await expect(preparationCountdown).toBeVisible();
-  const beforePause = await preparationCountdown.textContent();
   await setDocumentVisibility(page, 'hidden');
+  // A coarse whole-second label can already have a queued render at the exact
+  // visibility boundary. Let that in-flight render settle, then assert that no
+  // additional hidden-tab time is consumed.
+  await page.waitForTimeout(150);
+  const pausedPreparationValue = await preparationCountdown.textContent();
   await page.waitForTimeout(1_400);
-  await expect(preparationCountdown).toHaveText(beforePause ?? '');
+  await expect(preparationCountdown).toHaveText(pausedPreparationValue ?? '');
   await setDocumentVisibility(page, 'visible');
 
   const pauseDialog = page.getByRole('alertdialog', { name: '연습을 잠시 멈췄습니다' });

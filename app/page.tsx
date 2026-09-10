@@ -7,9 +7,25 @@ import { GameThumbnail } from './components/game-thumbnail';
 import { games, type GameId, type SessionResult } from './lib/game-data';
 import { REVIEW_SCHEMA_VERSION, aggregateReviewErrors, hasReviewData, sanitizeReviewPayload } from './lib/review-data';
 import { getStorageSafely, mergeSessionResults, persistSessionResults, type PersistSessionResultsResult } from './lib/result-storage';
+import {
+  LEGACY_RESULTS_STORAGE_KEY,
+  LEGACY_V3_RESULTS_STORAGE_KEY,
+  RESULTS_GENERATION_KEY,
+  RESULTS_STORAGE_PREFIX,
+  createResultsGeneration,
+  isResultsGeneration,
+  parseLegacyV3ResultsEnvelope,
+  parseResultsEnvelope,
+  resultsStorageKey,
+  serializeResultsEnvelope,
+} from './lib/result-envelope';
 import { getResultComparisonKey, getResultMode, type ResultMode } from './lib/result-comparison';
 import { formatResultScore, resultErrorLabel, resultScoreLabel } from './lib/result-display';
+import { isReviewPayloadStructurallyValid } from './lib/practice-backup';
+import { resolveReadinessOverall } from './lib/readiness';
 import { chooseTrainingRecommendation, type RecommendationReason } from './lib/training-recommendation';
+import { AccessibilityBootstrap, ReadinessCenter, READINESS_STORAGE_KEY, captureCurrentReadinessAssessment, parseSavedReadinessSummary, type SavedReadinessSummary } from './components/readiness-center';
+import { DataManagementDialog, type DataManagementActionResult } from './components/data-management-dialog';
 
 function StageLoading() {
   return <div className="stage-backdrop"><div className="stage-loading" role="status" aria-live="polite"><i aria-hidden="true" /><b>게임을 준비하고 있습니다.</b></div></div>;
@@ -23,8 +39,8 @@ const StrategyGuideDialog = dynamic(() => import('./components/strategy-guide-di
 const ReviewDialog = dynamic(() => import('./components/review-dialog').then((module) => module.ReviewDialog), { ssr: false });
 const FeedbackDialog = dynamic(() => import('./components/feedback-dialog').then((module) => module.FeedbackDialog), { ssr: false });
 
-const STORAGE_KEY = 'nineflow-practice-results-v2';
 const FUTURE_REVIEW_BACKUP_KEY = 'nineflow-practice-results-future-backup';
+const CORRUPT_RESULTS_BACKUP_KEY = 'nineflow-practice-results-corrupt-backup';
 const ORDER_STORAGE_KEY = 'nineflow-game-order-v2';
 const DIFFICULTY_SOURCE_URL = 'https://recruit.jobda.im/hubfs/TREND%20REPORT_HR%20%EA%B3%A0%EB%AF%BC%EC%9E%88%EC%8A%B5%EB%8B%88%EB%8B%A4_2%ED%8E%B8.pdf';
 const DIFFICULTY_REVIEW_URLS = [
@@ -47,14 +63,35 @@ const recommendationButtonLabels: Record<RecommendationReason, string> = {
   'recurring-error': '반복 오류 다시 보기',
   'least-recent': '오래 쉰 게임 점검',
 };
+function revalidateReadinessSummary(saved: SavedReadinessSummary) {
+  const currentOverall = captureCurrentReadinessAssessment().overall;
+  return { ...saved, overall: resolveReadinessOverall(currentOverall, saved.assetStatus) };
+}
 
 function isSessionResult(value: unknown): value is SessionResult {
   if (!value || typeof value !== 'object') return false;
   const item = value as Partial<SessionResult>;
+  const validGameId = typeof item.gameId === 'string' && gameIds.has(item.gameId as GameId);
   const numericValues = [item.accuracy, item.medianRt, item.stability, item.errors];
-  return typeof item.id === 'string' && typeof item.gameId === 'string' && gameIds.has(item.gameId as GameId)
+  const detailIsSafe = item.detail === undefined || (
+    Boolean(item.detail)
+    && typeof item.detail === 'object'
+    && !Array.isArray(item.detail)
+    && Object.values(item.detail).every((detailValue) => typeof detailValue === 'string'
+      || (typeof detailValue === 'number' && Number.isFinite(detailValue)))
+  );
+  const review = item.review === undefined ? undefined : sanitizeReviewPayload(item.review);
+  const reviewIsSafe = item.review === undefined || Boolean(
+    validGameId
+    && isReviewPayloadStructurallyValid(item.review, item.gameId as GameId)
+    && review
+    && review.gameId === item.gameId,
+  );
+  return typeof item.id === 'string' && item.id.trim().length > 0
+    && validGameId
     && typeof item.completedAt === 'string' && Number.isFinite(Date.parse(item.completedAt))
-    && numericValues.every((number) => typeof number === 'number' && Number.isFinite(number));
+    && numericValues.every((number) => typeof number === 'number' && Number.isFinite(number))
+    && detailIsSafe && reviewIsSafe;
 }
 
 function hasFutureReviewVersion(value: unknown) {
@@ -76,16 +113,115 @@ function normalizeSessionResults(value: unknown) {
   const normalized = value.filter(isSessionResult).map((result) => {
     const review = sanitizeReviewPayload(result.review);
     const matchedReview = review?.gameId === result.gameId ? review : undefined;
+    const resultWithoutReview = { ...result };
+    delete resultWithoutReview.review;
     return {
-      ...result,
+      ...resultWithoutReview,
       accuracy: Math.min(100, Math.max(0, Math.round(result.accuracy))),
       stability: Math.min(100, Math.max(0, Math.round(result.stability))),
       medianRt: Math.max(0, Math.round(result.medianRt)),
       errors: Math.max(0, Math.round(result.errors)),
-      ...(matchedReview ? { review: matchedReview } : { review: undefined }),
+      ...(matchedReview ? { review: matchedReview } : {}),
     };
   });
   return mergeSessionResults(normalized);
+}
+
+function normalizeStoredSessionResults(value: unknown): SessionResult[] | null {
+  if (!Array.isArray(value)) return null;
+  const normalized = normalizeSessionResults(value);
+  return normalized.length === value.length ? normalized : null;
+}
+
+function getOrCreateResultsGeneration(storage: Storage) {
+  const existing = storage.getItem(RESULTS_GENERATION_KEY);
+  if (isResultsGeneration(existing)) return { generation: existing, recoveredOrphan: false };
+  const recoverableEnvelopes: Array<{ generation: string; results: unknown[] }> = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (!key?.startsWith(RESULTS_STORAGE_PREFIX)) continue;
+    const generation = key.slice(RESULTS_STORAGE_PREFIX.length);
+    if (!isResultsGeneration(generation)) continue;
+    const parsed = parseResultsEnvelope(storage.getItem(key), generation);
+    if (parsed.ok) recoverableEnvelopes.push({ generation, results: parsed.envelope.results });
+  }
+  if (recoverableEnvelopes.length > 0) {
+    recoverableEnvelopes.sort((left, right) => left.generation.localeCompare(right.generation));
+    let recoveredGeneration = recoverableEnvelopes[0].generation;
+    if (recoverableEnvelopes.length > 1) {
+      const combinedGeneration = createResultsGeneration();
+      const combinedResults = recoverableEnvelopes.flatMap((item) => item.results);
+      // A normal stale generation can contain the same session ID as the
+      // current orphan. Only fully valid current-schema items are safe to
+      // normalize and deduplicate; unknown/future items remain byte-preserved.
+      const recoveryResults = combinedResults.every(isSessionResult)
+        ? normalizeSessionResults(combinedResults)
+        : combinedResults;
+      try {
+        storage.setItem(
+          resultsStorageKey(combinedGeneration),
+          serializeResultsEnvelope(combinedGeneration, recoveryResults),
+        );
+        recoveredGeneration = combinedGeneration;
+      } catch {
+        // If quota prevents a combined recovery copy, keep every orphan in place
+        // and surface the largest readable snapshot instead of erasing any key.
+        recoveredGeneration = [...recoverableEnvelopes]
+          .sort((left, right) => right.results.length - left.results.length || left.generation.localeCompare(right.generation))[0]
+          .generation;
+      }
+    }
+    storage.setItem(RESULTS_GENERATION_KEY, recoveredGeneration);
+    const confirmed = storage.getItem(RESULTS_GENERATION_KEY);
+    return {
+      generation: isResultsGeneration(confirmed) ? confirmed : recoveredGeneration,
+      recoveredOrphan: true,
+    };
+  }
+  // Every tab must choose the same first generation. A random first value can
+  // make two simultaneous first visits invalidate each other's migration. If
+  // a fixed-key v3 envelope survived without its tombstone, adopt its own
+  // generation; otherwise use one deterministic bootstrap generation.
+  const legacyEnvelope = parseLegacyV3ResultsEnvelope(storage.getItem(LEGACY_V3_RESULTS_STORAGE_KEY));
+  const bootstrapGeneration = legacyEnvelope.ok ? legacyEnvelope.envelope.generation : 'bootstrap-v4';
+  storage.setItem(RESULTS_GENERATION_KEY, bootstrapGeneration);
+  const confirmed = storage.getItem(RESULTS_GENERATION_KEY);
+  return {
+    generation: isResultsGeneration(confirmed) ? confirmed : bootstrapGeneration,
+    recoveredOrphan: false,
+  };
+}
+
+function persistResultsEnvelope(storage: Storage, generation: string, results: readonly SessionResult[]) {
+  const storageKey = resultsStorageKey(generation);
+  return persistSessionResults({
+    setItem: (_key, serializedResults) => {
+      const parsed: unknown = JSON.parse(serializedResults);
+      if (!Array.isArray(parsed)) throw new TypeError('저장할 연습 기록이 배열이 아닙니다.');
+      storage.setItem(storageKey, serializeResultsEnvelope(generation, parsed));
+    },
+  }, storageKey, results);
+}
+
+function cleanInactiveResultEnvelopes(storage: Storage, activeGeneration: string, preserveUnreadable = false) {
+  const activeKey = resultsStorageKey(activeGeneration);
+  const staleKeys: string[] = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (!key?.startsWith(RESULTS_STORAGE_PREFIX) || key === activeKey) continue;
+    if (preserveUnreadable) {
+      const generation = key.slice(RESULTS_STORAGE_PREFIX.length);
+      const parsed = isResultsGeneration(generation)
+        ? parseResultsEnvelope(storage.getItem(key), generation)
+        : null;
+      // Startup cleanup may retire a valid stale snapshot only. Unreadable,
+      // partially corrupt, or future-schema artifacts stay available in the
+      // data-management dialog until the user explicitly deletes site data.
+      if (!parsed?.ok || !parsed.envelope.results.every(isSessionResult)) continue;
+    }
+    staleKeys.push(key);
+  }
+  staleKeys.forEach((key) => storage.removeItem(key));
 }
 
 function formatCompletedAt(value: string) {
@@ -121,31 +257,118 @@ export default function Home() {
   const [results, setResults] = useState<SessionResult[]>([]);
   const [gameOrder, setGameOrder] = useState<GameOrder>('published');
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [dataManagementOpen, setDataManagementOpen] = useState(false);
+  const [readinessOpen, setReadinessOpen] = useState(false);
+  const [readinessSummary, setReadinessSummary] = useState<SavedReadinessSummary | null>(null);
   const [guideGameId, setGuideGameId] = useState<GameId | null>(null);
   const [reviewSessionId, setReviewSessionId] = useState<string | null>(null);
   const [reviewErrorCode, setReviewErrorCode] = useState<string | null>(null);
   const [storageNotice, setStorageNotice] = useState('');
   const futureSchemaWriteBlockedRef = useRef(false);
   const resultsRef = useRef<SessionResult[]>([]);
+  const resultsGenerationRef = useRef<string | null>(null);
 
   useEffect(() => { resultsRef.current = results; }, [results]);
+
+  useEffect(() => {
+    let restored: SavedReadinessSummary | null = null;
+    try {
+      const saved = parseSavedReadinessSummary(window.localStorage.getItem(READINESS_STORAGE_KEY));
+      restored = saved ? revalidateReadinessSummary(saved) : null;
+    } catch { /* 점검 기록이 없어도 준비센터는 새로 실행할 수 있다. */ }
+    if (!restored) return;
+    const frame = window.requestAnimationFrame(() => {
+      // 브라우저 전용 점검 결과는 hydration 이후 복원한다.
+      setReadinessSummary(restored);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  const handleReadinessChecked = useCallback((summary: SavedReadinessSummary) => setReadinessSummary(summary), []);
+
+  useEffect(() => {
+    const revalidate = () => {
+      try {
+        const saved = parseSavedReadinessSummary(window.localStorage.getItem(READINESS_STORAGE_KEY));
+        if (saved) setReadinessSummary(revalidateReadinessSummary(saved));
+      } catch { /* 준비 상태는 다음 점검에서 다시 계산한다. */ }
+    };
+    window.addEventListener('resize', revalidate);
+    window.addEventListener('online', revalidate);
+    window.addEventListener('offline', revalidate);
+    return () => {
+      window.removeEventListener('resize', revalidate);
+      window.removeEventListener('online', revalidate);
+      window.removeEventListener('offline', revalidate);
+    };
+  }, []);
 
   useEffect(() => {
     let restoredOrder: GameOrder | null = null;
     let restoredResults: SessionResult[] | null = null;
     let restoredNotice = '';
+    let rawSavedResults: string | null = null;
+    let restoredEnvelopeRaw: string | null = null;
+    let restoredGeneration: string | null = null;
+    let restoredStorageKey: string | null = null;
+    let recoveredOrphanGeneration = false;
     try {
+      const storage = window.localStorage;
+      const generationResolution = getOrCreateResultsGeneration(storage);
+      restoredGeneration = generationResolution.generation;
+      recoveredOrphanGeneration = generationResolution.recoveredOrphan;
+      resultsGenerationRef.current = restoredGeneration;
+      restoredStorageKey = resultsStorageKey(restoredGeneration);
       const savedOrder = window.localStorage.getItem(ORDER_STORAGE_KEY);
       if (savedOrder === 'published' || savedOrder === 'perceived') {
         restoredOrder = savedOrder;
       }
-      const saved = window.localStorage.getItem(STORAGE_KEY);
-      const parsed: unknown = saved ? JSON.parse(saved) : [];
+      restoredEnvelopeRaw = storage.getItem(restoredStorageKey);
+      const parsedEnvelope = parseResultsEnvelope(restoredEnvelopeRaw, restoredGeneration);
+      const legacyV3Raw = restoredEnvelopeRaw ? null : storage.getItem(LEGACY_V3_RESULTS_STORAGE_KEY);
+      const parsedLegacyV3 = parseLegacyV3ResultsEnvelope(legacyV3Raw);
+      const legacyV2Raw = restoredEnvelopeRaw || legacyV3Raw || restoredGeneration !== 'bootstrap-v4'
+        ? null
+        : storage.getItem(LEGACY_RESULTS_STORAGE_KEY);
+      rawSavedResults = restoredEnvelopeRaw ?? legacyV3Raw ?? legacyV2Raw;
+      let parsed: unknown;
+      let canPersist = true;
+      let migratedLegacyKey: string | null = null;
+      if (restoredEnvelopeRaw) {
+        if (!parsedEnvelope.ok) {
+          parsed = [];
+          canPersist = false;
+          restoredNotice = parsedEnvelope.reason === 'generation-mismatch'
+            ? '다른 탭의 삭제와 지연된 저장이 겹쳐 세대가 다른 기록을 무시했습니다.'
+            : '저장된 v4 연습 기록을 읽지 못해 원본을 덮어쓰지 않았습니다.';
+        } else {
+          parsed = parsedEnvelope.envelope.results;
+        }
+      } else if (legacyV3Raw) {
+        if (parsedLegacyV3.ok && parsedLegacyV3.envelope.generation === restoredGeneration) {
+          parsed = parsedLegacyV3.envelope.results;
+          migratedLegacyKey = LEGACY_V3_RESULTS_STORAGE_KEY;
+        } else if (parsedLegacyV3.ok) {
+          // A v3 envelope from a generation older than the tombstone is a
+          // delayed pre-delete write, not recoverable current data.
+          parsed = [];
+          migratedLegacyKey = LEGACY_V3_RESULTS_STORAGE_KEY;
+        } else {
+          parsed = [];
+          canPersist = false;
+          restoredNotice = '이전 v3 연습 기록을 읽지 못해 원본을 덮어쓰지 않았습니다.';
+        }
+      } else if (legacyV2Raw) {
+        parsed = JSON.parse(legacyV2Raw);
+        migratedLegacyKey = LEGACY_RESULTS_STORAGE_KEY;
+      } else {
+        parsed = [];
+      }
       const hasFutureReview = containsFutureReview(parsed);
       let futureDataBackedUp = false;
-      if (hasFutureReview && saved) {
+      if (hasFutureReview && rawSavedResults) {
         try {
-          window.localStorage.setItem(FUTURE_REVIEW_BACKUP_KEY, saved);
+          window.localStorage.setItem(FUTURE_REVIEW_BACKUP_KEY, rawSavedResults);
           futureDataBackedUp = true;
         } catch { /* 저장 공간이 잠겨 있으면 아래 쓰기 차단으로 원본을 보호한다. */ }
         // A newer app must continue to find its original primary payload. The backup is
@@ -154,6 +377,7 @@ export default function Home() {
       }
       if (Array.isArray(parsed)) {
         const sanitized = normalizeSessionResults(parsed);
+        const containsInvalidItems = sanitized.length !== parsed.length;
         // 외부 저장 데이터는 정리·용량 제한을 적용한 뒤 화면 상태와 다시 맞춘다.
         if (hasFutureReview) {
           // 현재 앱이 이해하지 못하는 상세를 별도 키에 먼저 보존한다. 백업조차 쓸 수 없으면
@@ -162,10 +386,31 @@ export default function Home() {
           restoredNotice = futureDataBackedUp
             ? '현재 앱보다 새 형식의 복습 기록을 감지해 원본을 별도 백업했습니다. 원본 보호를 위해 이 탭의 새 결과 저장은 중지됩니다.'
             : '현재 앱보다 새 형식의 복습 기록이 있어 원본 보호를 위해 이 탭의 새 결과 저장을 중지했습니다.';
+        } else if (containsInvalidItems || !canPersist) {
+          if (rawSavedResults) {
+            try { window.localStorage.setItem(CORRUPT_RESULTS_BACKUP_KEY, rawSavedResults); } catch { /* 원본 키는 덮어쓰지 않는다. */ }
+          }
+          restoredResults = sanitized;
+          if (!restoredNotice) restoredNotice = '손상된 연습 기록을 감지해 원본을 덮어쓰지 않았습니다. 정상 항목만 화면에 표시하며, 백업만 가져오기 전에 사이트 저장소를 확인해 주세요.';
         } else {
-          const outcome = persistSessionResults(window.localStorage, STORAGE_KEY, sanitized);
+          const outcome = persistResultsEnvelope(storage, restoredGeneration, sanitized);
           restoredResults = outcome.stored ? outcome.storedResults : sanitized;
           restoredNotice = storageMessage(outcome);
+          if (outcome.stored) {
+            restoredEnvelopeRaw = storage.getItem(restoredStorageKey);
+            const generationStillCurrent = storage.getItem(RESULTS_GENERATION_KEY) === restoredGeneration;
+            if (generationStillCurrent && migratedLegacyKey) storage.removeItem(migratedLegacyKey);
+            if (generationStillCurrent && !recoveredOrphanGeneration) {
+              cleanInactiveResultEnvelopes(storage, restoredGeneration, true);
+              // Once a valid v4 generation is active, old fixed-key formats
+              // are no longer authoritative and can be safely retired.
+              storage.removeItem(LEGACY_V3_RESULTS_STORAGE_KEY);
+              storage.removeItem(LEGACY_RESULTS_STORAGE_KEY);
+            }
+            if (generationStillCurrent && recoveredOrphanGeneration && !restoredNotice) {
+              restoredNotice = '저장 위치 정보를 복구해 남아 있던 연습 기록을 다시 연결했습니다. 원본 세대는 안전을 위해 그대로 보존했습니다.';
+            }
+          }
         }
       } else if (hasFutureReview) {
         restoredResults = [];
@@ -173,9 +418,18 @@ export default function Home() {
           ? '새 형식의 저장 구조 원본을 별도 백업했습니다. 원본 보호를 위해 이 탭의 새 결과 저장은 중지됩니다.'
           : '새 형식의 저장 구조가 있어 원본 보호를 위해 이 탭의 새 결과 저장을 중지했습니다.';
       }
-    } catch { /* 저장 데이터가 깨졌다면 빈 기록으로 계속 진행한다. */ }
+    } catch {
+      if (rawSavedResults) {
+        try { window.localStorage.setItem(CORRUPT_RESULTS_BACKUP_KEY, rawSavedResults); } catch { /* 원본 키는 그대로 유지한다. */ }
+        restoredNotice = '저장된 연습 기록을 읽지 못해 원본을 덮어쓰지 않았습니다. 사이트 저장소를 확인해 주세요.';
+      }
+    }
     const restoreFrame = window.requestAnimationFrame(() => {
       if (restoredOrder) setGameOrder(restoredOrder);
+      try {
+        if (restoredGeneration !== window.localStorage.getItem(RESULTS_GENERATION_KEY)) return;
+        if (!restoredStorageKey || restoredEnvelopeRaw !== window.localStorage.getItem(restoredStorageKey)) return;
+      } catch { return; }
       if (restoredResults) {
         const merged = mergeSessionResults(resultsRef.current, restoredResults);
         resultsRef.current = merged;
@@ -188,17 +442,62 @@ export default function Home() {
 
   useEffect(() => {
     const syncResultsFromAnotherTab = (event: StorageEvent) => {
-      if (event.storageArea !== window.localStorage || event.key !== STORAGE_KEY) return;
+      if (event.storageArea !== window.localStorage) return;
+      if (event.key === RESULTS_GENERATION_KEY) {
+        try {
+          // Storage events can arrive after a newer pointer event. Only the
+          // value that is still authoritative may reset this tab's view.
+          if (event.newValue !== window.localStorage.getItem(RESULTS_GENERATION_KEY)) return;
+        } catch { return; }
+        resultsGenerationRef.current = isResultsGeneration(event.newValue) ? event.newValue : null;
+        futureSchemaWriteBlockedRef.current = false;
+        resultsRef.current = [];
+        setResults([]);
+        setStorageNotice('다른 탭에서 연습 기록 세대가 바뀌어 이전 화면 기록을 비웠습니다.');
+        return;
+      }
+      if (!event.key?.startsWith(RESULTS_STORAGE_PREFIX)) return;
       try {
-        const parsed: unknown = event.newValue ? JSON.parse(event.newValue) : [];
+        const currentGeneration = window.localStorage.getItem(RESULTS_GENERATION_KEY);
+        if (!isResultsGeneration(currentGeneration)) return;
+        const activeStorageKey = resultsStorageKey(currentGeneration);
+        if (event.key !== activeStorageKey) {
+          // A stale tab may finish an old write after deletion. Its generation
+          // has a different key, so removing it cannot erase current records.
+          window.setTimeout(() => {
+            try {
+              const latestGeneration = window.localStorage.getItem(RESULTS_GENERATION_KEY);
+              if (isResultsGeneration(latestGeneration) && event.key !== resultsStorageKey(latestGeneration)) {
+                window.localStorage.removeItem(event.key!);
+              }
+            } catch { /* 다음 로드의 비활성 세대 청소가 다시 처리한다. */ }
+          }, 100);
+          return;
+        }
+        const currentRaw = window.localStorage.getItem(activeStorageKey);
+        if (event.newValue !== currentRaw) return;
+        const generationChanged = currentGeneration !== resultsGenerationRef.current;
+        const parsedEnvelope = parseResultsEnvelope(event.newValue, currentGeneration);
+        if (!parsedEnvelope.ok) {
+          setStorageNotice(parsedEnvelope.reason === 'generation-mismatch'
+            ? '삭제 세대와 다른 지연 저장을 무시했습니다.'
+            : '다른 탭의 v4 저장 기록을 읽지 못했습니다. 현재 화면 기록은 백업할 수 있도록 유지했습니다.');
+          return;
+        }
+        const parsed = parsedEnvelope.envelope.results;
         if (containsFutureReview(parsed)) {
           futureSchemaWriteBlockedRef.current = true;
           setStorageNotice('다른 탭에서 더 새 형식의 기록을 저장해 원본 보호를 위해 이 탭의 저장을 중지했습니다.');
           return;
         }
         futureSchemaWriteBlockedRef.current = false;
-        const remoteResults = normalizeSessionResults(parsed);
-        const merged = mergeSessionResults(resultsRef.current, remoteResults);
+        const remoteResults = normalizeStoredSessionResults(parsed);
+        if (!remoteResults) {
+          setStorageNotice('다른 탭의 저장 기록이 손상되어 현재 화면과 합치지 않았습니다.');
+          return;
+        }
+        const merged = mergeSessionResults(generationChanged ? [] : resultsRef.current, remoteResults);
+        resultsGenerationRef.current = currentGeneration;
         resultsRef.current = merged;
         setResults(merged);
         const remoteIds = remoteResults.map((result) => result.id).join('\u0000');
@@ -206,7 +505,16 @@ export default function Home() {
         if (mergedIds !== remoteIds) {
           // localStorage writes are not transactional. Rewriting the deterministic union
           // makes simultaneous completions in two tabs converge instead of losing one.
-          const outcome = persistSessionResults(window.localStorage, STORAGE_KEY, merged);
+          const outcome = persistResultsEnvelope(window.localStorage, currentGeneration, merged);
+          const generationAfterWrite = window.localStorage.getItem(RESULTS_GENERATION_KEY);
+          if (generationAfterWrite !== currentGeneration) {
+            resultsGenerationRef.current = generationAfterWrite;
+            resultsRef.current = [];
+            setResults([]);
+            try { window.localStorage.removeItem(resultsStorageKey(currentGeneration)); } catch { /* 비활성 세대라 현재 기록에는 영향이 없다. */ }
+            setStorageNotice('다른 탭의 전체 삭제를 우선해 지연된 저장 화면을 무시했습니다.');
+            return;
+          }
           if (outcome.stored) {
             resultsRef.current = outcome.storedResults;
             setResults(outcome.storedResults);
@@ -223,27 +531,42 @@ export default function Home() {
   }, []);
 
   function saveResult(result: SessionResult) {
-    const inMemoryNext = mergeSessionResults([result], resultsRef.current);
-    resultsRef.current = inMemoryNext;
-    if (futureSchemaWriteBlockedRef.current) {
-      setResults(inMemoryNext);
-      const message = '새 형식의 기존 복습 기록을 보호하기 위해 이번 결과는 현재 화면에만 표시합니다. 새로고침하면 사라질 수 있습니다.';
-      setStorageNotice(message);
-      return message;
-    }
-
     const storage = getStorageSafely(() => window.localStorage);
     if (!storage) {
+      const inMemoryNext = mergeSessionResults([result], resultsRef.current);
+      resultsRef.current = inMemoryNext;
       setResults(inMemoryNext);
       const message = '브라우저 저장소에 접근할 수 없어 이번 결과는 현재 화면에만 표시합니다. 새로고침하면 사라질 수 있습니다.';
       setStorageNotice(message);
       return message;
     }
 
+    let generationBefore: string;
     let storedSnapshot: SessionResult[] = [];
     try {
-      const saved = storage.getItem(STORAGE_KEY);
-      const parsed: unknown = saved ? JSON.parse(saved) : [];
+      generationBefore = getOrCreateResultsGeneration(storage).generation;
+      if (generationBefore !== resultsGenerationRef.current) {
+        resultsGenerationRef.current = generationBefore;
+        futureSchemaWriteBlockedRef.current = false;
+        resultsRef.current = [];
+      }
+      const inMemoryNext = mergeSessionResults([result], resultsRef.current);
+      resultsRef.current = inMemoryNext;
+      if (futureSchemaWriteBlockedRef.current) {
+        setResults(inMemoryNext);
+        const message = '새 형식의 기존 복습 기록을 보호하기 위해 이번 결과는 현재 화면에만 표시합니다. 새로고침하면 사라질 수 있습니다.';
+        setStorageNotice(message);
+        return message;
+      }
+      const saved = storage.getItem(resultsStorageKey(generationBefore));
+      const parsedEnvelope = parseResultsEnvelope(saved, generationBefore);
+      if (!parsedEnvelope.ok && parsedEnvelope.reason !== 'missing') {
+        setResults(inMemoryNext);
+        const message = '기존 v4 브라우저 기록이 손상되어 원본 보호를 위해 이번 결과를 저장하지 않았습니다.';
+        setStorageNotice(message);
+        return message;
+      }
+      const parsed: unknown = parsedEnvelope.ok ? parsedEnvelope.envelope.results : [];
       if (containsFutureReview(parsed)) {
         futureSchemaWriteBlockedRef.current = true;
         setResults(inMemoryNext);
@@ -251,11 +574,38 @@ export default function Home() {
         setStorageNotice(message);
         return message;
       }
-      storedSnapshot = normalizeSessionResults(parsed);
-    } catch { /* 읽기가 막혀도 아래 안전 저장 경로에서 결과를 유지한다. */ }
+      const normalizedStored = normalizeStoredSessionResults(parsed);
+      if (!normalizedStored) {
+        setResults(inMemoryNext);
+        const message = '기존 브라우저 기록에 손상된 항목이 있어 원본 보호를 위해 이번 결과를 저장하지 않았습니다.';
+        setStorageNotice(message);
+        return message;
+      }
+      storedSnapshot = normalizedStored;
+    } catch {
+      const inMemoryNext = mergeSessionResults([result], resultsRef.current);
+      resultsRef.current = inMemoryNext;
+      setResults(inMemoryNext);
+      const message = '기존 브라우저 기록을 읽지 못해 원본 보호를 위해 이번 결과를 화면에만 표시합니다.';
+      setStorageNotice(message);
+      return message;
+    }
 
     const next = mergeSessionResults([result], resultsRef.current, storedSnapshot);
-    const outcome = persistSessionResults(storage, STORAGE_KEY, next);
+    const outcome = persistResultsEnvelope(storage, generationBefore, next);
+    try {
+      const generationAfter = storage.getItem(RESULTS_GENERATION_KEY);
+      if (generationAfter !== generationBefore) {
+        resultsGenerationRef.current = generationAfter;
+        futureSchemaWriteBlockedRef.current = false;
+        resultsRef.current = [];
+        setResults([]);
+        try { storage.removeItem(resultsStorageKey(generationBefore)); } catch { /* 현재 세대와 분리된 키만 정리한다. */ }
+        const message = '다른 탭에서 실행된 전체 삭제를 우선해 이번 저장을 적용하지 않았습니다.';
+        setStorageNotice(message);
+        return message;
+      }
+    } catch { /* 저장 결과는 아래 outcome으로 안전하게 처리한다. */ }
     resultsRef.current = outcome.stored ? outcome.storedResults : next;
     setResults(resultsRef.current);
     const message = storageMessage(outcome);
@@ -324,15 +674,110 @@ export default function Home() {
     try { window.localStorage.setItem(ORDER_STORAGE_KEY, next); } catch { /* 저장을 쓸 수 없어도 정렬은 유지한다. */ }
   }
 
+  function importBackupResults(imported: SessionResult[]): DataManagementActionResult {
+    if (futureSchemaWriteBlockedRef.current) return { ok: false, message: '더 새 형식의 기존 기록을 보호하는 중이라 가져오기를 중지했습니다. 최신 앱에서 다시 시도해 주세요.' };
+    const storage = getStorageSafely(() => window.localStorage);
+    if (!storage) return { ok: false, message: '브라우저 저장 공간을 사용할 수 없어 기록을 가져오지 못했습니다.' };
+
+    let generationBefore: string;
+    let storedSnapshot: SessionResult[] = [];
+    let inMemorySnapshot = resultsRef.current;
+    try {
+      generationBefore = getOrCreateResultsGeneration(storage).generation;
+      if (generationBefore !== resultsGenerationRef.current) {
+        resultsGenerationRef.current = generationBefore;
+        futureSchemaWriteBlockedRef.current = false;
+        inMemorySnapshot = [];
+        resultsRef.current = [];
+      }
+      const saved = storage.getItem(resultsStorageKey(generationBefore));
+      const parsedEnvelope = parseResultsEnvelope(saved, generationBefore);
+      if (!parsedEnvelope.ok && parsedEnvelope.reason !== 'missing') {
+        return { ok: false, message: '현재 v4 브라우저 기록이 손상되어 원본 보호를 위해 가져오기를 중지했습니다.' };
+      }
+      const parsed: unknown = parsedEnvelope.ok ? parsedEnvelope.envelope.results : [];
+      if (containsFutureReview(parsed)) {
+        futureSchemaWriteBlockedRef.current = true;
+        return { ok: false, message: '더 새 형식의 기존 기록을 감지해 가져오기를 중지했습니다. 최신 앱에서 다시 시도해 주세요.' };
+      }
+      const normalizedStored = normalizeStoredSessionResults(parsed);
+      if (!normalizedStored) {
+        return { ok: false, message: '현재 브라우저 기록에 손상된 항목이 섞여 있어 원본 보호를 위해 가져오기를 중지했습니다.' };
+      }
+      storedSnapshot = normalizedStored;
+    } catch {
+      return { ok: false, message: '현재 브라우저 기록이 손상되어 안전하게 합칠 수 없습니다. 먼저 사이트 저장소를 확인해 주세요.' };
+    }
+
+    const existingIds = new Set([...inMemorySnapshot, ...storedSnapshot].map((result) => result.id));
+    const uniqueCandidateIds = new Set([...imported, ...inMemorySnapshot, ...storedSnapshot].map((result) => result.id));
+    const next = mergeSessionResults(imported, inMemorySnapshot, storedSnapshot);
+    const outcome = persistResultsEnvelope(storage, generationBefore, next);
+    if (!outcome.stored) return { ok: false, message: '브라우저 저장 공간이 부족하거나 차단되어 기록을 가져오지 못했습니다.' };
+    try {
+      const generationAfter = storage.getItem(RESULTS_GENERATION_KEY);
+      if (generationAfter !== generationBefore) {
+        resultsGenerationRef.current = generationAfter;
+        resultsRef.current = [];
+        setResults([]);
+        try { storage.removeItem(resultsStorageKey(generationBefore)); } catch { /* 비활성 세대 키만 정리한다. */ }
+        return { ok: false, message: '가져오는 도중 다른 탭에서 전체 삭제가 실행되어 삭제를 우선했습니다. 파일을 다시 확인한 뒤 가져오세요.' };
+      }
+    } catch { /* outcome.stored가 실제 저장 성공을 증명한다. */ }
+    resultsRef.current = outcome.storedResults;
+    setResults(outcome.storedResults);
+    setStorageNotice(storageMessage(outcome));
+    const retainedImported = outcome.storedResults.filter((result) => imported.some((item) => item.id === result.id)).length;
+    const newlyAdded = outcome.storedResults.filter((result) => imported.some((item) => item.id === result.id) && !existingIds.has(result.id)).length;
+    const excluded = Math.max(0, uniqueCandidateIds.size - outcome.storedResults.length);
+    const capNotice = excluded > 0 ? ` 최신 100개 보관 기준에 따라 오래된 기록 ${excluded}개는 제외됐습니다.` : '';
+    return { ok: true, message: `백업 기록 ${retainedImported}개를 확인해 기존 기록과 합쳤습니다. 새로 추가 ${newlyAdded}개, 현재 총 ${outcome.storedResults.length}개입니다.${capNotice}` };
+  }
+
+  function clearAllResults(): DataManagementActionResult {
+    const storage = getStorageSafely(() => window.localStorage);
+    if (!storage) return { ok: false, message: '브라우저 저장 공간에 접근하지 못해 기록을 삭제하지 못했습니다.' };
+    const clearGeneration = createResultsGeneration();
+    const clearStorageKey = resultsStorageKey(clearGeneration);
+    try {
+      // Prepare the empty generation before the pointer commit. If preparation
+      // fails, the previous active generation remains fully readable.
+      storage.setItem(clearStorageKey, serializeResultsEnvelope(clearGeneration, []));
+    } catch {
+      return { ok: false, message: '브라우저가 저장 공간 변경을 차단해 기록을 삭제하지 못했습니다.' };
+    }
+    try {
+      storage.setItem(RESULTS_GENERATION_KEY, clearGeneration);
+      if (storage.getItem(RESULTS_GENERATION_KEY) !== clearGeneration) throw new Error('generation-commit-lost');
+    } catch {
+      try { storage.removeItem(clearStorageKey); } catch { /* 비활성 준비 키는 다음 로드에서 정리한다. */ }
+      return { ok: false, message: '다른 탭의 저장 작업과 겹쳐 기록 삭제를 확정하지 못했습니다. 잠시 후 다시 시도해 주세요.' };
+    }
+    resultsGenerationRef.current = clearGeneration;
+    futureSchemaWriteBlockedRef.current = false;
+    resultsRef.current = [];
+    setResults([]);
+    setStorageNotice('');
+    let cleanupComplete = true;
+    try { cleanInactiveResultEnvelopes(storage, clearGeneration); } catch { cleanupComplete = false; }
+    for (const key of [LEGACY_V3_RESULTS_STORAGE_KEY, LEGACY_RESULTS_STORAGE_KEY, FUTURE_REVIEW_BACKUP_KEY, CORRUPT_RESULTS_BACKUP_KEY]) {
+      try { storage.removeItem(key); } catch { cleanupComplete = false; }
+    }
+    return cleanupComplete
+      ? { ok: true, message: '이 브라우저의 연습 결과와 문항별 복습 기록을 모두 삭제했습니다.' }
+      : { ok: true, message: '현재 연습 기록은 삭제했습니다. 이전 버전의 비활성 저장값 정리가 차단되어 브라우저의 사이트 데이터 삭제도 확인해 주세요.' };
+  }
+
   return (
     <main className="site-shell" id="top">
+      <AccessibilityBootstrap />
       <a className="skip-link" href="#games">게임 목록으로 건너뛰기</a>
       <header className="topbar">
         <a className="brand" href="#top" aria-label="NINEFLOW LAB 홈">
           <span className="brand-glyph">N</span>
           <span>NINEFLOW <em>LAB</em></span>
         </a>
-        <nav aria-label="주요 메뉴"><a href="#games">게임</a><button type="button" onClick={() => setGuideGameId(featuredGame.id)}>전략 가이드</button><button type="button" onClick={() => openReview()}>복습</button><a href="#records">내 기록</a><button type="button" onClick={() => setFeedbackOpen(true)}>의견</button></nav>
+        <nav aria-label="주요 메뉴"><button type="button" onClick={() => setReadinessOpen(true)}>준비센터</button><a href="#games">게임</a><button type="button" onClick={() => setGuideGameId(featuredGame.id)}>전략 가이드</button><button type="button" onClick={() => openReview()}>복습</button><a href="#records">내 기록</a><button type="button" onClick={() => setFeedbackOpen(true)}>의견</button></nav>
         <a className="header-status" href="#records" aria-label={`완료한 연습 ${results.length}회, 기록으로 이동`}>
           <span>연습</span><b>{results.length}</b>
         </a>
@@ -360,7 +805,7 @@ export default function Home() {
           <details className="simulator-note">
             <summary>이 연습 도구의 범위</summary>
             <p>공개된 게임 구조와 조작 흐름을 바탕으로 만든 독립형 시뮬레이터입니다. 공식 문항·화면·채점을 복제하거나 합격 가능성을 예측하지 않습니다.</p>
-            <p>2023 개발사 영상과 2024 JAINWON 공개자료의 게임별 시간이 서로 다른 경우가 있습니다. 현행 기업별 문항 수·시간·채점식은 비공개이므로 실제 초대 화면의 안내를 가장 먼저 따르세요.</p>
+            <p>2023 개발사 영상, 2024 공개 기업자료, 2026 과제 설명 화면의 게임별 시간·라운드가 서로 다른 경우가 있습니다. 기업 초대 검사 유형에 따라 게임이 포함되지 않을 수도 있으며, 현행 문항 수·시간·채점식은 비공개이므로 실제 초대 화면의 안내를 가장 먼저 따르세요.</p>
           </details>
         </div>
         <aside className={`hero-rail tone-${featuredGame.tone}`} aria-label="모리의 근거 기반 연습 추천">
@@ -393,6 +838,13 @@ export default function Home() {
         </aside>
       </section>
 
+      <section className={`readiness-banner ${readinessSummary ? `is-${readinessSummary.overall}` : 'is-unchecked'}`} aria-labelledby="readiness-banner-title">
+        <div className="readiness-banner-mark" aria-hidden="true">{readinessSummary?.overall === 'ready' ? '✓' : readinessSummary?.overall === 'blocked' ? '!' : '◎'}</div>
+        <div className="readiness-banner-copy"><span>10초 응시 준비센터</span><h2 id="readiness-banner-title">화면·입력·기록 저장을 시작 전에 확인하세요.</h2><p>핵심 리소스를 미리 불러오고 클릭·키보드를 직접 시험한 뒤, 고대비·큰 글자·움직임 줄이기도 한곳에서 설정할 수 있습니다.</p></div>
+        <dl aria-label="준비센터 점검 항목"><div><dt>자동 점검</dt><dd>화면·온라인 신호·저장</dd></div><div><dt>직접 확인</dt><dd>클릭·터치·키보드</dd></div><div><dt>보기 설정</dt><dd>명암·글자·모션</dd></div></dl>
+        <div className="readiness-banner-action"><small>{readinessSummary ? `${readinessSummary.overall === 'ready' ? '준비 완료' : readinessSummary.overall === 'review' ? '확인 필요' : '환경 조정 필요'} · ${formatCompletedAt(readinessSummary.checkedAt)}` : '아직 이 브라우저를 점검하지 않았습니다.'}</small><button type="button" onClick={() => setReadinessOpen(true)}>{readinessSummary ? '다시 점검' : '준비 점검 시작'} <span aria-hidden="true">→</span></button></div>
+      </section>
+
       <section className="game-section" id="games" aria-labelledby="games-title">
         <div className="section-heading">
           <div>
@@ -405,12 +857,12 @@ export default function Home() {
         <div className="game-order-toolbar">
           <span>정렬</span>
           <div className="game-order-actions" role="group" aria-label="게임 표시 순서">
-            <button type="button" aria-pressed={gameOrder === 'published'} onClick={() => changeGameOrder('published')}>공개 게임 번호순</button>
+            <button type="button" aria-pressed={gameOrder === 'published'} onClick={() => changeGameOrder('published')}>2024 공개자료 순서</button>
             <button type="button" aria-pressed={gameOrder === 'perceived'} onClick={() => changeGameOrder('perceived')}>후기 체감순</button>
           </div>
           <details className="difficulty-source"><summary>난이도 기준</summary><div className="difficulty-source-panel"><b>2024 공개자료 등급과 체감 순위를 분리했습니다.</b><p>카드의 상·중·하는 2024 JAINWON 공개 기업자료 기준입니다. 현행 기업 초대의 등급이나 공식 1~9위는 공개되지 않았으며, 체감 순서는 여러 공개 후기에 반복된 경향을 합친 연습 우선순위라 개인차가 있습니다.</p><div><a href={DIFFICULTY_SOURCE_URL} target="_blank" rel="noreferrer">2024 공개자료 등급 ↗</a>{DIFFICULTY_REVIEW_URLS.map((source) => <a key={source.href} href={source.href} target="_blank" rel="noreferrer">{source.label} ↗</a>)}</div></div></details>
           <button type="button" className="guide-library-button" onClick={() => setGuideGameId(orderedGames[0]?.id ?? 'rotation')}>규칙·예시·팁 전체 보기 <span>→</span></button>
-          <p className="sr-only" aria-live="polite">{gameOrder === 'perceived' ? '비공식 수험자 후기의 체감 난이도가 높은 순으로 배열했습니다.' : '공개 자료의 게임 번호순으로 배열했습니다.'}</p>
+          <p className="sr-only" aria-live="polite">{gameOrder === 'perceived' ? '비공식 수험자 후기의 체감 난이도가 높은 순으로 배열했습니다.' : '2024 공개 기업자료에 나온 순서로 배열했습니다.'}</p>
         </div>
 
         <div className="game-grid">
@@ -450,7 +902,7 @@ export default function Home() {
       </section>
 
       <section className="records-section" id="records" aria-labelledby="records-title">
-        <div className="records-heading"><div><span>나의 훈련 기록</span><h2 id="records-title">내 연습 기록</h2></div><p>최근 기록과 모드·분량·속도·집중 설정이 같은 세션끼리만 최고 점수를 비교합니다.</p></div>
+        <div className="records-heading"><div><span>나의 훈련 기록</span><h2 id="records-title">내 연습 기록</h2></div><p>최근 기록과 모드·분량·속도·집중·접근성 표시 설정이 같은 세션끼리만 최고 점수를 비교합니다.</p><button type="button" className="records-data-button" onClick={() => setDataManagementOpen(true)}>백업·복원</button></div>
         {recentResults.length ? <>
           <section className="home-review-center" aria-labelledby="home-review-title">
             <div className="home-review-heading"><div><span>틀린 이유 복습</span><h3 id="home-review-title">무엇을 반복해서 틀리는지 확인하세요.</h3><p>{scoredReviewResults.length ? `게임별 가장 최근 비교 문맥에서만 반복 횟수와 오류율을 계산합니다.${reviewableResults.length > scoredReviewResults.length ? ` 무응답 구간이 남은 세션 ${reviewableResults.length - scoredReviewResults.length}개도 문항별로 열 수 있습니다.` : scoredReviewResults.length < 5 ? ' 아직 표본이 적어 약점으로 단정하지 않습니다.' : ''}` : reviewableResults.length ? `${reviewableResults.length}개 세션의 무응답 구간이 복습에 남아 있습니다. 제출 전 놓친 문제부터 확인하세요.` : '이전 기록에는 문항별 데이터가 없습니다. 새 연습부터 자동으로 쌓입니다.'}</p></div><button type="button" onClick={() => openReview()}>복습 센터 열기 <span>→</span></button></div>
@@ -476,6 +928,8 @@ export default function Home() {
         <div className="footer-links">
           <button type="button" onClick={() => setGuideGameId(featuredGame.id)}>9개 게임 전략 가이드</button>
           <button type="button" onClick={() => openReview()}>내 실수 복습</button>
+          <button type="button" onClick={() => setReadinessOpen(true)}>응시 준비센터</button>
+          <button type="button" onClick={() => setDataManagementOpen(true)}>기록 백업·복원</button>
           <button type="button" onClick={() => setFeedbackOpen(true)}>의견 보내기</button>
           <a href="https://www.jobda.im/acc/tutorial" target="_blank" rel="noreferrer">JOBDA 구 역량검사 연습 ↗</a>
           <a href="https://github.com/twitter/twemoji" target="_blank" rel="noreferrer">손동작 이미지: Twemoji · CC BY 4.0</a>
@@ -485,16 +939,18 @@ export default function Home() {
       <button type="button" className="feedback-fab" onClick={() => setFeedbackOpen(true)}><span aria-hidden="true">✦</span> 의견 보내기</button>
       <nav className="mobile-dock" aria-label="빠른 메뉴">
         <a href="#games"><span aria-hidden="true">◇</span><b>게임</b></a>
+        <button type="button" onClick={() => setReadinessOpen(true)}><span aria-hidden="true">◎</span><b>준비</b></button>
         <button type="button" onClick={() => setGuideGameId(featuredGame.id)}><span aria-hidden="true">?</span><b>가이드</b></button>
         <button type="button" onClick={() => openReview()}><span aria-hidden="true">↺</span><b>복습</b></button>
         <a href="#records"><span aria-hidden="true">▥</span><b>기록</b></a>
-        <button type="button" onClick={() => setFeedbackOpen(true)}><span aria-hidden="true">✦</span><b>의견</b></button>
       </nav>
+      {readinessOpen && <ReadinessCenter onClose={() => setReadinessOpen(false)} onChecked={handleReadinessChecked} />}
+      {dataManagementOpen && <DataManagementDialog results={results} onImport={importBackupResults} onClear={clearAllResults} onClose={() => setDataManagementOpen(false)} />}
       {feedbackOpen && <FeedbackDialog onClose={() => setFeedbackOpen(false)} />}
       {guideGameId && <StrategyGuideDialog initialGameId={guideGameId} onClose={() => setGuideGameId(null)} onStartGame={(gameId) => { setGuideGameId(null); setActiveGame(gameId); }} />}
       {reviewSessionId !== null && <ReviewDialog results={results} initialSessionId={reviewSessionId || undefined} initialErrorCode={reviewErrorCode || undefined} onClose={closeReview} onPracticeGame={(gameId) => { closeReview(); setActiveGame(gameId); }} />}
       {activeGame && (
-        <GameStage key={activeGame} gameId={activeGame} onClose={closeActiveGame} onSwitch={switchActiveGame} onSave={saveResult} />
+        <GameStage key={activeGame} gameId={activeGame} onClose={closeActiveGame} onSwitch={switchActiveGame} onSave={saveResult} onReadinessChecked={handleReadinessChecked} />
       )}
     </main>
   );
