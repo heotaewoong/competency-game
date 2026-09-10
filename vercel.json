@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "alias": ["heobrain-competency-game.vercel.app"],
   "framework": "nextjs",
   "buildCommand": "npx next build"
 }
