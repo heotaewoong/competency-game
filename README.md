@@ -17,7 +17,7 @@
 
 - Git 브랜치: `main`
 - Git 원격 저장소: <https://github.com/heotaewoong/competency-game>
-- Vercel 운영 주소: <https://competency-game-three.vercel.app>
+- Vercel 운영 주소: <https://heobrain-competency-game.vercel.app>
 - 배포 소스 복구 기준 태그: `vercel-dpl-G8qamXDwTKYnSDVrgq9pCjigG6vU`
 
 > `.env.local`, `.vercel`, `node_modules`, 빌드·테스트 결과물은 저장소에 포함하지 않습니다. 위 태그는 Vercel 배포 `dpl_G8qamXDwTKYnSDVrgq9pCjigG6vU`에서 소스를 복구한 시점의 코드 체크포인트이며, 현재 운영 배포의 소스라고 단정하지 않습니다. `main`과 운영 사이트의 일치 여부는 Vercel 배포 메타데이터의 배포 ID와 소스 SHA로 별도 확인해야 합니다. Vercel 프로젝트는 GitHub와 자동 연동되어 있지 않으므로 별도 배포 전까지 `main` 변경은 운영 사이트에 반영되지 않습니다.
