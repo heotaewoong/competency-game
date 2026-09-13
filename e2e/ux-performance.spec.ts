@@ -20,7 +20,9 @@ test('모바일 첫 화면은 게임 코드를 미리 받지 않고 실제 의�
   await page.setViewportSize({ width: 390, height: 844 });
   const scripts = new Set<string>();
   page.on('request', (request) => {
-    if (request.resourceType() === 'script' && request.url().includes('/_next/static/chunks/')) scripts.add(request.url());
+    if (request.resourceType() === 'script' && /\/_next\/static\/(?:immutable\/)?chunks\/.*\.js(?:\?|$)/.test(request.url())) {
+      scripts.add(request.url());
+    }
   });
 
   await page.goto('/', { waitUntil: 'networkidle' });
