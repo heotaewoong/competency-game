@@ -2,6 +2,8 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const CONFIG_KEY = 'nineflow-practice-config-v1';
 const APPOINTMENT_KEY = 'nineflow-appointment-preferences-v1';
+const ACCESSIBILITY_KEY = 'nineflow-accessibility-v1';
+const PACING_KEY = 'nineflow-practice-pacing-v1';
 
 async function seedPracticeConfig(page: Page) {
   await page.addInitScript(({ configKey, appointmentKey }) => {
@@ -63,6 +65,22 @@ async function expectReadableChip(locator: Locator, minimumHeight?: number) {
   if (minimumHeight !== undefined) expect(styles.minHeight).toBeGreaterThanOrEqual(minimumHeight);
   expect(contrastRatio(styles.color, styles.backgroundColor)).toBeGreaterThanOrEqual(4.5);
 }
+
+test('모바일 준비 배너의 보조 문구는 작은 글씨에 필요한 대비와 크기를 유지한다', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  const surface = page.locator('.readiness-banner');
+  const background = await surface.evaluate((element) => window.getComputedStyle(element).backgroundColor);
+
+  for (const locator of [surface.locator('dt').first(), surface.locator('.readiness-banner-action small')]) {
+    const style = await locator.evaluate((element) => {
+      const computed = window.getComputedStyle(element);
+      return { color: computed.color, fontSize: Number.parseFloat(computed.fontSize) };
+    });
+    expect(style.fontSize).toBeGreaterThanOrEqual(10);
+    expect(contrastRatio(style.color, background)).toBeGreaterThanOrEqual(4.5);
+  }
+});
 
 async function expectControlsInsideViewport(locator: Locator, width: number, height: number) {
   const boxes = await locator.evaluateAll((elements) => elements.map((element) => {
@@ -761,10 +779,54 @@ test('844×360 첫 화면과 게임 설명에서 핵심 시작 버튼을 바로 
   await expect(startOptions.nth(1)).toContainText('실전형 연습 시작');
   await expect(startOptions.nth(0)).toHaveClass(/is-selected/);
   await expect(startOptions.nth(1)).not.toHaveClass(/is-selected/);
+
+  const shortcutBox = await stage.locator('.intro-settings-shortcut').boundingBox();
+  const actionsBox = await stage.locator('.intro-actions').boundingBox();
+  expect(shortcutBox).not.toBeNull();
+  expect(actionsBox).not.toBeNull();
+  expect((shortcutBox?.y ?? 1) + (shortcutBox?.height ?? 0)).toBeLessThanOrEqual(actionsBox?.y ?? 0);
+
   await startOptions.nth(1).click();
   const workspace = page.locator('.game-workspace');
   await expect(workspace).toBeVisible({ timeout: 8_000 });
   await expect(workspace.locator('.mode-chip')).toHaveText('실전형 연습');
+});
+
+test('앱의 움직임 줄이기는 회전 풀이와 문항 복습 자동 재생에도 적용된다', async ({ page }) => {
+  await page.addInitScript(({ accessibilityKey, configKey, pacingKey }) => {
+    window.localStorage.setItem(accessibilityKey, JSON.stringify({ contrast: 'standard', textScale: 'standard', motion: 'reduce' }));
+    window.localStorage.setItem(configKey, JSON.stringify({ rotation: { quantity: 1, paceMs: 90_000 } }));
+    window.localStorage.setItem(pacingKey, JSON.stringify({ rotation: true }));
+    window.localStorage.setItem('nineflow-rotation-preferences-v1', JSON.stringify({
+      contentMode: 'letters',
+      selectedLetters: ['F'],
+      selectedTransforms: ['turn-left-45'],
+      showPreview: true,
+    }));
+  }, { accessibilityKey: ACCESSIBILITY_KEY, configKey: CONFIG_KEY, pacingKey: PACING_KEY });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: /도형 회전하기, 난이도 중, 설정 열기/ }).click();
+  const stage = page.locator('section[data-game="rotation"]');
+  await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
+
+  const workspace = page.locator('.game-workspace.game-rotation');
+  await expect(workspace).toBeVisible({ timeout: 8_000 });
+  await workspace.getByRole('button', { name: '1번 왼쪽 45° 회전' }).click();
+
+  const processReplay = workspace.locator('.rotation-process-controls .is-play');
+  await expect(processReplay).toBeDisabled();
+  await expect(processReplay).toContainText('재생 꺼짐');
+
+  await workspace.getByRole('button', { name: /답안 제출/ }).click();
+  await workspace.getByRole('button', { name: /결과 보기/ }).click();
+  await page.getByRole('button', { name: '문항별 복습' }).click();
+
+  const review = page.getByRole('dialog', { name: '내 실수 복습' });
+  await expect(review).toBeVisible();
+  const reviewReplay = review.locator('.review-replay-controls .is-play');
+  await expect(reviewReplay).toBeDisabled();
+  await expect(reviewReplay).toHaveText('재생 꺼짐');
 });
 
 test('도형 회전 격자 자극은 공개 화면과 같은 4×4 구조를 유지한다', async ({ page }) => {

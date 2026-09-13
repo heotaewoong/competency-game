@@ -1975,7 +1975,7 @@ function RotationProcessPreview({ puzzle, sequence, frames, currentStep, playing
       <div className="rotation-process-controls" role="group" aria-label="과정 재생 조작">
         <button type="button" data-game-shortcut-ignore onClick={() => move(0)} disabled={currentStep === 0 || sequence.length === 0}><span aria-hidden="true">|‹</span><b>처음</b></button>
         <button type="button" data-game-shortcut-ignore onClick={() => move(currentStep - 1)} disabled={currentStep === 0 || sequence.length === 0}><span aria-hidden="true">‹</span><b>이전</b></button>
-        <button type="button" data-game-shortcut-ignore className="is-play" aria-pressed={playing} title={reducedMotion ? '기기의 동작 줄이기 설정에 따라 자동 재생을 끄며, 이전·다음 단계는 수동으로 확인할 수 있습니다.' : undefined} onClick={() => onPlayingChange(!playing)} disabled={sequence.length === 0 || reducedMotion}><span aria-hidden="true">{playing ? 'Ⅱ' : '▶'}</span><b>{reducedMotion ? '재생 꺼짐' : playing ? '일시정지' : currentStep >= sequence.length ? '다시 재생' : '재생'}</b></button>
+        <button type="button" data-game-shortcut-ignore className="is-play" aria-pressed={playing} title={reducedMotion ? '움직임 줄이기 설정에 따라 자동 재생을 끄며, 이전·다음 단계는 수동으로 확인할 수 있습니다.' : undefined} onClick={() => onPlayingChange(!playing)} disabled={sequence.length === 0 || reducedMotion}><span aria-hidden="true">{playing ? 'Ⅱ' : '▶'}</span><b>{reducedMotion ? '재생 꺼짐' : playing ? '일시정지' : currentStep >= sequence.length ? '다시 재생' : '재생'}</b></button>
         <button type="button" data-game-shortcut-ignore onClick={() => move(currentStep + 1)} disabled={currentStep >= sequence.length}><span aria-hidden="true">›</span><b>다음</b></button>
         <button type="button" data-game-shortcut-ignore onClick={() => move(sequence.length)} disabled={currentStep >= sequence.length}><span aria-hidden="true">›|</span><b>끝</b></button>
       </div>
@@ -2269,16 +2269,20 @@ function RotationGame({ onFinish, onClose, config, preferences, onPreviewChange 
 
   useEffect(() => {
     const query = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const applyPreference = (matches: boolean) => {
-      setReducedMotion(matches);
-      if (matches) setPreviewPlaying(false);
+    const applyPreference = () => {
+      const reduced = query.matches || document.documentElement.dataset.motion === 'reduce';
+      setReducedMotion(reduced);
+      if (reduced) setPreviewPlaying(false);
     };
-    const update = (event: MediaQueryListEvent) => applyPreference(event.matches);
-    const frame = window.requestAnimationFrame(() => applyPreference(query.matches));
+    const update = () => applyPreference();
+    const preferenceObserver = new MutationObserver(applyPreference);
+    const frame = window.requestAnimationFrame(applyPreference);
     query.addEventListener('change', update);
+    preferenceObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-motion'] });
     return () => {
       window.cancelAnimationFrame(frame);
       query.removeEventListener('change', update);
+      preferenceObserver.disconnect();
     };
   }, []);
 

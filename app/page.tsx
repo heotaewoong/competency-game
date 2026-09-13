@@ -25,7 +25,7 @@ import { isReviewPayloadStructurallyValid } from './lib/practice-backup';
 import { resolveReadinessOverall } from './lib/readiness';
 import { chooseTrainingRecommendation, type RecommendationReason } from './lib/training-recommendation';
 import { AccessibilityBootstrap, ReadinessCenter, READINESS_STORAGE_KEY, captureCurrentReadinessAssessment, parseSavedReadinessSummary, type SavedReadinessSummary } from './components/readiness-center';
-import { DataManagementDialog, type DataManagementActionResult } from './components/data-management-dialog';
+import type { DataManagementActionResult } from './components/data-management-dialog';
 
 function StageLoading() {
   return <div className="stage-backdrop"><div className="stage-loading" role="status" aria-live="polite"><i aria-hidden="true" /><b>게임을 준비하고 있습니다.</b></div></div>;
@@ -35,6 +35,10 @@ const loadGameStage = () => import('./components/game-stage');
 const preloadGameStage = () => {
   if (typeof window !== 'undefined') void loadGameStage().catch(() => undefined);
 };
+const loadDataManagementDialog = () => import('./components/data-management-dialog');
+const preloadDataManagementDialog = () => {
+  if (typeof window !== 'undefined') void loadDataManagementDialog().catch(() => undefined);
+};
 
 const GameStage = dynamic(() => loadGameStage().then((module) => module.GameStage), {
   ssr: false,
@@ -43,6 +47,7 @@ const GameStage = dynamic(() => loadGameStage().then((module) => module.GameStag
 const StrategyGuideDialog = dynamic(() => import('./components/strategy-guide-dialog').then((module) => module.StrategyGuideDialog), { ssr: false });
 const ReviewDialog = dynamic(() => import('./components/review-dialog').then((module) => module.ReviewDialog), { ssr: false });
 const FeedbackDialog = dynamic(() => import('./components/feedback-dialog').then((module) => module.FeedbackDialog), { ssr: false });
+const DataManagementDialog = dynamic(() => loadDataManagementDialog().then((module) => module.DataManagementDialog), { ssr: false });
 
 const FUTURE_REVIEW_BACKUP_KEY = 'nineflow-practice-results-future-backup';
 const CORRUPT_RESULTS_BACKUP_KEY = 'nineflow-practice-results-corrupt-backup';
@@ -283,7 +288,7 @@ export default function Home() {
       if (!entry?.isIntersecting) return;
       preloadGameStage();
       observer.disconnect();
-    }, { rootMargin: '360px 0px' });
+    }, { rootMargin: '0px' });
     observer.observe(section);
     return () => observer.disconnect();
   }, []);
@@ -817,7 +822,7 @@ export default function Home() {
             <span><i aria-hidden="true">✓</i> 9가지 게임</span>
           </div>
           <div className="hero-actions">
-            <button type="button" className="hero-primary" onPointerEnter={preloadGameStage} onFocus={preloadGameStage} onClick={() => openGame(featuredGame.id)}>
+            <button type="button" className="hero-primary" onPointerEnter={preloadGameStage} onPointerDown={preloadGameStage} onFocus={preloadGameStage} onClick={() => openGame(featuredGame.id)}>
               <span>{recommendationButtonLabels[recommendation.reason]}</span>
               <b>{featuredGame.title}</b><i aria-hidden="true">→</i>
             </button>
@@ -855,7 +860,7 @@ export default function Home() {
             ) : (
               <div className="continue-tip"><b>처음이라면</b><span>설명을 켠 연습 모드로 시작해 조작부터 익혀보세요.</span></div>
             )}
-            <button type="button" className="continue-start" onPointerEnter={preloadGameStage} onFocus={preloadGameStage} onClick={() => openGame(featuredGame.id)}>설정하고 시작 <span aria-hidden="true">→</span></button>
+            <button type="button" className="continue-start" onPointerEnter={preloadGameStage} onPointerDown={preloadGameStage} onFocus={preloadGameStage} onClick={() => openGame(featuredGame.id)}>설정하고 시작 <span aria-hidden="true">→</span></button>
           </article>
         </aside>
       </section>
@@ -916,7 +921,7 @@ export default function Home() {
                     <b>설정 후 시작 <i aria-hidden="true">→</i></b>
                   </div>
                 </div>
-                <button className="game-card-hitarea" type="button" onPointerEnter={preloadGameStage} onFocus={preloadGameStage} onClick={() => openGame(game.id)} aria-label={`${game.title}, 난이도 ${game.difficulty}, 설정 열기`} aria-describedby={summaryId}><span className="sr-only">{game.title} 설정 열기</span></button>
+                <button className="game-card-hitarea" type="button" onPointerEnter={preloadGameStage} onPointerDown={preloadGameStage} onFocus={preloadGameStage} onClick={() => openGame(game.id)} aria-label={`${game.title}, 난이도 ${game.difficulty}, 설정 열기`} aria-describedby={summaryId}><span className="sr-only">{game.title} 설정 열기</span></button>
               </article>
             );
           })}
@@ -924,7 +929,7 @@ export default function Home() {
       </section>
 
       <section className="records-section" id="records" aria-labelledby="records-title">
-        <div className="records-heading"><div><span>나의 훈련 기록</span><h2 id="records-title">내 연습 기록</h2></div><p>최근 기록과 모드·분량·속도·집중·접근성 표시 설정이 같은 세션끼리만 최고 점수를 비교합니다.</p><button type="button" className="records-data-button" onClick={() => setDataManagementOpen(true)}>백업·복원</button></div>
+        <div className="records-heading"><div><span>나의 훈련 기록</span><h2 id="records-title">내 연습 기록</h2></div><p>최근 기록과 모드·분량·속도·집중·접근성 표시 설정이 같은 세션끼리만 최고 점수를 비교합니다.</p><button type="button" className="records-data-button" onPointerEnter={preloadDataManagementDialog} onPointerDown={preloadDataManagementDialog} onFocus={preloadDataManagementDialog} onClick={() => setDataManagementOpen(true)}>백업·복원</button></div>
         {recentResults.length ? <>
           <section className="home-review-center" aria-labelledby="home-review-title">
             <div className="home-review-heading"><div><span>틀린 이유 복습</span><h3 id="home-review-title">무엇을 반복해서 틀리는지 확인하세요.</h3><p>{scoredReviewResults.length ? `게임별 가장 최근 비교 문맥에서만 반복 횟수와 오류율을 계산합니다.${reviewableResults.length > scoredReviewResults.length ? ` 무응답 구간이 남은 세션 ${reviewableResults.length - scoredReviewResults.length}개도 문항별로 열 수 있습니다.` : scoredReviewResults.length < 5 ? ' 아직 표본이 적어 약점으로 단정하지 않습니다.' : ''}` : reviewableResults.length ? `${reviewableResults.length}개 세션의 무응답 구간이 복습에 남아 있습니다. 제출 전 놓친 문제부터 확인하세요.` : '이전 기록에는 문항별 데이터가 없습니다. 새 연습부터 자동으로 쌓입니다.'}</p></div><button type="button" onClick={() => openReview()}>복습 센터 열기 <span>→</span></button></div>
@@ -935,14 +940,14 @@ export default function Home() {
             {practicedGames.map(({ game, latest, mode, comparisonAvailable, comparableSessions, best }) => <article key={game.id} className={`tone-${game.tone}`}>
               <div><span>{game.no}</span><div><small>{game.skill}</small><b>{game.title}</b></div></div>
               <dl aria-label={comparisonAvailable ? `${resultModeLabels[mode ?? 'unknown']}의 동일 설정 안에서 비교한 기록` : '비교할 설정 정보가 없는 이전 기록'}><div><dt>{resultModeLabels[mode ?? 'unknown']} 최근 {resultScoreLabel(latest)}</dt><dd>{formatResultScore(latest)}</dd></div><div><dt>동일 설정 최고</dt><dd>{comparisonAvailable ? `${best}%` : '—'}</dd></div><div><dt>동일 설정 횟수</dt><dd>{comparisonAvailable ? `${comparableSessions.length}회` : '설정 없음'}</dd></div></dl>
-              <div className="game-record-actions">{hasReviewData(latest.review) ? <button type="button" onClick={() => openReview(latest.id)} aria-label={`${game.title} 최근 세션 복습`}>{latest.review?.attempts.length ? '복습' : '통계'}</button> : <span>복습 기록 없음</span>}<button type="button" onPointerEnter={preloadGameStage} onFocus={preloadGameStage} onClick={() => openGame(game.id)} aria-label={`${game.title} 다시 연습`}>다시 연습 <span aria-hidden="true">→</span></button></div>
+              <div className="game-record-actions">{hasReviewData(latest.review) ? <button type="button" onClick={() => openReview(latest.id)} aria-label={`${game.title} 최근 세션 복습`}>{latest.review?.attempts.length ? '복습' : '통계'}</button> : <span>복습 기록 없음</span>}<button type="button" onPointerEnter={preloadGameStage} onPointerDown={preloadGameStage} onFocus={preloadGameStage} onClick={() => openGame(game.id)} aria-label={`${game.title} 다시 연습`}>다시 연습 <span aria-hidden="true">→</span></button></div>
             </article>)}
           </div>
           <details className="history-panel">
             <summary>최근 세션 상세 보기 <span>{recentResults.length}개</span></summary>
             <div className="record-list">{recentResults.map((result) => { const game = games.find((item) => item.id === result.gameId)!; const modeLabel = resultModeLabels[getResultMode(result)]; return <article key={result.id}><div><span>{game.no}</span><b>{game.title}</b><small>{formatCompletedAt(result.completedAt)} · {modeLabel}</small></div><dl><div><dt>{resultScoreLabel(result)}</dt><dd>{formatResultScore(result)}</dd></div><div><dt>{result.gameId === 'path' ? '경로 연결 중앙시간' : '중앙 반응'}</dt><dd>{result.medianRt ? `${result.medianRt}ms` : '—'}</dd></div><div><dt>{resultErrorLabel(result)}</dt><dd>{result.errors}</dd></div></dl>{hasReviewData(result.review) ? <button type="button" onClick={() => openReview(result.id)}>{result.review?.attempts.length ? '문항별 복습' : '오류 통계'}</button> : <small className="legacy-review-label">복습 데이터 없음</small>}</article>; })}</div>
           </details>
-        </> : <div className="records-empty"><Image className="records-empty-coach" src="/assets/mori-coach-hero-v2-800.webp" alt="" width={800} height={700} sizes="(max-width: 620px) 66px, 86px" /><div><b>첫 기록을 만들어 볼까요?</b><span>게임 하나를 끝내면 최근 점수와 자주 틀린 이유를 여기서 확인할 수 있어요.</span><button type="button" onPointerEnter={preloadGameStage} onFocus={preloadGameStage} onClick={() => openGame(featuredGame.id)}>추천 게임 시작</button></div></div>}
+        </> : <div className="records-empty"><Image className="records-empty-coach" src="/assets/mori-coach-hero-v2-800.webp" alt="" width={800} height={700} sizes="(max-width: 620px) 66px, 86px" /><div><b>첫 기록을 만들어 볼까요?</b><span>게임 하나를 끝내면 최근 점수와 자주 틀린 이유를 여기서 확인할 수 있어요.</span><button type="button" onPointerEnter={preloadGameStage} onPointerDown={preloadGameStage} onFocus={preloadGameStage} onClick={() => openGame(featuredGame.id)}>추천 게임 시작</button></div></div>}
       </section>
 
       <footer>
@@ -951,7 +956,7 @@ export default function Home() {
           <button type="button" onClick={() => setGuideGameId(featuredGame.id)}>9개 게임 전략 가이드</button>
           <button type="button" onClick={() => openReview()}>내 실수 복습</button>
           <button type="button" onClick={() => setReadinessOpen(true)}>응시 준비센터</button>
-          <button type="button" onClick={() => setDataManagementOpen(true)}>기록 백업·복원</button>
+          <button type="button" onPointerEnter={preloadDataManagementDialog} onPointerDown={preloadDataManagementDialog} onFocus={preloadDataManagementDialog} onClick={() => setDataManagementOpen(true)}>기록 백업·복원</button>
           <button type="button" onClick={() => setFeedbackOpen(true)}>의견 보내기</button>
           <a href="https://www.jobda.im/acc/tutorial" target="_blank" rel="noreferrer">JOBDA 구 역량검사 연습 ↗</a>
           <a href="https://github.com/twitter/twemoji" target="_blank" rel="noreferrer">손동작 이미지: Twemoji · CC BY 4.0</a>

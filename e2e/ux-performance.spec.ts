@@ -16,6 +16,27 @@ async function openRotation(page: Page) {
   await expect(page.locator('section[data-game="rotation"]')).toBeVisible();
 }
 
+test('모바일 첫 화면은 게임 코드를 미리 받지 않고 실제 의도 신호에서 준비한다', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const scripts = new Set<string>();
+  page.on('request', (request) => {
+    if (request.resourceType() === 'script' && request.url().includes('/_next/static/chunks/')) scripts.add(request.url());
+  });
+
+  await page.goto('/', { waitUntil: 'networkidle' });
+  await page.waitForTimeout(500);
+  const initialScriptCount = scripts.size;
+  expect(initialScriptCount).toBeGreaterThan(0);
+  await page.waitForTimeout(750);
+  expect(scripts.size).toBe(initialScriptCount);
+
+  const start = page.locator('.hero-primary');
+  await start.focus();
+  await expect.poll(() => scripts.size).toBeGreaterThan(initialScriptCount);
+  await start.click();
+  await expect(page.locator('.stage-panel')).toBeVisible({ timeout: 8_000 });
+});
+
 test('홈 준비 점검은 선택하지 않은 게임의 대용량 자산을 내려받지 않는다', async ({ page }) => {
   const requested: string[] = [];
   page.on('request', (request) => requested.push(request.url()));
@@ -63,10 +84,12 @@ test('맞춤 설정 바로가기는 작은 화면에서도 약속 유형 선택�
 
     const shortcut = page.getByRole('button', { name: /내 연습 설정 바로가기/ });
     await expect(shortcut).toBeVisible();
-    await shortcut.click();
+    await shortcut.focus();
+    await shortcut.press('Enter');
 
     const options = page.locator('.appointment-practice-options');
     await expect(options).toBeFocused();
+    await expect.poll(() => options.evaluate((element) => window.getComputedStyle(element).outlineWidth)).toBe('3px');
     await expect(options.getByText('연습할 게임 선택', { exact: true })).toBeVisible();
     const box = await options.boundingBox();
     expect(box).not.toBeNull();

@@ -79,16 +79,20 @@ function RotationAttemptPanel({ attempt }: { attempt: RotationReviewAttempt }) {
 
   useEffect(() => {
     const query = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const applyPreference = (matches: boolean) => {
-      setReducedMotion(matches);
-      if (matches) setPlaying(false);
+    const applyPreference = () => {
+      const reduced = query.matches || document.documentElement.dataset.motion === 'reduce';
+      setReducedMotion(reduced);
+      if (reduced) setPlaying(false);
     };
-    const update = (event: MediaQueryListEvent) => applyPreference(event.matches);
-    const frame = window.requestAnimationFrame(() => applyPreference(query.matches));
+    const update = () => applyPreference();
+    const preferenceObserver = new MutationObserver(applyPreference);
+    const frame = window.requestAnimationFrame(applyPreference);
     query.addEventListener('change', update);
+    preferenceObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-motion'] });
     return () => {
       window.cancelAnimationFrame(frame);
       query.removeEventListener('change', update);
+      preferenceObserver.disconnect();
     };
   }, []);
 
@@ -147,7 +151,7 @@ function RotationAttemptPanel({ attempt }: { attempt: RotationReviewAttempt }) {
       <div className="review-replay-controls" role="group" aria-label="클릭 기록 재생">
         <button type="button" onClick={() => { if (eventIndex > 0) move(0); }} aria-disabled={eventIndex === 0}>처음</button>
         <button type="button" onClick={() => { if (eventIndex > 0) move(eventIndex - 1); }} aria-disabled={eventIndex === 0}>이전</button>
-        <button type="button" className="is-play" aria-pressed={playing} title={reducedMotion ? '기기의 동작 줄이기 설정에 따라 자동 재생을 끕니다.' : undefined} onClick={() => { if (eventIndex >= attempt.events.length - 1) setEventIndex(0); setPlaying((value) => !value); }} disabled={attempt.events.length < 2 || reducedMotion}>{reducedMotion ? '재생 꺼짐' : playing ? '일시정지' : '자동 재생'}</button>
+        <button type="button" className="is-play" aria-pressed={playing} title={reducedMotion ? '움직임 줄이기 설정에 따라 자동 재생을 끕니다.' : undefined} onClick={() => { if (eventIndex >= attempt.events.length - 1) setEventIndex(0); setPlaying((value) => !value); }} disabled={attempt.events.length < 2 || reducedMotion}>{reducedMotion ? '재생 꺼짐' : playing ? '일시정지' : '자동 재생'}</button>
         <button type="button" onClick={() => { if (eventIndex < attempt.events.length - 1) move(eventIndex + 1); }} aria-disabled={eventIndex >= attempt.events.length - 1}>다음</button>
         <button type="button" onClick={() => { if (eventIndex < attempt.events.length - 1) move(attempt.events.length - 1); }} aria-disabled={eventIndex >= attempt.events.length - 1}>끝</button>
       </div>
