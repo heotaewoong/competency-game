@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { GameId } from '../lib/game-data';
-import { ESSENTIAL_ASSET_PATHS } from '../lib/essential-assets';
+import { essentialAssetPathsFor } from '../lib/essential-assets';
 import {
   DEFAULT_ACCESSIBILITY_PREFERENCES,
   assessReadiness,
@@ -163,7 +163,7 @@ export function ReadinessCenter({
     runIdRef.current = runId;
     setAssessment(captureCurrentReadinessAssessment());
     setAssetStatus('checking');
-    const settled = await Promise.allSettled(ESSENTIAL_ASSET_PATHS.map(preloadAsset));
+    const settled = await Promise.allSettled(essentialAssetPathsFor(gameId).map(preloadAsset));
     if (runIdRef.current !== runId) return;
     const nextAssetStatus = settled.every((result) => result.status === 'fulfilled') ? 'ready' : 'review';
     setAssetStatus(nextAssetStatus);
@@ -175,7 +175,7 @@ export function ReadinessCenter({
     try { window.localStorage.setItem(READINESS_STORAGE_KEY, JSON.stringify({ version: 1, ...summary })); }
     catch { /* 준비 결과 저장 실패는 위 저장소 항목에서 별도로 안내한다. */ }
     onCheckedRef.current?.(summary);
-  }, []);
+  }, [gameId]);
 
   useEffect(() => { onCheckedRef.current = onChecked; }, [onChecked]);
 

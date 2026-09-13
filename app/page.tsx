@@ -31,7 +31,12 @@ function StageLoading() {
   return <div className="stage-backdrop"><div className="stage-loading" role="status" aria-live="polite"><i aria-hidden="true" /><b>게임을 준비하고 있습니다.</b></div></div>;
 }
 
-const GameStage = dynamic(() => import('./components/game-stage').then((module) => module.GameStage), {
+const loadGameStage = () => import('./components/game-stage');
+const preloadGameStage = () => {
+  if (typeof window !== 'undefined') void loadGameStage().catch(() => undefined);
+};
+
+const GameStage = dynamic(() => loadGameStage().then((module) => module.GameStage), {
   ssr: false,
   loading: StageLoading,
 });
@@ -267,8 +272,21 @@ export default function Home() {
   const futureSchemaWriteBlockedRef = useRef(false);
   const resultsRef = useRef<SessionResult[]>([]);
   const resultsGenerationRef = useRef<string | null>(null);
+  const gamesSectionRef = useRef<HTMLElement>(null);
 
   useEffect(() => { resultsRef.current = results; }, [results]);
+
+  useEffect(() => {
+    const section = gamesSectionRef.current;
+    if (!section || typeof window.IntersectionObserver === 'undefined') return;
+    const observer = new window.IntersectionObserver(([entry]) => {
+      if (!entry?.isIntersecting) return;
+      preloadGameStage();
+      observer.disconnect();
+    }, { rootMargin: '360px 0px' });
+    observer.observe(section);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     let restored: SavedReadinessSummary | null = null;
@@ -624,6 +642,10 @@ export default function Home() {
   }
 
   const closeActiveGame = useCallback(() => setActiveGame(null), []);
+  const openGame = useCallback((gameId: GameId) => {
+    preloadGameStage();
+    setActiveGame(gameId);
+  }, []);
   const switchActiveGame = useCallback((gameId: GameId) => setActiveGame(gameId), []);
 
   const recentResults = results.slice(0, 8);
@@ -795,7 +817,7 @@ export default function Home() {
             <span><i aria-hidden="true">✓</i> 9가지 게임</span>
           </div>
           <div className="hero-actions">
-            <button type="button" className="hero-primary" onClick={() => setActiveGame(featuredGame.id)}>
+            <button type="button" className="hero-primary" onPointerEnter={preloadGameStage} onFocus={preloadGameStage} onClick={() => openGame(featuredGame.id)}>
               <span>{recommendationButtonLabels[recommendation.reason]}</span>
               <b>{featuredGame.title}</b><i aria-hidden="true">→</i>
             </button>
@@ -816,7 +838,7 @@ export default function Home() {
               <p>{recommendationCopy}</p>
             </div>
             <div className="coach-glow" aria-hidden="true" />
-            <Image className="mori-hero" src="/assets/mori-coach-hero-v2-800.webp" alt="" width={800} height={700} sizes="(max-width: 360px) 116px, (max-width: 620px) 148px, (max-width: 760px) 170px, (max-width: 980px) 160px, 260px" priority unoptimized />
+            <Image className="mori-hero" src="/assets/mori-coach-hero-v2-800.webp" alt="" width={800} height={700} sizes="(max-width: 360px) 116px, (max-width: 620px) 148px, (max-width: 760px) 170px, (max-width: 980px) 160px, 260px" priority />
           </section>
           <article className="continue-card" aria-label={`${featuredGame.title} 추천 요약`}>
             <div className="continue-head"><span>{recommendationButtonLabels[recommendation.reason]}</span><em>{featuredGame.no}</em></div>
@@ -833,7 +855,7 @@ export default function Home() {
             ) : (
               <div className="continue-tip"><b>처음이라면</b><span>설명을 켠 연습 모드로 시작해 조작부터 익혀보세요.</span></div>
             )}
-            <button type="button" className="continue-start" onClick={() => setActiveGame(featuredGame.id)}>설정하고 시작 <span aria-hidden="true">→</span></button>
+            <button type="button" className="continue-start" onPointerEnter={preloadGameStage} onFocus={preloadGameStage} onClick={() => openGame(featuredGame.id)}>설정하고 시작 <span aria-hidden="true">→</span></button>
           </article>
         </aside>
       </section>
@@ -845,7 +867,7 @@ export default function Home() {
         <div className="readiness-banner-action"><small>{readinessSummary ? `${readinessSummary.overall === 'ready' ? '준비 완료' : readinessSummary.overall === 'review' ? '확인 필요' : '환경 조정 필요'} · ${formatCompletedAt(readinessSummary.checkedAt)}` : '아직 이 브라우저를 점검하지 않았습니다.'}</small><button type="button" onClick={() => setReadinessOpen(true)}>{readinessSummary ? '다시 점검' : '준비 점검 시작'} <span aria-hidden="true">→</span></button></div>
       </section>
 
-      <section className="game-section" id="games" aria-labelledby="games-title">
+      <section ref={gamesSectionRef} className="game-section" id="games" aria-labelledby="games-title">
         <div className="section-heading">
           <div>
             <span>9가지 훈련</span>
@@ -894,7 +916,7 @@ export default function Home() {
                     <b>설정 후 시작 <i aria-hidden="true">→</i></b>
                   </div>
                 </div>
-                <button className="game-card-hitarea" type="button" onClick={() => setActiveGame(game.id)} aria-label={`${game.title}, 난이도 ${game.difficulty}, 설정 열기`} aria-describedby={summaryId}><span className="sr-only">{game.title} 설정 열기</span></button>
+                <button className="game-card-hitarea" type="button" onPointerEnter={preloadGameStage} onFocus={preloadGameStage} onClick={() => openGame(game.id)} aria-label={`${game.title}, 난이도 ${game.difficulty}, 설정 열기`} aria-describedby={summaryId}><span className="sr-only">{game.title} 설정 열기</span></button>
               </article>
             );
           })}
@@ -913,14 +935,14 @@ export default function Home() {
             {practicedGames.map(({ game, latest, mode, comparisonAvailable, comparableSessions, best }) => <article key={game.id} className={`tone-${game.tone}`}>
               <div><span>{game.no}</span><div><small>{game.skill}</small><b>{game.title}</b></div></div>
               <dl aria-label={comparisonAvailable ? `${resultModeLabels[mode ?? 'unknown']}의 동일 설정 안에서 비교한 기록` : '비교할 설정 정보가 없는 이전 기록'}><div><dt>{resultModeLabels[mode ?? 'unknown']} 최근 {resultScoreLabel(latest)}</dt><dd>{formatResultScore(latest)}</dd></div><div><dt>동일 설정 최고</dt><dd>{comparisonAvailable ? `${best}%` : '—'}</dd></div><div><dt>동일 설정 횟수</dt><dd>{comparisonAvailable ? `${comparableSessions.length}회` : '설정 없음'}</dd></div></dl>
-              <div className="game-record-actions">{hasReviewData(latest.review) ? <button type="button" onClick={() => openReview(latest.id)} aria-label={`${game.title} 최근 세션 복습`}>{latest.review?.attempts.length ? '복습' : '통계'}</button> : <span>복습 기록 없음</span>}<button type="button" onClick={() => setActiveGame(game.id)} aria-label={`${game.title} 다시 연습`}>다시 연습 <span aria-hidden="true">→</span></button></div>
+              <div className="game-record-actions">{hasReviewData(latest.review) ? <button type="button" onClick={() => openReview(latest.id)} aria-label={`${game.title} 최근 세션 복습`}>{latest.review?.attempts.length ? '복습' : '통계'}</button> : <span>복습 기록 없음</span>}<button type="button" onPointerEnter={preloadGameStage} onFocus={preloadGameStage} onClick={() => openGame(game.id)} aria-label={`${game.title} 다시 연습`}>다시 연습 <span aria-hidden="true">→</span></button></div>
             </article>)}
           </div>
           <details className="history-panel">
             <summary>최근 세션 상세 보기 <span>{recentResults.length}개</span></summary>
             <div className="record-list">{recentResults.map((result) => { const game = games.find((item) => item.id === result.gameId)!; const modeLabel = resultModeLabels[getResultMode(result)]; return <article key={result.id}><div><span>{game.no}</span><b>{game.title}</b><small>{formatCompletedAt(result.completedAt)} · {modeLabel}</small></div><dl><div><dt>{resultScoreLabel(result)}</dt><dd>{formatResultScore(result)}</dd></div><div><dt>{result.gameId === 'path' ? '경로 연결 중앙시간' : '중앙 반응'}</dt><dd>{result.medianRt ? `${result.medianRt}ms` : '—'}</dd></div><div><dt>{resultErrorLabel(result)}</dt><dd>{result.errors}</dd></div></dl>{hasReviewData(result.review) ? <button type="button" onClick={() => openReview(result.id)}>{result.review?.attempts.length ? '문항별 복습' : '오류 통계'}</button> : <small className="legacy-review-label">복습 데이터 없음</small>}</article>; })}</div>
           </details>
-        </> : <div className="records-empty"><Image className="records-empty-coach" src="/assets/mori-coach-hero-v2-800.webp" alt="" width={800} height={700} sizes="(max-width: 620px) 66px, 86px" unoptimized /><div><b>첫 기록을 만들어 볼까요?</b><span>게임 하나를 끝내면 최근 점수와 자주 틀린 이유를 여기서 확인할 수 있어요.</span><button type="button" onClick={() => setActiveGame(featuredGame.id)}>추천 게임 시작</button></div></div>}
+        </> : <div className="records-empty"><Image className="records-empty-coach" src="/assets/mori-coach-hero-v2-800.webp" alt="" width={800} height={700} sizes="(max-width: 620px) 66px, 86px" /><div><b>첫 기록을 만들어 볼까요?</b><span>게임 하나를 끝내면 최근 점수와 자주 틀린 이유를 여기서 확인할 수 있어요.</span><button type="button" onPointerEnter={preloadGameStage} onFocus={preloadGameStage} onClick={() => openGame(featuredGame.id)}>추천 게임 시작</button></div></div>}
       </section>
 
       <footer>
@@ -947,8 +969,8 @@ export default function Home() {
       {readinessOpen && <ReadinessCenter onClose={() => setReadinessOpen(false)} onChecked={handleReadinessChecked} />}
       {dataManagementOpen && <DataManagementDialog results={results} onImport={importBackupResults} onClear={clearAllResults} onClose={() => setDataManagementOpen(false)} />}
       {feedbackOpen && <FeedbackDialog onClose={() => setFeedbackOpen(false)} />}
-      {guideGameId && <StrategyGuideDialog initialGameId={guideGameId} onClose={() => setGuideGameId(null)} onStartGame={(gameId) => { setGuideGameId(null); setActiveGame(gameId); }} />}
-      {reviewSessionId !== null && <ReviewDialog results={results} initialSessionId={reviewSessionId || undefined} initialErrorCode={reviewErrorCode || undefined} onClose={closeReview} onPracticeGame={(gameId) => { closeReview(); setActiveGame(gameId); }} />}
+      {guideGameId && <StrategyGuideDialog initialGameId={guideGameId} onClose={() => setGuideGameId(null)} onStartGame={(gameId) => { setGuideGameId(null); openGame(gameId); }} />}
+      {reviewSessionId !== null && <ReviewDialog results={results} initialSessionId={reviewSessionId || undefined} initialErrorCode={reviewErrorCode || undefined} onClose={closeReview} onPracticeGame={(gameId) => { closeReview(); openGame(gameId); }} />}
       {activeGame && (
         <GameStage key={activeGame} gameId={activeGame} onClose={closeActiveGame} onSwitch={switchActiveGame} onSave={saveResult} onReadinessChecked={handleReadinessChecked} />
       )}

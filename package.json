@@ -6,9 +6,12 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "vinext dev",
-    "build": "vinext build",
-    "start": "vinext start",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "dev:sites": "vinext dev",
+    "build:sites": "vinext build",
+    "start:sites": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "typecheck": "tsc --noEmit -p tsconfig.quality.json",
     "quality": "npm run typecheck && npm run lint && npm test && npm run test:e2e",
@@ -46,8 +49,8 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.54.2",
-    "@cloudflare/workers-types": "5.20260831.1",
+    "@cloudflare/vite-plugin": "1.54.8",
+    "@cloudflare/workers-types": "5.20260911.1",
     "@openai/sites-vite-plugin": "^0.1.0 || ^0.2.0",
     "@playwright/test": "1.62.1",
     "@tailwindcss/postcss": "4.2.1",
@@ -63,7 +66,7 @@
     "typescript": "5.9.3",
     "vinext": "^1.0.0-beta.8",
     "vite": "8.2.2",
-    "wrangler": "4.127.1"
+    "wrangler": "4.131.1"
   },
   "type": "module"
 }

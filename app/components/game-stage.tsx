@@ -186,6 +186,19 @@ const DEFAULT_NBACK_PREFERENCES: NBackPreferences = {
   progression: 'fixed',
 };
 const DEFAULT_APPOINTMENT_PREFERENCES: AppointmentPreferences = { selectedRounds: [...APPOINTMENT_KIND_ORDER] };
+let appointmentFoodAtlas: HTMLImageElement | null = null;
+
+function preloadAppointmentFoodAtlas() {
+  if (typeof window === 'undefined' || appointmentFoodAtlas) return;
+  const image = new window.Image();
+  image.decoding = 'async';
+  image.onerror = () => {
+    if (appointmentFoodAtlas === image) appointmentFoodAtlas = null;
+  };
+  image.src = '/assets/appointment/food-sprite-v1.webp';
+  appointmentFoodAtlas = image;
+}
+
 const DEFAULT_FOCUSED_PRACTICE: FocusedPracticePreferences = {
   rps: 'full',
   path: 'all',
@@ -629,13 +642,6 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
   }, []);
 
   useEffect(() => {
-    if (gameId !== 'appointment') return;
-    const foodAtlas = new window.Image();
-    foodAtlas.decoding = 'async';
-    foodAtlas.src = '/assets/appointment/food-sprite-v1.webp';
-  }, [gameId]);
-
-  useEffect(() => {
     try {
       const saved = JSON.parse(window.localStorage.getItem(FOCUSED_PRACTICE_STORAGE_KEY) ?? 'null') as Partial<FocusedPracticePreferences> | null;
       if (!saved) return;
@@ -1015,6 +1021,9 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
   }
 
   function startSession(nextMode: SessionMode = sessionMode) {
+    if (gameId === 'appointment' && (nextMode === 'simulation' || appointmentPreferences.selectedRounds.includes('food'))) {
+      preloadAppointmentFoodAtlas();
+    }
     visibilityPausedRef.current = false;
     setVisibilityPaused(false);
     setVisibilityPauseCount(0);
@@ -1028,6 +1037,17 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
   const selectedAppointmentRounds = APPOINTMENT_ROUNDS.filter((round) => appointmentPreferences.selectedRounds.includes(round.kind));
   const appointmentPracticeSummary = `선택: ${selectedAppointmentRounds.map((round) => round.kind === 'bus' ? round.label : round.shortLabel).join(' · ')} · 총 ${selectedAppointmentRounds.length * practiceConfig.quantity}문항`;
 
+  function focusPracticeSettings() {
+    const selector = sessionMode === 'simulation'
+      ? '.simulation-preset'
+      : gameId === 'appointment'
+        ? '.appointment-practice-options'
+        : '.session-settings';
+    const target = panelRef.current?.querySelector<HTMLElement>(selector);
+    target?.scrollIntoView({ block: 'start' });
+    target?.focus({ preventScroll: true });
+  }
+
   return (
     <div className="stage-backdrop" role="presentation">
       <section ref={panelRef} className="stage-panel" data-game={gameId} role={overlayOpen ? undefined : 'dialog'} aria-modal={overlayOpen ? undefined : true} aria-label={overlayOpen ? undefined : `${game.title} ${sessionMode === 'practice' ? '연습' : '실전형 연습'}`} tabIndex={-1}>
@@ -1039,6 +1059,10 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
               <div className="intro-heading">
                 <div><p>{game.no} · {game.skill}</p><h2>{game.title}</h2><span>{game.rounds}</span></div>
               </div>
+              <button className="intro-settings-shortcut" type="button" onClick={focusPracticeSettings}>
+                <span><b>내 연습 설정 바로가기</b><small>{gameId === 'appointment' && sessionMode === 'practice' ? appointmentPracticeSummary : sessionMode === 'practice' ? '분량·속도·세부 훈련 설정 확인' : '현재 게임의 실전형 고정 설정 확인'}</small></span>
+                <em>설정 확인 <i aria-hidden="true">↓</i></em>
+              </button>
               <ol className="intro-flow" aria-label="시작 전 확인 순서">
                 <li><span>1</span><div><b>과제 이해</b><small>목표·조작 확인</small></div></li>
                 <li><span>2</span><div><b>무점수 예제</b><small>규칙 2문항 확인</small></div></li>
@@ -1083,8 +1107,8 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
             <div className="intro-actions">
               <a href={`https://www.jobda.im/info/${officialInfo[gameId]}`} target="_blank" rel="noreferrer"><span>공식 공개 해설</span><small>2023 레거시 ↗</small></a>
               <div className="intro-start-options" aria-label="시작 방식 바로 선택">
-                <button className={`stage-start stage-start-practice ${sessionMode === 'practice' ? 'is-selected' : ''}`.trim()} type="button" onClick={() => startSession('practice')}><span>설명·연습 시작</span><small>{gameId === 'appointment' ? appointmentPracticeSummary : sessionMode === 'practice' ? '선택한 내 설정으로 시작' : '맞춤 연습으로 바로 전환'}</small></button>
-                <button className={`stage-start stage-start-simulation ${sessionMode === 'simulation' ? 'is-selected' : ''}`.trim()} type="button" onClick={() => startSession('simulation')}><span>실전형 연습 시작</span><small>{ruleCheckComplete ? '규칙 확인 완료 · 고정 프리셋' : sessionMode === 'simulation' ? '무점수 예제는 선택 사항입니다' : '실전형으로 바로 전환'}</small></button>
+                <button className={`stage-start stage-start-practice ${sessionMode === 'practice' ? 'is-selected' : ''}`.trim()} type="button" onPointerEnter={() => gameId === 'appointment' && appointmentPreferences.selectedRounds.includes('food') && preloadAppointmentFoodAtlas()} onFocus={() => gameId === 'appointment' && appointmentPreferences.selectedRounds.includes('food') && preloadAppointmentFoodAtlas()} onClick={() => startSession('practice')}><span>설명·연습 시작</span><small>{gameId === 'appointment' ? appointmentPracticeSummary : sessionMode === 'practice' ? '선택한 내 설정으로 시작' : '맞춤 연습으로 바로 전환'}</small></button>
+                <button className={`stage-start stage-start-simulation ${sessionMode === 'simulation' ? 'is-selected' : ''}`.trim()} type="button" onPointerEnter={() => gameId === 'appointment' && preloadAppointmentFoodAtlas()} onFocus={() => gameId === 'appointment' && preloadAppointmentFoodAtlas()} onClick={() => startSession('simulation')}><span>실전형 연습 시작</span><small>{ruleCheckComplete ? '규칙 확인 완료 · 고정 프리셋' : sessionMode === 'simulation' ? '무점수 예제는 선택 사항입니다' : '실전형으로 바로 전환'}</small></button>
               </div>
             </div>
           </>
@@ -1122,7 +1146,7 @@ function ModeSelector({ mode, onChange }: { mode: SessionMode; onChange: (mode: 
     select(next);
   }
   return (
-    <section className="mode-selector" aria-label="진행 모드 선택">
+    <section className="mode-selector" aria-label="진행 모드 선택" tabIndex={-1}>
       <div><b>진행 모드</b><small>시작 전에 연습 또는 실전형 연습을 선택하세요</small></div>
       <div className="mode-options" role="radiogroup" aria-label="진행 방식">
         <button ref={practiceRef} type="button" role="radio" aria-checked={mode === 'practice'} tabIndex={mode === 'practice' ? 0 : -1} className={mode === 'practice' ? 'active' : ''} onKeyDown={navigate} onClick={() => onChange('practice')}>
@@ -1247,7 +1271,7 @@ function FocusedPracticeOptions({ gameId, value, onChange }: { gameId: GameId; v
 function SimulationPreset({ gameId }: { gameId: GameId }) {
   if (gameId === 'rotation') {
     return (
-      <section className="simulation-preset rotation-simulation-preset" aria-label="도형 회전 실전형 연습 고정 설정">
+      <section className="simulation-preset rotation-simulation-preset" aria-label="도형 회전 실전형 연습 고정 설정" tabIndex={-1}>
         <div><span><b>실전형 흐름 고정 설정</b><small>세션 시작 후 변경할 수 없습니다</small></span><em>훈련용 6 MIN</em></div>
         <dl>
           <div><dt>1단계</dt><dd>알파벳 · 3분</dd></div>
@@ -1260,7 +1284,7 @@ function SimulationPreset({ gameId }: { gameId: GameId }) {
   }
   if (gameId === 'nback') {
     return (
-      <section className="simulation-preset nback-simulation-preset" aria-label="도형 순서 실전형 연습 고정 설정">
+      <section className="simulation-preset nback-simulation-preset" aria-label="도형 순서 실전형 연습 고정 설정" tabIndex={-1}>
         <div><span><b>실전형 흐름 고정 설정</b><small>세션 시작 시 5개 고정 묶음 중 하나를 고르고 두 라운드에서 유지합니다</small></span><em>훈련용 {NBACK_SIMULATION_N2_PROBLEM_COUNT + NBACK_SIMULATION_N23_PROBLEM_COUNT}문항</em></div>
         <dl>
           <div><dt>출제 도형</dt><dd>선택된 한 묶음의 3개 도형</dd></div>
@@ -1274,7 +1298,7 @@ function SimulationPreset({ gameId }: { gameId: GameId }) {
   }
   if (gameId === 'appointment') {
     return (
-      <section className="simulation-preset appointment-simulation-preset" aria-label="약속 정하기 실전형 연습 고정 설정">
+      <section className="simulation-preset appointment-simulation-preset" aria-label="약속 정하기 실전형 연습 고정 설정" tabIndex={-1}>
         <div><span><b>4라운드 고정 흐름</b><small>요일 → 위치 → 메뉴 → 미탑승 버스</small></span><em>2024 자료 · 4 MIN</em></div>
         <dl>
           {APPOINTMENT_ROUNDS.map((round) => <div key={round.kind}><dt>{round.number}라운드</dt><dd>{round.shortLabel}</dd></div>)}
@@ -1296,7 +1320,7 @@ function SimulationPreset({ gameId }: { gameId: GameId }) {
     : '';
   const publicDuration = '2024 공개 기업자료상 4분(현행 보장 아님)';
   return (
-    <section className="simulation-preset" aria-label="실전형 연습 고정 설정">
+    <section className="simulation-preset" aria-label="실전형 연습 고정 설정" tabIndex={-1}>
       <div><span><b>실전형 연습 고정 설정</b><small>세션 시작 후 변경할 수 없습니다</small></span><em>고정</em></div>
       <dl>
         <div><dt>{spec.quantityLabel}</dt><dd>{config.quantity}</dd></div>
@@ -1538,7 +1562,7 @@ function AppointmentPracticeOptions({ value, questionsPerRound, onChange }: { va
     if (next.length) onChange({ selectedRounds: APPOINTMENT_KIND_ORDER.filter((item) => next.includes(item)) });
   }
   return (
-    <section className="appointment-practice-options" aria-labelledby="appointment-round-picker-title">
+    <section className="appointment-practice-options" aria-labelledby="appointment-round-picker-title" tabIndex={-1}>
       <header>
         <span><i>맞춤 연습 필수 설정</i><b id="appointment-round-picker-title">연습할 게임 선택</b><small>요일·위치·메뉴·미탑승 버스 중 원하는 유형만 고르세요. 최소 1개는 유지됩니다.</small></span>
         <div><em>{value.selectedRounds.length} / 4 선택</em><button type="button" onClick={() => onChange(DEFAULT_APPOINTMENT_PREFERENCES)}>전체 4개</button></div>
@@ -1567,7 +1591,7 @@ function SessionSettings({ gameId, value, onChange, guidedPacing, onGuidedPacing
     onChange({ ...value, [field]: Math.min(max, Math.max(min, value[field] + delta)) });
   }
   return (
-    <section className="session-settings" aria-label="연습 세션 설정">
+    <section className="session-settings" aria-label="연습 세션 설정" tabIndex={-1}>
       <div><span><b>세션 설정</b><small>공개 형식 기반 연습값 · 언제든 변경 가능</small></span><button type="button" onClick={() => onChange(defaultPracticeConfig(gameId))}>기본값</button></div>
       <div className="session-steppers">
         <div className="session-stepper" role="group" aria-labelledby={`${gameId}-quantity-label`}><span id={`${gameId}-quantity-label`}>{spec.quantityLabel}</span><div><button type="button" aria-label={`${spec.quantityLabel} 줄이기`} onClick={() => change('quantity', -spec.quantityStep)}>−</button><output aria-live="polite" aria-label={`${spec.quantityLabel} 현재 값`}>{value.quantity}</output><button type="button" aria-label={`${spec.quantityLabel} 늘리기`} onClick={() => change('quantity', spec.quantityStep)}>＋</button></div></div>
@@ -1745,7 +1769,7 @@ function ResultView({ result, mode, storageNotice, onClose, onRestart, onOpenGui
     <section className="stage-result" role="region" aria-labelledby="result-title" tabIndex={-1}>
       <span className="result-check" aria-hidden="true">✓</span><p>{mode === 'practice' ? '연습 모드' : '실전형 연습'} 완료 · {game.no}</p><h2 id="result-title">{game.title} 결과</h2>
       <aside className="result-coach" aria-label="모리의 다음 연습 안내">
-        <Image src="/assets/mori-coach-hero-v2-800.webp" alt="" width={800} height={700} sizes="(max-width: 620px) 62px, 82px" unoptimized />
+        <Image src="/assets/mori-coach-hero-v2-800.webp" alt="" width={800} height={700} sizes="(max-width: 620px) 62px, 82px" />
         <div><span>모리의 한 줄 코칭</span><b>{coachTitle}</b><p>{coachCopy}</p></div>
       </aside>
       <div className="result-metrics">

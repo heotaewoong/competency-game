@@ -2392,6 +2392,26 @@ body {
   gap: 8px;
   list-style: none;
 }
+.intro-settings-shortcut {
+  width: 100%;
+  min-height: 52px;
+  margin-top: 16px;
+  padding: 9px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid #cdd8f1;
+  border-radius: 12px;
+  color: #31405a;
+  background: linear-gradient(135deg, #f7f8ff, #eef5ff);
+  text-align: left;
+}
+.intro-settings-shortcut > span { min-width: 0; display: grid; gap: 3px; }
+.intro-settings-shortcut b { font-size: 12px; }
+.intro-settings-shortcut small { overflow: hidden; color: #66758c; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.intro-settings-shortcut em { min-height: 34px; padding: 7px 10px; display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; border-radius: 9px; color: #fff; background: var(--brand); font-size: 10px; font-style: normal; font-weight: 850; }
+.mode-selector:focus-visible, .appointment-practice-options:focus-visible { outline: 3px solid #2459d6; outline-offset: 4px; }
 .intro-flow li {
   position: relative;
   min-width: 0;
@@ -2818,6 +2838,9 @@ html[data-contrast="high"] :where(.hero-copy p, .card-copy p, .readiness-banner-
 html[data-contrast="high"] button:focus-visible, html[data-contrast="high"] a:focus-visible, html[data-contrast="high"] summary:focus-visible { outline-color: #004bd6; outline-width: 4px; }
 html[data-text-scale="large"] :where(button, a, label, legend) { font-size: max(13px, .875em); }
 html[data-text-scale="large"] :where(p, li, dt, dd, small) { font-size: max(12px, .8em); }
+html[data-text-scale="large"] .hero-copy > p:not(.eyebrow) { font-size: 16px; }
+html[data-text-scale="large"] :where(.mode-options button > span, .mode-options button > b, .appointment-practice-options b, .appointment-round-picker em, .intro-settings-shortcut b, .intro-settings-shortcut em) { font-size: 12px !important; }
+html[data-text-scale="large"] :where(.mode-options button > small, .appointment-practice-options small, .intro-start-options .stage-start > small, .intro-settings-shortcut small) { overflow: visible; font-size: 12px !important; line-height: 1.45; text-overflow: clip; white-space: normal; }
 html[data-motion="reduce"] { scroll-behavior: auto; }
 html[data-motion="reduce"] *, html[data-motion="reduce"] *::before, html[data-motion="reduce"] *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 

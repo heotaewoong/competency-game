@@ -105,9 +105,10 @@ test('게임별 무점수 규칙 예제는 오답 재시도 뒤 정답 2/2일 �
 });
 
 test('실제 게임 필수 이미지가 404면 준비 완료로 오판하지 않는다', async ({ page }) => {
-  await page.route('**/assets/rps/paper.svg', (route) => route.fulfill({ status: 404, body: 'missing' }));
+  await page.route('**/assets/appointment/food-sprite-v1.webp', (route) => route.fulfill({ status: 404, body: 'missing' }));
   await page.goto('/');
-  await page.getByRole('button', { name: /준비 점검 시작/ }).click();
+  await page.getByRole('button', { name: /약속 정하기, 난이도 상, 설정 열기/ }).click();
+  await page.locator('section[data-game="appointment"]').getByRole('button', { name: '응시 준비센터 열기' }).click();
 
   const dialog = page.getByRole('dialog', { name: '응시 준비센터' });
   await expect(dialog.getByText('시작 전 확인 필요', { exact: true })).toBeVisible({ timeout: 10_000 });
@@ -118,13 +119,14 @@ test('실제 게임 필수 이미지가 404면 준비 완료로 오판하지 않
 });
 
 test('필수 이미지 응답이 멈춰도 제한시간 뒤 확인 필요로 수렴하고 재점검할 수 있다', async ({ page }) => {
-  await page.route('**/assets/rps/rock.svg', async (route) => {
+  await page.route('**/assets/appointment/food-sprite-v1.webp', async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 7_500));
     await route.abort('timedout').catch(() => undefined);
   });
   await page.goto('/');
+  await page.getByRole('button', { name: /약속 정하기, 난이도 상, 설정 열기/ }).click();
   const startedAt = Date.now();
-  await page.getByRole('button', { name: /준비 점검 시작/ }).click();
+  await page.locator('section[data-game="appointment"]').getByRole('button', { name: '응시 준비센터 열기' }).click();
 
   const dialog = page.getByRole('dialog', { name: '응시 준비센터' });
   await expect(dialog.getByText('시작 전 확인 필요', { exact: true })).toBeVisible({ timeout: 9_000 });
