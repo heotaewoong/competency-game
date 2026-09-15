@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { games } from './game-data.ts';
-import { rotationGuideTips } from './rotation-guide.ts';
+import { rotationGuideExamples, rotationGuideTips } from './rotation-guide.ts';
 import { strategyGuides } from './strategy-guide.ts';
 
 test('9개 게임은 각각 하나의 완성된 전략 가이드를 가진다', () => {
@@ -35,6 +35,12 @@ test('도형 회전 가이드는 135° 묶음과 두 대각선 축 샌드위치 
   for (const token of ['45° 세 칸 = 135°', 'y=x(↗축 대칭)', '좌45° → 좌우 반전 → 우45°', 'y=-x(↘축 대칭)', '좌45° → 상하 반전 → 우45°']) {
     assert.ok(tips.includes(token), `도형 회전 팁에 ${token} 포함`);
   }
+});
+
+test('도형 회전 가이드의 격자 예시는 실제 게임과 같은 4×4다', () => {
+  const tileExamples = rotationGuideExamples.filter((example) => example.kind === 'tiles');
+  assert.ok(tileExamples.length > 0);
+  assert.ok(tileExamples.every((example) => example.pattern?.length === 16));
 });
 
 test('도형 회전 상세 팁도 수학 좌표 축과 입력 공식을 같은 방향으로 안내한다', () => {

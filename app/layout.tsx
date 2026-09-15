@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import './performance-overrides.css';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://heobrain-competency-game.vercel.app'),

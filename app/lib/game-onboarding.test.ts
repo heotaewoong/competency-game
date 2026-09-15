@@ -3,6 +3,21 @@ import test from 'node:test';
 import { games } from './game-data.ts';
 import { evaluateRuleCheck, hasCompletedRuleCheck, RULE_CHECK_VERSION, ruleChecksByGame, upsertRuleCheckCompletion } from './game-onboarding.ts';
 
+test('공개 자료의 시간과 이 앱이 구현한 라운드를 구분한다', () => {
+  for (const game of games) {
+    assert.match(game.time, /공개 자료/);
+    assert.match(game.time, /초대.*우선/);
+    assert.match(game.rounds, /공개형/);
+  }
+
+  const rps = games.find((game) => game.id === 'rps');
+  assert.ok(rps);
+  assert.match(rps.rule, /2023형 세 라운드를 구현/);
+  assert.match(rps.rounds, /구현: 2023 공개형 3R/);
+  assert.match(rps.rounds, /2026 자료 4R은 세부 미공개/);
+  assert.doesNotMatch(rps.time, /4R/);
+});
+
 test('9개 게임마다 서로 다른 무점수 규칙 확인 문항 2개를 제공한다', () => {
   assert.deepEqual(Object.keys(ruleChecksByGame).sort(), games.map((game) => game.id).sort());
   const ids = new Set<string>();

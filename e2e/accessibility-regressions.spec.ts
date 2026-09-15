@@ -156,7 +156,7 @@ test('약속 위치 격자는 경계 방향키에서도 페이지 스크롤을 �
   await expect(last).toBeFocused();
 });
 
-test('마법약 실전형은 실제 색 대신 예측 성공·실패만 안내한다', async ({ page }) => {
+test('마법약 실전형은 선택 후 실제 제조색과 예측 성공·실패를 함께 안내한다', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /마법약 만들기, 난이도 중, 설정 열기/ }).click();
 
@@ -166,16 +166,81 @@ test('마법약 실전형은 실제 색 대신 예측 성공·실패만 안내�
 
   const workspace = page.locator('.game-workspace.game-potion');
   await expect(workspace.locator('.potion-layout')).toBeVisible({ timeout: 10_000 });
-  await expect(workspace.locator('.workspace-foot')).toContainText('근거 해설 없이 진행 · 선택 후 성공·실패만 공개');
+  await expect(workspace.locator('.workspace-foot > span').first()).toContainText('매 시행 성공·실패와 실제 제조색 공개');
   await expect(workspace.locator('.workspace-foot')).not.toContainText('피드백 없이 고정 설정으로 진행 중');
   await expect(workspace.locator('.workspace-foot .sr-only')).not.toContainText(/이 조합의 이전 관찰은 파랑/);
 
   await workspace.locator('.potion-actions button.blue').click();
-  await expect(workspace.locator('.potion-result-preview small')).toContainText(/예측 (성공|실패)입니다/);
-  await expect(workspace.locator('.potion-result-preview small')).not.toContainText(/실제 결과/);
-  await expect(workspace.locator('.potion-result-preview small')).not.toHaveAttribute('aria-live');
+  const preview = workspace.locator('.potion-result-preview');
+  await expect(preview.locator('header b')).toHaveText('실제 제조색 공개');
+  await expect(preview.locator('small')).toContainText(/실제 결과는 (파란 약|빨간 약)입니다/);
+  await expect(preview.locator('small')).toContainText(/예측 (성공|실패)입니다/);
+  await expect(preview.locator('article.is-result')).toHaveCount(1);
+  await expect(preview.locator('article.is-muted')).toHaveCount(1);
+  await expect(preview.locator('small')).not.toHaveAttribute('aria-live');
+  await expect(workspace.locator('.workspace-foot > b')).toContainText(/예측 (성공|실패)/);
+  await expect(workspace.locator('.workspace-foot > b')).toContainText(/실제 결과: (파란 약|빨간 약)/);
   await expect(workspace.locator('.workspace-foot .sr-only')).toContainText(/예측 (성공|실패)/);
-  await expect(workspace.locator('.workspace-foot .sr-only')).not.toContainText(/실제 결과:/);
+  await expect(workspace.locator('.workspace-foot .sr-only')).toContainText(/실제 결과: (파란 약|빨간 약)/);
+});
+
+test('마법약 실전형의 시간 초과 실제색도 다음 동일 레시피 학습 근거에 누적한다', async ({ page }) => {
+  // 100회 전체 시행을 생략하지 않고 가상 시계와 누적 근거까지 확인하므로
+  // 느린 CI에서도 테스트 러너 상한이 제품 흐름보다 먼저 끝나지 않게 한다.
+  test.setTimeout(360_000);
+  await page.goto('/');
+  await page.getByRole('button', { name: /마법약 만들기, 난이도 중, 설정 열기/ }).click();
+
+  const stage = page.locator('section[data-game="potion"]');
+  await expect(stage).toBeVisible();
+  const clockOrigin = Date.UTC(2030, 0, 1);
+  await page.clock.install({ time: clockOrigin });
+  await page.clock.pauseAt(clockOrigin + 60_000);
+  await stage.getByRole('radio', { name: /실전형 연습/ }).click();
+  await stage.getByRole('button', { name: /^실전형 연습 시작/ }).click();
+
+  const workspace = page.locator('.game-workspace.game-potion');
+  await expect(workspace.locator('.game-preparation')).toBeVisible();
+  const potionLayout = workspace.locator('.potion-layout');
+  for (let countdownStep = 0; countdownStep < 4 && !await potionLayout.isVisible(); countdownStep += 1) {
+    await page.clock.runFor(1_100);
+  }
+  await expect(potionLayout).toBeVisible();
+  const progress = workspace.locator('.workspace-progress span');
+  const deadline = workspace.locator('.time-strip');
+  const totalTrials = Number((await progress.textContent())?.match(/\d+\s*\/\s*(\d+)/)?.[1]);
+  expect(totalTrials).toBeGreaterThan(1);
+
+  for (let trial = 0; trial < totalTrials; trial += 1) {
+    await expect(progress).toContainText(`${trial + 1} / ${totalTrials}`);
+    await expect(deadline).toHaveAttribute('data-deadline-active', 'true');
+    const responseLimit = Number(await deadline.getAttribute('aria-valuenow'));
+    expect(responseLimit).toBeGreaterThan(0);
+    await page.clock.runFor(responseLimit + 50);
+
+    if (trial === 0) {
+      await expect(workspace.locator('.potion-result-preview small')).toContainText(/시간이 끝났습니다.*실제 결과는 (파란 약|빨간 약)입니다/);
+      await expect(workspace.locator('.potion-result-preview article.is-result')).toHaveCount(1);
+      await expect(workspace.locator('.workspace-foot > b')).toContainText(/시간 초과.*실제 결과: (파란 약|빨간 약)/);
+    }
+
+    await page.clock.runFor(trial === totalTrials - 1 ? 600 : 920);
+  }
+
+  const result = page.locator('.stage-result');
+  await expect(result).toBeVisible();
+  const evidenceDetail = await result.locator('.potion-result-detail').textContent();
+  const evidenceTrials = evidenceDetail?.match(/근거 판정 가능 시행\s*(\d+)\s*\/\s*(\d+)/);
+  expect(evidenceTrials, '시간 초과 실제색이 누적되면 다음 블록에서 근거 판정이 가능해야 합니다.').not.toBeNull();
+  expect(Number(evidenceTrials?.[1])).toBeGreaterThan(0);
+  expect(Number(evidenceTrials?.[2])).toBe(totalTrials);
+
+  await result.getByRole('button', { name: '문항별 복습' }).click();
+  const review = page.getByRole('dialog', { name: '내 실수 복습' });
+  await expect(review).toBeVisible();
+  await expect(review.locator('.review-attempt-detail')).toContainText('시간 초과');
+  await expect(review.locator('.review-facts')).toContainText(/실제결과\s*(파란 약|빨간 약)/);
+  await expect(review.locator('.review-facts')).not.toContainText('비공개');
 });
 
 test('마법약 누적 근거는 연습 힌트를 켠 사용자에게만 동일하게 제공한다', async ({ page }) => {

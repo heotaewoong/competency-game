@@ -1,10 +1,10 @@
 import type { GameId, SessionResult } from './game-data';
 
 export type ResultMode = 'practice' | 'simulation' | 'unknown';
-export const SIMULATION_PRESET_VERSION = 'legacy-training-v2-2026-09';
+export const SIMULATION_PRESET_VERSION = 'public-rules-training-v4-2026-09';
 type ComparisonDetailKey =
   | 'quantity' | 'paceMs' | 'practiceFocus' | 'evidenceHint' | 'scoringVersion'
-  | 'rotationContent' | 'rotationLetters' | 'rotationTargetIds' | 'previewUsed'
+  | 'rotationContent' | 'rotationLetters' | 'rotationTargetIds' | 'previewUsed' | 'rotationPhaseCount' | 'rotationPhaseDurationMs'
   | 'appointmentRounds' | 'guidedPacing'
   | 'nbackTask' | 'nbackGroupSetting' | 'nbackProgression' | 'nbackNameLabels' | 'nbackMnemonics'
   | 'accessibilityProfile'
@@ -12,7 +12,7 @@ type ComparisonDetailKey =
 
 const comparisonDetailKeys: readonly ComparisonDetailKey[] = [
   'quantity', 'paceMs', 'practiceFocus', 'evidenceHint', 'scoringVersion',
-  'rotationContent', 'rotationLetters', 'rotationTargetIds', 'previewUsed',
+  'rotationContent', 'rotationLetters', 'rotationTargetIds', 'previewUsed', 'rotationPhaseCount', 'rotationPhaseDurationMs',
   'appointmentRounds', 'guidedPacing',
   'nbackTask', 'nbackGroupSetting', 'nbackProgression', 'nbackNameLabels', 'nbackMnemonics',
   'accessibilityProfile',
@@ -32,7 +32,7 @@ const practiceSpecificKeys: Record<GameId, readonly ComparisonDetailKey[]> = {
 };
 
 const simulationSpecificKeys: Partial<Record<GameId, readonly ComparisonDetailKey[]>> = {
-  rotation: ['rotationContent', 'rotationLetters', 'rotationTargetIds', 'previewUsed'],
+  rotation: ['rotationContent', 'rotationLetters', 'rotationTargetIds', 'previewUsed', 'rotationPhaseCount', 'rotationPhaseDurationMs'],
   appointment: ['appointmentRounds'],
   nback: ['nbackTask', 'nbackGroupSetting', 'nbackProgression'],
   potion: ['scoringVersion'],
@@ -48,7 +48,7 @@ export function getResultMode(result: SessionResult): ResultMode {
 
 function hasUsableDetail(detail: Record<string, string | number>, key: ComparisonDetailKey) {
   const value = detail[key];
-  if (key === 'quantity' || key === 'paceMs') return typeof value === 'number' && Number.isFinite(value);
+  if (key === 'quantity' || key === 'paceMs' || key === 'rotationPhaseCount' || key === 'rotationPhaseDurationMs') return typeof value === 'number' && Number.isFinite(value);
   return typeof value === 'string' && value.trim().length > 0;
 }
 

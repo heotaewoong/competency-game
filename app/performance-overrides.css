@@ -1,0 +1,14 @@
+/* Keep the full-screen assessment workspace isolated from the animated home. */
+.site-shell.is-game-open > :not(.stage-backdrop) {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.site-shell.is-game-open > :not(.stage-backdrop) * {
+  animation-play-state: paused !important;
+}
+
+.stage-backdrop {
+  background: #0b1324;
+  backdrop-filter: none;
+}

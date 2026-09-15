@@ -16,7 +16,7 @@ async function openRotation(page: Page) {
   await expect(page.locator('section[data-game="rotation"]')).toBeVisible();
 }
 
-test('모바일 첫 화면은 게임 코드를 미리 받지 않고 실제 의도 신호에서 준비한다', async ({ page }) => {
+test('모바일은 게임 목록에 진입해도 게임 코드를 받지 않고 실제 의도 신호에서 준비한다', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const scripts = new Set<string>();
   page.on('request', (request) => {
@@ -32,7 +32,12 @@ test('모바일 첫 화면은 게임 코드를 미리 받지 않고 실제 의�
   await page.waitForTimeout(750);
   expect(scripts.size).toBe(initialScriptCount);
 
-  const start = page.locator('.hero-primary');
+  await page.locator('#games').evaluate((element) => element.scrollIntoView());
+  await expect(page.locator('#games')).toBeInViewport();
+  await page.waitForTimeout(750);
+  expect(scripts.size).toBe(initialScriptCount);
+
+  const start = page.locator('.game-card-hitarea').first();
   await start.focus();
   await expect.poll(() => scripts.size).toBeGreaterThan(initialScriptCount);
   await start.click();

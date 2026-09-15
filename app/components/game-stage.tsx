@@ -61,11 +61,13 @@ import { COUNT_WORD_PAIRS, buildCountTrials, type CountFocus } from '../lib/coun
 import {
   APPOINTMENT_FOODS,
   APPOINTMENT_KIND_ORDER,
+  APPOINTMENT_LOCATION_LABELS,
   APPOINTMENT_LOCATIONS,
   APPOINTMENT_ROUNDS,
   APPOINTMENT_SIMULATION_QUESTIONS_PER_ROUND,
   APPOINTMENT_SIMULATION_TOTAL_QUESTIONS,
   APPOINTMENT_WEEKDAYS,
+  buildAppointmentSimulationTrials,
   buildAppointmentTrials,
   type AppointmentKind,
   type AppointmentTrial,
@@ -228,8 +230,11 @@ const practiceSpecs: Record<GameId, PracticeSpec> = {
   count: { quantityLabel:'문제 수', quantityMin:5, quantityMax:50, quantityStep:5, quantityDefault:15, paceLabel:'단어 제시', paceMin:500, paceMax:2500, paceStep:100, paceDefault:1000 },
   mouse: { quantityLabel:'라운드 수', quantityMin:3, quantityMax:15, quantityStep:1, quantityDefault:5, paceLabel:'생쥐 제시', paceMin:700, paceMax:3000, paceStep:100, paceDefault:1000 },
 };
-const APPOINTMENT_SIMULATION_PERSON_MS = 2200;
-const APPOINTMENT_SIMULATION_ANSWER_MS = 6500;
+// Public material confirms roughly four minutes and 4 × 10 questions, but not
+// the exact stimulus/answer split. These trainer-owned limits target that total
+// without presenting either value as an official timer.
+const APPOINTMENT_SIMULATION_PERSON_MS = 1000;
+const APPOINTMENT_SIMULATION_ANSWER_MS = 2700;
 const PRESENTATION_ADVANCE_LOCK_MS = 320;
 const ROUND_INPUT_SETTLE_MS = 320;
 const MOUSE_DECISION_TRANSITION_MS = 420;
@@ -244,14 +249,15 @@ function defaultPracticeConfig(gameId: GameId): PracticeConfig {
 // 실제 문항 수와 채점식은 공개되지 않았으므로 공식값으로 표시하지 않는다.
 const simulationConfigs: Record<GameId, PracticeConfig> = {
   rps: { quantity: 30, paceMs: 4500 },
-  rotation: { quantity: 10, paceMs: 30000 },
-  appointment: { quantity: APPOINTMENT_SIMULATION_QUESTIONS_PER_ROUND, paceMs: APPOINTMENT_SIMULATION_PERSON_MS },
+  // Rotation is phase-timed rather than question-timed: two 3-minute phases.
+  rotation: { quantity: 2, paceMs: 180000 },
+  appointment: { quantity: APPOINTMENT_SIMULATION_TOTAL_QUESTIONS, paceMs: APPOINTMENT_SIMULATION_PERSON_MS },
   path: { quantity: 4, paceMs: 60000 },
-  potion: { quantity: 42, paceMs: 7000 },
+  potion: { quantity: 100, paceMs: 3000 },
   nback: { quantity: NBACK_SIMULATION_N2_PROBLEM_COUNT + NBACK_SIMULATION_N23_PROBLEM_COUNT, paceMs: 3000 },
   number: { quantity: 12, paceMs: 20000 },
-  count: { quantity: 40, paceMs: 1000 },
-  mouse: { quantity: 15, paceMs: 1000 },
+  count: { quantity: 46, paceMs: 1000 },
+  mouse: { quantity: 20, paceMs: 1000 },
 };
 function simulationConfig(gameId: GameId) {
   return simulationConfigs[gameId];
@@ -976,7 +982,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
             previewUsed: typeof rawPreviewUsed === 'string' ? rawPreviewUsed : rotationPreferences.showPreview ? '사용' : '숨김',
           }
       : {};
-    const appointmentDetail: Record<string, string | number> = gameId === 'appointment' ? { appointmentRounds: sessionMode === 'simulation' ? '1→2→3→4 고정' : appointmentPreferences.selectedRounds.map((kind) => APPOINTMENT_ROUNDS.find((round) => round.kind === kind)?.number).join('→') } : {};
+    const appointmentDetail: Record<string, string | number> = gameId === 'appointment' ? { appointmentRounds: sessionMode === 'simulation' ? '2023 공개 영상형 · 1→2→3→4 · 각 10문항' : appointmentPreferences.selectedRounds.map((kind) => APPOINTMENT_ROUNDS.find((round) => round.kind === kind)?.number).join('→') } : {};
     const guidedPacingDetail: Record<string, string | number> = sessionMode === 'practice'
       ? { guidedPacing: guidedPacing ? '제한시간 없음' : '설정 제한시간 적용' }
       : {};
@@ -1296,11 +1302,11 @@ function SimulationPreset({ gameId }: { gameId: GameId }) {
       <section className="simulation-preset rotation-simulation-preset" aria-label="도형 회전 실전형 연습 고정 설정" tabIndex={-1}>
         <div><span><b>실전형 흐름 고정 설정</b><small>세션 시작 후 변경할 수 없습니다</small></span><em>훈련용 6 MIN</em></div>
         <dl>
-          <div><dt>1단계</dt><dd>알파벳 · 3분</dd></div>
-          <div><dt>2단계</dt><dd>4×4 격자 · 3분</dd></div>
+          <div><dt>1단계</dt><dd>알파벳 · 훈련용 3분</dd></div>
+          <div><dt>2단계</dt><dd>4×4 격자 · 훈련용 3분</dd></div>
           <div><dt>도움 표시</dt><dd>미리보기·정오 숨김</dd></div>
         </dl>
-        <p>2023 개발사 영상은 약 6분, 2024 JAINWON 공개 기업자료는 4분으로 서로 다릅니다. 이 도구는 공개 영상의 두 단계 흐름을 연습하도록 6분을 쓰며, 문항마다 다시 주어지는 20회 조작 한도는 범위가 공개되지 않은 독립 훈련값입니다. 실제 응시에서는 기업 초대 안내를 우선하세요.</p>
+        <p>2023 개발사 영상은 전체 약 6분, 2024 JAINWON 공개 기업자료는 4분으로 서로 다릅니다. 이 도구의 단계별 3분은 6분을 같은 길이로 나눈 독립 훈련값입니다. 문항마다 다시 주어지는 20회 조작 한도도 범위가 공개되지 않은 자체값이며, 실제 응시에서는 기업 초대 안내를 우선하세요.</p>
       </section>
     );
   }
@@ -1321,13 +1327,14 @@ function SimulationPreset({ gameId }: { gameId: GameId }) {
   if (gameId === 'appointment') {
     return (
       <section className="simulation-preset appointment-simulation-preset" aria-label="약속 정하기 실전형 연습 고정 설정" tabIndex={-1}>
-        <div><span><b>4라운드 고정 흐름</b><small>요일 → 위치 → 메뉴 → 미탑승 버스</small></span><em>2024 자료 · 4 MIN</em></div>
+        <div><span><b>2023 공개 영상형</b><small>요일 → 위치 → 메뉴 → 미탑승 버스</small></span><em>4R · 40문항</em></div>
         <dl>
-          {APPOINTMENT_ROUNDS.map((round) => <div key={round.kind}><dt>{round.number}라운드</dt><dd>{round.shortLabel}</dd></div>)}
-          <div><dt>앱 자체 분량</dt><dd>라운드당 {APPOINTMENT_SIMULATION_QUESTIONS_PER_ROUND}문항</dd></div>
+          {APPOINTMENT_ROUNDS.map((round) => <div key={round.kind}><dt>{round.number}라운드</dt><dd>{round.shortLabel} · {APPOINTMENT_SIMULATION_QUESTIONS_PER_ROUND}문항</dd></div>)}
+          <div><dt>메뉴 답안</dt><dd>이미지 6개 · 공개 예시 기반 자체 구성</dd></div>
+          <div><dt>버스 답안</dt><dd>숫자 5개 · 친구별 2·1·2개는 공개 예시 반복값</dd></div>
           <div><dt>진행</dt><dd>자동 제시 · 정오 피드백 숨김</dd></div>
         </dl>
-        <p>JOBDA 공개 레거시 가이드에서 확인되는 네 라운드 순서와 약 4분 흐름을 적용합니다. 기업별 문항 수·노출시간은 비공개이므로 분량과 시간은 훈련용 고정값입니다.</p>
+        <p>공식 영상에서 확인되는 네 라운드와 라운드별 10문항을 적용합니다. 1~3라운드의 ‘후반 4개’는 절반 이후로 운용하며, 정확한 전환 문항·노출시간·응답시간은 비공개라 약 4분에 맞춘 독립 훈련값입니다. 2024 공개자료의 버스 6선지 변형과 섞지 않았습니다.</p>
       </section>
     );
   }
@@ -1335,17 +1342,20 @@ function SimulationPreset({ gameId }: { gameId: GameId }) {
   const config = simulationConfig(gameId);
   const publicFlow = gameId === 'rps' ? '내 패 → 상대 패 → 관점 혼합'
     : gameId === 'path' ? '최소 울타리 계획 → 경로 제출'
-    : gameId === 'potion' ? '4가지 재료 조합 반복 → 성공·실패 피드백'
+    : gameId === 'potion' ? '4가지 재료 조합 반복 → 성공·실패와 실제 제조색 피드백'
     : gameId === 'number' ? '점등 숫자 → 건너뛰기·두 번 누르기'
     : gameId === 'count' ? '좌우 단어 개수 비교'
     : gameId === 'mouse' ? '생쥐 → 고양이 → 빨강 → 파랑'
     : '';
   const publicDuration = '2024 공개 기업자료상 4분(현행 보장 아님)';
+  const publicQuantityNote = '독립 훈련값';
   return (
     <section className="simulation-preset" aria-label="실전형 연습 고정 설정" tabIndex={-1}>
       <div><span><b>실전형 연습 고정 설정</b><small>세션 시작 후 변경할 수 없습니다</small></span><em>고정</em></div>
       <dl>
-        <div><dt>{spec.quantityLabel}</dt><dd>{config.quantity}</dd></div>
+        <div><dt>{spec.quantityLabel}</dt><dd>{config.quantity} · {publicQuantityNote}</dd></div>
+        {gameId === 'rps' && <div><dt>라운드별 분량</dt><dd>1R 10 → 2R 10 → 3R 10 · 독립값</dd></div>}
+        {gameId === 'number' && <div><dt>라운드별 분량</dt><dd>1R 6 → 2R 6 · 독립값</dd></div>}
         <div><dt>{spec.paceLabel}</dt><dd>{formatPace(config.paceMs)}</dd></div>
         <div><dt>공개 진행 순서</dt><dd>{publicFlow}</dd></div>
         <div><dt>자료상 시간</dt><dd>{publicDuration}</dd></div>
@@ -1353,8 +1363,8 @@ function SimulationPreset({ gameId }: { gameId: GameId }) {
         {gameId === 'mouse' && <><div><dt>훈련용 중간 제시</dt><dd>빈칸 0.5초 · 고양이 1.2초 · 색 0.9초</dd></div><div><dt>훈련용 응답 제한</dt><dd>색마다 {formatPace(Math.max(4000, config.paceMs * 4))}</dd></div></>}
         <div><dt>도움 표시</dt><dd>숨김</dd></div>
       </dl>
-      {gameId === 'path' && <p>2023 개발사 영상은 경로가 맞더라도 목표보다 많은 울타리를 쓰면 감점된다고 설명합니다. 비공개 감점식은 흥내 내지 않고 경로 성공과 목표 울타리 일치를 별도 기록하며, 클릭 제한 대신 전체 조작 수를 남깁니다.</p>}
-      <p>공개된 라운드·판정·조작 순서는 유지하되, 공개되지 않은 문항 수와 채점식은 독립 훈련값을 사용합니다. JOBDA 공식 모의검사나 동일 문항을 뜻하지 않습니다.</p>
+      {gameId === 'path' && <p>2023 개발사 영상은 경로가 맞더라도 목표보다 많은 울타리를 쓰면 감점된다고 설명합니다. 비공개 감점식은 흉내 내지 않고 경로 성공과 목표 울타리 일치를 별도 기록하며, 클릭 제한 대신 전체 조작 수를 남깁니다.</p>}
+      <p>공개된 라운드·판정·조작 순서를 유지합니다. 공개 튜토리얼 화면에서 확인한 분량은 이 버전의 연습 프로필에만 적용하며 현행 기업 초대의 총문항을 보장하지 않습니다. 그 밖의 공개되지 않은 수량·시간·채점식은 독립 훈련값이며 JOBDA 공식 모의검사나 동일 문항을 뜻하지 않습니다.</p>
     </section>
   );
 }
@@ -1834,10 +1844,13 @@ function RpsGame({ onFinish, onClose, config }: GameProps & { config: PracticeCo
   const [rts, setRts] = useState<number[]>([]);
   const [feedback, setFeedback] = useState('');
   const [locked, setLocked] = useState(false);
+  const [phaseTransition, setPhaseTransition] = useState(false);
+  const [transitionCountdown, setTransitionCountdown] = useState<number | null>(null);
   const responseClock = useActiveElapsedClock();
   const resolvedRef = useRef(false);
   const reviewAttemptsRef = useRef<GenericReviewAttempt[]>([]);
   const firstChoiceRef = useRef<HTMLButtonElement>(null);
+  const transitionRef = useRef<HTMLElement>(null);
   const schedule = useManagedTimeout();
   const item = trials[round];
 
@@ -1868,10 +1881,17 @@ function RpsGame({ onFinish, onClose, config }: GameProps & { config: PracticeCo
       if (round === trials.length - 1) onFinish(resultFor('rps', nextCorrect, trials.length, nextRts, nextErrors, undefined, compactReviewPayload('rps', reviewAttemptsRef.current)));
       else {
         schedule(() => {
-          resolvedRef.current = false;
-          setRound(round + 1);
+          const nextRound = round + 1;
+          const changesPhase = trials[nextRound].phase !== item.phase;
+          setRound(nextRound);
           setFeedback('');
-          setLocked(false);
+          if (mode === 'simulation' && changesPhase) {
+            setPhaseTransition(true);
+            setTransitionCountdown(3);
+          } else {
+            resolvedRef.current = false;
+            setLocked(false);
+          }
         }, ROUND_INPUT_SETTLE_MS);
       }
     }, mode === 'practice' ? 1000 : 420);
@@ -1883,16 +1903,32 @@ function RpsGame({ onFinish, onClose, config }: GameProps & { config: PracticeCo
     responseClock.restart();
   }, [locked, responseClock, round]);
   usePausableTimeout(() => choose(null), config.paceMs, !locked && !guidedPacing, round);
+  const beginNextPhase = useCallback(() => {
+    setPhaseTransition(false);
+    setTransitionCountdown(null);
+    resolvedRef.current = false;
+    setLocked(false);
+  }, []);
+  usePausableTimeout(beginNextPhase, 3000, phaseTransition && mode === 'simulation', `rps-phase-transition-${round}`);
+  usePausableTimeout(() => {
+    setTransitionCountdown((value) => value === null ? null : Math.max(1, value - 1));
+  }, 1000, phaseTransition && transitionCountdown !== null && transitionCountdown > 1, `rps-phase-countdown-${round}-${transitionCountdown ?? 'done'}`);
 
   useEffect(() => {
-    if (locked || isPaused) return;
+    if (locked || isPaused || phaseTransition) return;
     const frame = window.requestAnimationFrame(() => firstChoiceRef.current?.focus({ preventScroll: true }));
     return () => window.cancelAnimationFrame(frame);
-  }, [isPaused, locked, round]);
+  }, [isPaused, locked, phaseTransition, round]);
+
+  useEffect(() => {
+    if (!phaseTransition || isPaused) return;
+    const frame = window.requestAnimationFrame(() => transitionRef.current?.focus({ preventScroll: true }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [isPaused, phaseTransition]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (isPaused || event.repeat || shouldIgnoreGameShortcut(event)) return;
+      if (isPaused || phaseTransition || event.repeat || shouldIgnoreGameShortcut(event)) return;
       if (['ArrowLeft','ArrowDown','ArrowRight'].includes(event.key)) event.preventDefault();
       if (event.key === 'ArrowLeft') choose('scissors');
       if (event.key === 'ArrowDown') choose('rock');
@@ -1904,17 +1940,29 @@ function RpsGame({ onFinish, onClose, config }: GameProps & { config: PracticeCo
 
   const shown = rpsChoices.find((choice) => choice.id === item.shown)!;
   const phaseNumber = item.phase === '내 패 찾기' ? 1 : item.phase === '상대 패 찾기' ? 2 : 3;
+  const phaseStart = trials.findIndex((trial) => trial.phase === item.phase);
+  const phaseTotal = trials.filter((trial) => trial.phase === item.phase).length;
+  const phasePosition = round - phaseStart + 1;
   const statusMessage = `${item.phase}. ${item.unknown === 'player' ? '내 패' : '상대 패'}가 물음표이고, 보이는 패는 ${shown.label}입니다. 내가 이기는 관계를 선택하세요.`;
   return (
-    <GameFrame gameId="rps" current={round + 1} total={trials.length} helper="← 가위 · ↓ 바위 · → 보" feedback={feedback} statusMessage={statusMessage} onClose={onClose}>
-      <div className="round-label"><span>단계 {phaseNumber} / 3</span><b>{item.phase}</b></div>
-      {guidedPacing ? <p className="guided-pacing-note" role="status">시간 제한 없이 연습 중 · 준비되면 답을 선택하세요</p> : <DeadlineBar key={round} duration={config.paceMs} label="문제 제한시간" active={!locked} />}
-      <div className="rps-board">
-        <article><span>나</span>{item.unknown === 'player' ? <b className="rps-question">?</b> : <Image src={shown.image} alt={shown.label} width={126} height={126} />}</article>
-        <div><b>VS</b><span>내가 이기는 관계</span></div>
-        <article><span>상대</span>{item.unknown === 'opponent' ? <b className="rps-question">?</b> : <Image src={shown.image} alt={shown.label} width={126} height={126} />}</article>
-      </div>
-      <div className="rps-actions">{rpsChoices.map((choice, index) => <button ref={index === 0 ? firstChoiceRef : undefined} key={choice.id} disabled={locked} onKeyDown={(event) => { if (event.repeat) event.preventDefault(); }} onClick={(event) => { if (event.detail > 1) return; choose(choice.id); }}><Image src={choice.image} alt="" width={42} height={42} /><span>{choice.key}</span><b>{choice.label}</b></button>)}</div>
+    <GameFrame gameId="rps" current={mode === 'simulation' ? phaseTransition ? 0 : phasePosition : round + 1} total={mode === 'simulation' ? phaseTotal : trials.length} progressLabel={mode === 'simulation' ? `${phaseNumber}라운드 · ${item.phase}` : undefined} zeroLabel="전환 준비" helper="← 가위 · ↓ 바위 · → 보" feedback={feedback} statusMessage={phaseTransition ? `${phaseNumber}라운드 ${item.phase} 전환 준비.` : statusMessage} onClose={onClose}>
+      {phaseTransition ? (
+        <section ref={transitionRef} className="rps-round-transition" role="region" tabIndex={-1} aria-labelledby="rps-round-transition-title">
+          <span>ROUND {phaseNumber} / 3</span>
+          <h3 id="rps-round-transition-title">{item.phase}</h3>
+          <p>{phaseNumber === 2 ? '이번에는 상대 패가 물음표입니다.' : '내 패와 상대 패의 물음표 위치가 섞여 나옵니다.'}</p>
+          <div className="rps-transition-countdown" role="timer" aria-label={`${transitionCountdown ?? 0}초 뒤 ${phaseNumber}라운드 시작`}><b>{transitionCountdown}</b><small>초 뒤 자동 시작</small></div>
+        </section>
+      ) : <>
+        <div className="round-label"><span>라운드 {phaseNumber} / 3</span><b>{item.phase}</b></div>
+        {guidedPacing ? <p className="guided-pacing-note" role="status">시간 제한 없이 연습 중 · 준비되면 답을 선택하세요</p> : <DeadlineBar key={round} duration={config.paceMs} label="문제 제한시간" active={!locked} />}
+        <div className="rps-board">
+          <article><span>나</span>{item.unknown === 'player' ? <b className="rps-question">?</b> : <Image src={shown.image} alt={shown.label} width={126} height={126} />}</article>
+          <div><b>VS</b><span>내가 이기는 관계</span></div>
+          <article><span>상대</span>{item.unknown === 'opponent' ? <b className="rps-question">?</b> : <Image src={shown.image} alt={shown.label} width={126} height={126} />}</article>
+        </div>
+        <div className="rps-actions">{rpsChoices.map((choice, index) => <button ref={index === 0 ? firstChoiceRef : undefined} key={choice.id} disabled={locked} onKeyDown={(event) => { if (event.repeat) event.preventDefault(); }} onClick={(event) => { if (event.detail > 1) return; choose(choice.id); }}><Image src={choice.image} alt="" width={42} height={42} /><span>{choice.key}</span><b>{choice.label}</b></button>)}</div>
+      </>}
     </GameFrame>
   );
 }
@@ -2104,6 +2152,7 @@ function RotationGame({ onFinish, onClose, config, preferences, onPreviewChange 
     const weakestExactTransform = exactTransformStats[0];
     onFinish(resultFor('rotation', correctAttempts.length, attempts.length, attempts.filter((attempt) => attempt.responded).map((attempt) => attempt.rt), attempts.length - correctAttempts.length, {
       attemptCount: attempts.length,
+      ...(mode === 'simulation' ? { rotationPhaseCount: 2, rotationPhaseDurationMs: ROTATION_PHASE_MS } : {}),
       clickEfficiency: editTotal ? `${Math.round((optimalTotal / editTotal) * 100)}%` : '—',
       averageExtraClicks: correctAttempts.length ? averageExtra.toFixed(1) : '—',
       letterAccuracy: typeof typeAccuracy(letters) === 'number' ? `${typeAccuracy(letters)}%` : '—',
@@ -2421,7 +2470,7 @@ function RotationGame({ onFinish, onClose, config, preferences, onPreviewChange 
   return (
     <GameFrame gameId="rotation" current={mode === 'simulation' ? (simulationPhase === 'letters' ? 1 : 2) : round + 1} total={mode === 'simulation' ? 2 : puzzles.length} helper="1·2 회전 · 3·4 반전 · Backspace 지움 · Delete 초기화 · Enter 제출" feedback={feedback} statusMessage={accessibleRotationStatus} onClose={onClose}>
       <div className="rotation-stage-layout">
-        {mode === 'simulation' ? <div className="rotation-phase-banner"><span>실전형 단계 {simulationPhase === 'letters' ? '1' : '2'} / 2</span><b>{currentPhase}</b><small>3분 훈련 구간 · 문항별 20회는 앱 자체 한도</small></div> : <div className="rotation-practice-banner"><b>{puzzle.kind === 'letter' ? '알파벳' : '4×4 격자 도형'}</b>{review ? <span className="rotation-review-preview-label">제출 후 최소 풀이 예시</span> : <button type="button" data-game-shortcut-ignore aria-pressed={preferences.showPreview} onClick={(event) => { toggleProcessPreview(); restoreGameShortcutFocus(event.currentTarget); }}><span>조작 과정 예시</span><b>{preferences.showPreview ? '켜짐' : '꺼짐'}</b></button>}<small>비대칭 특징 2곳 → 45° 눈금 → 거울상</small></div>}
+        {mode === 'simulation' ? <div className="rotation-phase-banner"><span>실전형 단계 {simulationPhase === 'letters' ? '1' : '2'} / 2</span><b>{currentPhase}</b><small>훈련용 3분 구간 · 문항별 20회도 앱 자체 한도</small></div> : <div className="rotation-practice-banner"><b>{puzzle.kind === 'letter' ? '알파벳' : '4×4 격자 도형'}</b>{review ? <span className="rotation-review-preview-label">제출 후 최소 풀이 예시</span> : <button type="button" data-game-shortcut-ignore aria-pressed={preferences.showPreview} onClick={(event) => { toggleProcessPreview(); restoreGameShortcutFocus(event.currentTarget); }}><span>조작 과정 예시</span><b>{preferences.showPreview ? '켜짐' : '꺼짐'}</b></button>}<small>비대칭 특징 2곳 → 45° 눈금 → 거울상</small></div>}
       {!review && (guidedPacing ? <p className="guided-pacing-note" role="status">시간 제한 없이 연습 중 · 조작을 확인한 뒤 직접 제출하세요</p> : <DeadlineBar key={mode === 'simulation' ? simulationPhase : round} duration={mode === 'simulation' ? ROTATION_PHASE_MS : config.paceMs} label={mode === 'simulation' ? `${currentPhase} 단계 남은 시간` : '문제 제한시간'} />)}
       <div className="rotation-comparison">
         <article className={processPreviewEnabled ? 'is-preview' : ''}><span>{processPreviewEnabled ? `${previewSource === 'optimal' ? '최소 과정' : '현재 풀이'} · ${boundedPreviewStep}/${replaySequence.length}` : '시작'}</span><RotationShape puzzle={puzzle} matrix={previewMatrix} label={`${processPreviewEnabled ? `${boundedPreviewStep}단계 누적 조작이 반영된` : '시작'} ${puzzle.kind === 'letter' ? `알파벳 ${puzzle.letter}` : '4×4 격자 도형'}. 현재 방향은 ${rotationMatrixDescription(previewMatrix)}`} /></article>
@@ -2475,11 +2524,13 @@ function BusStimulus({ value }: { value: string }) {
 }
 
 function PersonMemory({ trial, person }: { trial: AppointmentTrial; person: number }) {
+  const { mode } = useContext(SessionModeContext);
   const values = trial.people[person];
-  if (trial.kind === 'location') return <div className="location-memory" role="img" aria-label={`선호 위치 ${values.join(', ')}`}>{APPOINTMENT_LOCATIONS.map((id, index) => <i aria-hidden="true" className={values.includes(id) ? 'selected' : ''} key={id}><span>{Math.floor(index / 4) + 1}행 {(index % 4) + 1}열</span></i>)}</div>;
-  if (trial.kind === 'food') return <div className="food-memory" role="img" aria-label={`선호 메뉴 ${values.join(', ')}`}>{values.map((value) => <span className="food-card" key={value}><FoodStimulus value={value} /><b>{value}</b></span>)}</div>;
-  if (trial.kind === 'bus') return <div className="bus-memory" role="img" aria-label={`탑승 버스 ${values.join(', ')}번`}>{values.map((value) => <span className="bus-card" key={value}><BusStimulus value={value} /><b>{value}번</b></span>)}</div>;
-  return <div className="day-memory" role="img" aria-label={`가능한 요일 ${values.join(', ')}`}>{APPOINTMENT_WEEKDAYS.map((value) => <span className={values.includes(value) ? 'selected' : ''} key={value}><small>{value}</small><b aria-hidden="true">{values.includes(value) ? '✓' : ''}</b></span>)}</div>;
+  if (trial.kind === 'location') return <div className="location-memory" role="img" aria-label={`선호 위치 ${values.join(', ')}`}>{APPOINTMENT_LOCATIONS.map((id, index) => <i aria-hidden="true" className={values.includes(id) ? 'selected' : ''} key={id}><b>{APPOINTMENT_LOCATION_LABELS[index]}</b><small>{Math.floor(index / 4) + 1}-{(index % 4) + 1}</small></i>)}</div>;
+  if (trial.kind === 'food') return <div className="food-memory" role="img" aria-label={`선호 메뉴 ${values.join(', ')}`}>{values.map((value) => <span className="food-card" key={value}><FoodStimulus value={value} /><b className={mode === 'simulation' ? 'sr-only' : ''}>{value}</b></span>)}</div>;
+  if (trial.kind === 'bus') return <div className={`bus-memory ${mode === 'simulation' ? 'is-simulation' : ''}`} role="img" aria-label={`탑승 버스 ${values.join(', ')}번`}>{values.map((value) => <span className="bus-card" key={value}><BusStimulus value={value} /><b className={mode === 'simulation' ? 'sr-only' : ''}>{value}번</b></span>)}</div>;
+  const visibleDays = mode === 'simulation' ? values : APPOINTMENT_WEEKDAYS;
+  return <div className={`day-memory ${mode === 'simulation' ? 'is-compact' : ''}`} role="img" aria-label={`가능한 요일 ${values.join(', ')}`}>{visibleDays.map((value) => <span className={values.includes(value) ? 'selected' : ''} key={value}><small>{value}</small><b aria-hidden="true">{values.includes(value) ? '✓' : ''}</b></span>)}</div>;
 }
 
 function AppointmentRoundRail({ currentRound, selectedRounds }: { currentRound: number; selectedRounds: readonly AppointmentKind[] }) {
@@ -2495,6 +2546,7 @@ function AppointmentRoundRail({ currentRound, selectedRounds }: { currentRound: 
 }
 
 function AppointmentChoices({ trial, locked, showNumberShortcuts, onChoose }: { trial: AppointmentTrial; locked: boolean; showNumberShortcuts: boolean; onChoose: (value: string) => void }) {
+  const { mode } = useContext(SessionModeContext);
   function moveLocationFocus(event: ReactKeyboardEvent<HTMLFieldSetElement>) {
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
     const current = event.target instanceof HTMLElement ? event.target.closest<HTMLButtonElement>('button') : null;
@@ -2507,11 +2559,11 @@ function AppointmentChoices({ trial, locked, showNumberShortcuts, onChoose }: { 
     if (next < 0 || next >= buttons.length || (Math.abs(delta) === 1 && Math.floor(next / 4) !== Math.floor(index / 4))) return;
     buttons[next].focus();
   }
-  if (trial.kind === 'location') return <fieldset className="appointment-choice-grid location-choice-grid" onKeyDown={moveLocationFocus}><legend className="sr-only">세 사람에게 공통된 위치 선택. 방향키로 격자를 이동하고 Enter로 선택합니다.</legend>{trial.choices.map((value, index) => <button type="button" disabled={locked} aria-label={`${Math.floor(index / 4) + 1}행 ${(index % 4) + 1}열`} onClick={() => onChoose(value)} key={value}><span aria-hidden="true" /></button>)}</fieldset>;
+  if (trial.kind === 'location') return <fieldset className="appointment-choice-grid location-choice-grid" onKeyDown={moveLocationFocus}><legend className="sr-only">세 사람에게 공통된 위치 선택. 방향키로 격자를 이동하고 Enter로 선택합니다.</legend>{trial.choices.map((value, index) => <button type="button" disabled={locked} aria-label={`${APPOINTMENT_LOCATION_LABELS[index]}, ${Math.floor(index / 4) + 1}행 ${(index % 4) + 1}열`} onClick={() => onChoose(value)} key={value}><span aria-hidden="true" /><b>{APPOINTMENT_LOCATION_LABELS[index]}</b><small aria-hidden="true">{Math.floor(index / 4) + 1}-{(index % 4) + 1}</small></button>)}</fieldset>;
   return (
-    <fieldset className={`appointment-choice-grid ${trial.kind}-choice-grid`}>
+    <fieldset className={`appointment-choice-grid ${trial.kind}-choice-grid ${mode === 'simulation' ? 'is-simulation' : ''}`}>
       <legend className="sr-only">{trial.title}</legend>
-      {trial.choices.map((value, index) => <button type="button" disabled={locked} onClick={() => onChoose(value)} key={value}>{showNumberShortcuts && <small>{index + 1}</small>}{trial.kind === 'food' && <FoodStimulus value={value} />}{trial.kind === 'bus' && <BusStimulus value={value} />}<b>{trial.kind === 'bus' ? `${value}번` : value}</b></button>)}
+      {trial.choices.map((value, index) => <button type="button" disabled={locked} aria-label={trial.kind === 'bus' ? `${value}번` : value} onClick={() => onChoose(value)} key={value}>{showNumberShortcuts && <small>{index + 1}</small>}{trial.kind === 'food' && <FoodStimulus value={value} />}{trial.kind === 'bus' && mode === 'practice' && <BusStimulus value={value} />}<b className={trial.kind === 'food' && mode === 'simulation' ? 'sr-only' : ''}>{trial.kind === 'bus' ? `${value}번` : value}</b></button>)}
     </fieldset>
   );
 }
@@ -2522,8 +2574,9 @@ function AppointmentGame({ onFinish, onClose, config, preferences }: GameProps &
   const guidedPacing = useContext(GuidedPacingContext);
   const [seed] = useState(newSessionSeed);
   const selectedRounds = mode === 'simulation' ? APPOINTMENT_KIND_ORDER : preferences.selectedRounds;
-  const questionsPerRound = mode === 'simulation' ? APPOINTMENT_SIMULATION_QUESTIONS_PER_ROUND : config.quantity;
-  const trials = useMemo(() => buildAppointmentTrials(questionsPerRound, seed, selectedRounds), [questionsPerRound, seed, selectedRounds]);
+  const trials = useMemo(() => mode === 'simulation'
+    ? buildAppointmentSimulationTrials(seed)
+    : buildAppointmentTrials(config.quantity, seed, selectedRounds), [config.quantity, mode, seed, selectedRounds]);
   const [trialIndex, setTrialIndex] = useState(0);
   const [person, setPerson] = useState(0);
   const [phase, setPhase] = useState<'roundIntro' | 'stimulus' | 'answer'>('roundIntro');
@@ -2609,7 +2662,9 @@ function AppointmentGame({ onFinish, onClose, config, preferences }: GameProps &
       index: trialIndex,
       status: ok ? 'correct' : 'error',
       errorCodes,
-      title: `${trial.round}라운드 ${trial.questionInRound}번 · ${trial.kind === 'bus' ? 'NOT' : 'AND'}`,
+      title: mode === 'simulation'
+        ? `${trial.round}라운드 ${trial.questionInRound}번 · ${trial.kind === 'bus' ? '미탑승' : '공통 항목'}`
+        : `${trial.round}유형 ${trial.questionInRound}번 · ${trial.kind === 'bus' ? '미탑승' : '공통 항목'}`,
       prompt: trial.title,
       expected: trial.answer,
       selected: value ?? '응답 없음',
@@ -2657,7 +2712,7 @@ function AppointmentGame({ onFinish, onClose, config, preferences }: GameProps &
   });
 
   const helper = mode === 'simulation'
-    ? `${trial.round}라운드 · ${trial.title}`
+    ? `${trial.round}라운드 · ${trial.roundLabel} · ${trial.questionInRound}/${trial.questionsInRound}`
     : `${trial.kind === 'bus' ? '본 번호를 누적해 선택지에서 제외하세요.' : '첫 두 사람의 교집합만 남겨 셋째와 비교하세요.'}${trial.kind === 'location' ? ' 위치는 마우스로 선택합니다.' : ' 숫자키로도 응답할 수 있습니다.'}`;
   const appointmentItemLabel = (value: string) => {
     if (trial.kind === 'location') {
@@ -2677,10 +2732,11 @@ function AppointmentGame({ onFinish, onClose, config, preferences }: GameProps &
   return (
     <GameFrame gameId="appointment" current={trialIndex + 1} total={trials.length} helper={helper} feedback={feedback} statusMessage={statusMessage} onClose={onClose}>
       <div className="appointment-shell" ref={phaseContainerRef}>
-        <AppointmentRoundRail currentRound={trial.round} selectedRounds={selectedRounds} />
+        {mode === 'practice' && <AppointmentRoundRail currentRound={trial.round} selectedRounds={selectedRounds} />}
+        {mode === 'simulation' && <div className="appointment-question-progress" role="status" aria-label={`${trial.round}라운드 ${trial.roundLabel}, ${trial.questionInRound}번 문항, ${trial.questionsInRound - trial.questionInRound}문항 남음`}><span><small>{trial.round}라운드 · {trial.roundLabel}</small><b>{trial.questionInRound}</b></span><span><small>남은 문항</small><b>{trial.questionsInRound - trial.questionInRound}</b></span></div>}
         {phase === 'roundIntro' && <section className="appointment-round-intro" tabIndex={-1} aria-labelledby="appointment-round-title"><span>ROUND {trial.round} / 4</span><h3 id="appointment-round-title">{trial.roundLabel}</h3><p>{trial.title}</p><div><b>{trial.kind === 'bus' ? '제외 규칙' : '공통 규칙'}</b><small>{trial.kind === 'bus' ? '세 사람에게 한 번도 나오지 않은 번호' : '첫 사람 → 둘째 → 셋째의 교집합'}</small></div>{mode === 'practice' ? <button type="button" className="single-action" onClick={beginRound}>이 라운드 시작 <i>→</i></button> : <p className="auto-next">잠시 후 자동으로 시작합니다.</p>}</section>}
-        {phase === 'stimulus' && <section className="appointment-stimulus" tabIndex={-1}>{guidedPacing ? <p className="guided-pacing-note" role="status">음성 안내 직접 진행 중 · 제한시간 없음</p> : <DeadlineBar key={`${trialIndex}-${person}`} duration={presentationMs} label={`${personNames[person]} 정보 제시시간`} />}<div className="appointment-phase-meta"><span>{personNames[person]}</span><b>{person + 1} / 3</b><small>{trial.questionInRound} / {trial.questionsInRound}문항</small></div><h3>{trial.kind === 'bus' ? '이 친구가 이용한 버스를 기억하세요' : '이 친구가 고른 항목을 기억하세요'}</h3><PersonMemory trial={trial} person={person} />{mode === 'practice' ? <button type="button" className="single-action" aria-disabled={presentationAdvanceLocked} onKeyDown={(event) => { if (event.repeat) event.preventDefault(); }} onClick={nextPerson}>{guidedPacing ? '내용을 들었어요 · ' : ''}{person < 2 ? '다음 친구' : '질문 보기'} <i>→</i></button> : <p className="auto-next">제시시간이 끝나면 자동으로 이동합니다.</p>}</section>}
-        {phase === 'answer' && <section className="appointment-question" tabIndex={-1}>{guidedPacing ? <p className="guided-pacing-note" role="status">음성 안내 직접 진행 중 · 응답 제한시간 없음</p> : <DeadlineBar key={`${trialIndex}-answer`} duration={answerLimit} label="응답 제한시간" active={!locked} />}<div className="appointment-phase-meta"><span>{trial.kind === 'bus' ? '한 번도 안 나온 것' : '세 사람의 공통 항목'}</span><b>QUESTION</b><small>{trial.questionInRound} / {trial.questionsInRound}문항</small></div><h3>{trial.title}</h3><AppointmentChoices trial={trial} locked={locked} showNumberShortcuts={mode === 'practice'} onChoose={choose} /></section>}
+        {phase === 'stimulus' && <section className="appointment-stimulus" tabIndex={-1}>{guidedPacing ? <p className="guided-pacing-note" role="status">음성 안내 직접 진행 중 · 제한시간 없음</p> : <DeadlineBar key={`${trialIndex}-${person}`} duration={presentationMs} label={`${personNames[person]} 정보 제시시간`} />}<div className="appointment-phase-meta"><span>{mode === 'simulation' ? `${trial.round}라운드 · ${personNames[person]}` : personNames[person]}</span><b>{person + 1} / 3</b><small>{trial.questionInRound} / {trial.questionsInRound}문항</small></div><h3>{trial.kind === 'bus' ? '이 친구가 이용한 버스를 기억하세요' : '이 친구가 고른 항목을 기억하세요'}</h3><PersonMemory trial={trial} person={person} />{mode === 'practice' ? <button type="button" className="single-action" aria-disabled={presentationAdvanceLocked} onKeyDown={(event) => { if (event.repeat) event.preventDefault(); }} onClick={nextPerson}>{guidedPacing ? '내용을 들었어요 · ' : ''}{person < 2 ? '다음 친구' : '질문 보기'} <i>→</i></button> : <p className="auto-next">제시시간이 끝나면 자동으로 이동합니다.</p>}</section>}
+        {phase === 'answer' && <section className="appointment-question" tabIndex={-1}>{guidedPacing ? <p className="guided-pacing-note" role="status">음성 안내 직접 진행 중 · 응답 제한시간 없음</p> : <DeadlineBar key={`${trialIndex}-answer`} duration={answerLimit} label="응답 제한시간" active={!locked} />}<div className="appointment-phase-meta"><span>{trial.kind === 'bus' ? '한 번도 안 나온 것' : '세 사람의 공통 항목'}</span><b>{mode === 'simulation' ? `${trial.round}R` : 'QUESTION'}</b><small>{trial.questionInRound} / {trial.questionsInRound}문항</small></div><h3>{trial.title}</h3><AppointmentChoices trial={trial} locked={locked} showNumberShortcuts={mode === 'practice'} onChoose={choose} /></section>}
       </div>
     </GameFrame>
   );
@@ -3000,8 +3056,9 @@ function PotionGame({ onFinish, onClose, config }: GameProps & { config: Practic
     const nextCorrect = correct + (ok ? 1 : 0);
     const nextErrors = errors + (ok ? 0 : 1);
     const nextRts = prediction === null ? rts : [...rts, rt];
-    const outcomeWasVisible = mode === 'practice' || prediction !== null;
-    const nextHistory = recordVisiblePotionOutcome(history, key, trial.outcome, outcomeWasVisible);
+    // The learning signal is the manufactured colour itself. Reveal and record
+    // it after every trial so a timeout cannot silently corrupt later evidence.
+    const nextHistory = recordVisiblePotionOutcome(history, key, trial.outcome, true);
     if (evidenceDecision.opportunity) {
       evidenceScoreRef.current.total += 1;
       if (evidenceAligned === true) evidenceScoreRef.current.aligned += 1;
@@ -3013,9 +3070,7 @@ function PotionGame({ onFinish, onClose, config }: GameProps & { config: Practic
     const errorCodes = prediction === null ? ['timeout'] : evidenceAligned === false ? ['potion-evidence-opposed'] : [];
     const observedText = `파랑 ${observed.blue}회 · 빨강 ${observed.red}회`;
     const explanation = prediction === null
-      ? mode === 'simulation'
-        ? '응답 제한시간이 끝나 실제 결과를 공개하지 않았고, 이후 판단의 누적 근거에도 포함하지 않았습니다.'
-        : '응답 제한시간이 끝났지만 실제 결과를 공개하고 새 관찰값으로 기록했습니다.'
+      ? '응답 제한시간이 끝났지만 실제 제조색을 공개하고 다음 판단의 관찰값으로 기록했습니다.'
       : evidencePreferred === null
         ? `선택 당시 ${observedText}로 우세색을 정할 근거가 없었습니다. 이번 결과는 다음 판단의 근거가 됩니다.`
         : evidenceAligned && ok
@@ -3034,14 +3089,10 @@ function PotionGame({ onFinish, onClose, config }: GameProps & { config: Practic
       selected: prediction === null ? '응답 없음' : prediction === 'blue' ? '파란 약' : '빨간 약',
       explanation,
       rtMs: rt,
-      facts: mode === 'simulation' && prediction === null
-        ? { 실제결과: '비공개', 응답결과: '시간 초과', 근거정렬: '판정 보류' }
-        : { 실제결과: trial.outcome === 'blue' ? '파란 약' : '빨간 약', 결과적중: ok, 근거정렬: evidenceAligned === null ? '판정 보류' : evidenceAligned },
+      facts: { 실제결과: trial.outcome === 'blue' ? '파란 약' : '빨간 약', 결과적중: ok, 근거정렬: evidenceAligned === null ? '판정 보류' : evidenceAligned },
     }));
     setCorrect(nextCorrect); setErrors(nextErrors); setRts(nextRts); setHistory(nextHistory);
-    setFeedback(mode === 'simulation'
-      ? prediction === null ? '시간 초과' : ok ? '예측 성공' : '예측 실패'
-      : `${prediction === null ? '시간 초과 · ' : ''}실제 결과: ${trial.outcome === 'blue' ? '파란 약' : '빨간 약'}`);
+    setFeedback(`${prediction === null ? '시간 초과' : ok ? '예측 성공' : '예측 실패'} · 실제 결과: ${trial.outcome === 'blue' ? '파란 약' : '빨간 약'}`);
     schedule(() => {
       if (round === trials.length - 1) {
         const evidenceScore = evidenceScoreRef.current;
@@ -3088,7 +3139,7 @@ function PotionGame({ onFinish, onClose, config }: GameProps & { config: Practic
     : `이번 재료는 ${ingredientSummary}. 결과 색을 예측하세요.`;
 
   return (
-    <GameFrame gameId="potion" current={round + 1} total={trials.length} helper={`${recipeCount}개 독립 레시피의 결과를 갱신합니다. ←/1 파랑 · →/2 빨강`} simulationHelper="근거 해설 없이 진행 · 선택 후 성공·실패만 공개" feedback={feedback} statusMessage={statusMessage} showFeedbackInSimulation onClose={onClose}>
+    <GameFrame gameId="potion" current={round + 1} total={trials.length} helper={`${recipeCount}개 독립 레시피의 결과를 갱신합니다. ←/1 파랑 · →/2 빨강`} simulationHelper="근거 해설 없이 진행 · 매 시행 성공·실패와 실제 제조색 공개" feedback={feedback} statusMessage={statusMessage} showFeedbackInSimulation onClose={onClose}>
       <div className="potion-layout">
         {guidedPacing ? <p className="guided-pacing-note" role="status">시간 제한 없이 연습 중 · 누적 근거를 확인한 뒤 예측하세요</p> : <DeadlineBar key={round} duration={config.paceMs} label="응답 제한시간" active={!locked} />}
         <div className="potion-workbench">
@@ -3109,18 +3160,14 @@ function PotionGame({ onFinish, onClose, config }: GameProps & { config: Practic
           </section>
           <span className="potion-workbench-arrow" aria-hidden="true">→</span>
           <section className={`potion-result-preview ${locked ? 'is-revealed' : ''}`} aria-label="가능한 마법약 결과">
-            <header><span>결과 후보</span><b>{locked ? mode === 'practice' ? '실제 결과 공개' : '예측 판정 공개' : '둘 중 하나를 예측'}</b></header>
+            <header><span>결과 후보</span><b>{locked ? '실제 제조색 공개' : '둘 중 하나를 예측'}</b></header>
             <div>
-              <article className={locked && mode === 'practice' ? trial.outcome === 'blue' ? 'blue is-result' : 'blue is-muted' : 'blue'}><PotionFlask outcome="blue" /><b>파란 약</b></article>
-              <article className={locked && mode === 'practice' ? trial.outcome === 'red' ? 'red is-result' : 'red is-muted' : 'red'}><PotionFlask outcome="red" /><b>빨간 약</b></article>
+              <article className={locked ? trial.outcome === 'blue' ? 'blue is-result' : 'blue is-muted' : 'blue'}><PotionFlask outcome="blue" /><b>파란 약</b></article>
+              <article className={locked ? trial.outcome === 'red' ? 'red is-result' : 'red is-muted' : 'red'}><PotionFlask outcome="red" /><b>빨간 약</b></article>
             </div>
             <small>{locked
-              ? mode === 'practice'
-                ? `실제 결과는 ${trial.outcome === 'blue' ? '파란 약' : '빨간 약'}입니다.`
-                : selectedPrediction === null
-                  ? '응답 시간이 끝났습니다.'
-                  : selectedPrediction === trial.outcome ? '예측 성공입니다.' : '예측 실패입니다.'
-              : mode === 'practice' ? '선택하면 실제 색이 공개됩니다.' : '선택하면 성공·실패만 공개됩니다.'}</small>
+              ? `${selectedPrediction === null ? '응답 시간이 끝났습니다.' : selectedPrediction === trial.outcome ? '예측 성공입니다.' : '예측 실패입니다.'} 실제 결과는 ${trial.outcome === 'blue' ? '파란 약' : '빨간 약'}입니다.`
+              : mode === 'practice' ? '선택하면 실제 색이 공개됩니다.' : '선택하면 성공·실패와 실제 제조색이 공개됩니다.'}</small>
           </section>
         </div>
         <div className="potion-block-progress"><span>레시피 학습 블록</span><b>{(round % recipeCount) + 1} / {recipeCount}</b></div>{mode === 'practice' && preferences.showEvidence && <div className="potion-observation"><span>이 조합의 이전 실제 결과 · 연습 힌트</span><div><b className="blue">파랑 {observed.blue}</b><b className="red">빨강 {observed.red}</b></div></div>}
@@ -3720,13 +3767,21 @@ function MouseGame({ onFinish, onClose, config }: GameProps & { config: Practice
     if (stage === 'memory') setStage('blank');
     else if (stage === 'blank') setStage('cats');
     else if (stage === 'cats') setStage('highlight');
-    else if (stage === 'highlight') { setStage('red'); responseClock.restart(); }
+    else if (stage === 'highlight') {
+      decisionResolvedRef.current = false;
+      setStage('red');
+      responseClock.restart();
+    }
   }
 
   usePausableTimeout(() => setStage('blank'), config.paceMs, stage === 'memory' && !guidedPacing, `mouse-memory-${round}`);
   usePausableTimeout(() => setStage('cats'), MOUSE_BLANK_MS, stage === 'blank' && !guidedPacing, `mouse-blank-${round}`);
   usePausableTimeout(() => setStage('highlight'), MOUSE_CATS_MS, stage === 'cats' && !guidedPacing, `mouse-cats-${round}`);
-  usePausableTimeout(() => { setStage('red'); responseClock.restart(); }, MOUSE_HIGHLIGHT_MS, stage === 'highlight' && !guidedPacing, `mouse-highlight-${round}`);
+  usePausableTimeout(() => {
+    decisionResolvedRef.current = false;
+    setStage('red');
+    responseClock.restart();
+  }, MOUSE_HIGHLIGHT_MS, stage === 'highlight' && !guidedPacing, `mouse-highlight-${round}`);
   useEffect(() => {
     if (!guidedPacing || (stage !== 'memory' && stage !== 'blank' && stage !== 'cats' && stage !== 'highlight')) return;
     const frame = window.requestAnimationFrame(() => presentationRef.current?.querySelector<HTMLButtonElement>('.accessible-next-action')?.focus({ preventScroll: true }));
@@ -3785,7 +3840,7 @@ function MouseGame({ onFinish, onClose, config }: GameProps & { config: Practice
     setCorrect(nextCorrect); setErrors(nextErrors); setRts(nextRts); setConfidenceTotal(nextConfidence); setConfidenceResponses(nextConfidenceResponses);
     schedule(() => {
       if (round === trials.length - 1) onFinish(resultFor('mouse', nextCorrect, trials.length * 2, nextRts, nextErrors, { averageConfidence: nextConfidenceResponses ? (nextConfidence / nextConfidenceResponses).toFixed(1) : '—', confidenceResponses: nextConfidenceResponses }, compactReviewPayload('mouse', reviewAttemptsRef.current)));
-      else { presentationAdvanceLockRef.current = false; setPresentationAdvanceLocked(false); setFeedback(''); setStage('memory'); setRedAnswer(null); setRedConfidence(0); setLocked(false); redRt.current = 0; setRound((value) => value + 1); }
+      else { decisionResolvedRef.current = false; presentationAdvanceLockRef.current = false; setPresentationAdvanceLocked(false); setFeedback(''); setStage('memory'); setRedAnswer(null); setRedConfidence(0); setLocked(false); redRt.current = 0; setRound((value) => value + 1); }
     }, mode === 'practice' ? PRACTICE_FEEDBACK_DWELL_MS : 180);
   }
 
@@ -3801,10 +3856,6 @@ function MouseGame({ onFinish, onClose, config }: GameProps & { config: Practice
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  useEffect(() => {
-    if (stage !== 'red' && stage !== 'blue') return;
-    decisionResolvedRef.current = false;
-  }, [stage]);
   usePausableTimeout(() => finishDecision(null, 0), decisionMs, (stage === 'red' || stage === 'blue') && !locked && !guidedPacing, `mouse-decision-${round}-${stage}`);
 
   const stageMessage = stage === 'memory' ? '생쥐 위치를 기억하세요.' : stage === 'blank' ? '빈 격자에서도 위치를 유지하세요.' : stage === 'cats' ? '고양이 위치를 확인하세요.' : stage === 'highlight' ? '빨강과 파랑 고양이 위치를 대조하세요.' : `${stage === 'red' ? '빨간' : '파란'} 고양이의 찾았다·놓쳤다와 확신도를 선택하세요.`;

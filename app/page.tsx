@@ -277,21 +277,8 @@ export default function Home() {
   const futureSchemaWriteBlockedRef = useRef(false);
   const resultsRef = useRef<SessionResult[]>([]);
   const resultsGenerationRef = useRef<string | null>(null);
-  const gamesSectionRef = useRef<HTMLElement>(null);
 
   useEffect(() => { resultsRef.current = results; }, [results]);
-
-  useEffect(() => {
-    const section = gamesSectionRef.current;
-    if (!section || typeof window.IntersectionObserver === 'undefined') return;
-    const observer = new window.IntersectionObserver(([entry]) => {
-      if (!entry?.isIntersecting) return;
-      preloadGameStage();
-      observer.disconnect();
-    }, { rootMargin: '0px' });
-    observer.observe(section);
-    return () => observer.disconnect();
-  }, []);
 
   useEffect(() => {
     let restored: SavedReadinessSummary | null = null;
@@ -310,17 +297,34 @@ export default function Home() {
   const handleReadinessChecked = useCallback((summary: SavedReadinessSummary) => setReadinessSummary(summary), []);
 
   useEffect(() => {
+    let resizeTimer: number | null = null;
     const revalidate = () => {
       try {
         const saved = parseSavedReadinessSummary(window.localStorage.getItem(READINESS_STORAGE_KEY));
-        if (saved) setReadinessSummary(revalidateReadinessSummary(saved));
+        if (saved) {
+          const next = revalidateReadinessSummary(saved);
+          setReadinessSummary((current) => current
+            && current.overall === next.overall
+            && current.checkedAt === next.checkedAt
+            && current.assetStatus === next.assetStatus
+            ? current
+            : next);
+        }
       } catch { /* 준비 상태는 다음 점검에서 다시 계산한다. */ }
     };
-    window.addEventListener('resize', revalidate);
+    const scheduleResizeRevalidation = () => {
+      if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(() => {
+        resizeTimer = null;
+        revalidate();
+      }, 150);
+    };
+    window.addEventListener('resize', scheduleResizeRevalidation);
     window.addEventListener('online', revalidate);
     window.addEventListener('offline', revalidate);
     return () => {
-      window.removeEventListener('resize', revalidate);
+      if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+      window.removeEventListener('resize', scheduleResizeRevalidation);
       window.removeEventListener('online', revalidate);
       window.removeEventListener('offline', revalidate);
     };
@@ -785,7 +789,7 @@ export default function Home() {
   }
 
   return (
-    <main className="site-shell" id="top">
+    <main className={`site-shell${activeGame ? ' is-game-open' : ''}`} id="top">
       <AccessibilityBootstrap />
       <a className="skip-link" href="#games">게임 목록으로 건너뛰기</a>
       <header className="topbar">
@@ -861,7 +865,7 @@ export default function Home() {
         <div className="readiness-banner-action"><small>{readinessSummary ? `${readinessSummary.overall === 'ready' ? '준비 완료' : readinessSummary.overall === 'review' ? '확인 필요' : '환경 조정 필요'} · ${formatCompletedAt(readinessSummary.checkedAt)}` : '아직 이 브라우저를 점검하지 않았습니다.'}</small><button type="button" onClick={() => setReadinessOpen(true)}>{readinessSummary ? '다시 점검' : '준비 점검 시작'} <span aria-hidden="true">→</span></button></div>
       </section>
 
-      <section ref={gamesSectionRef} className="game-section" id="games" aria-labelledby="games-title">
+      <section className="game-section" id="games" aria-labelledby="games-title">
         <div className="section-heading">
           <div>
             <span>9가지 훈련</span>

@@ -83,11 +83,7 @@ export function evaluatePotionEvidenceDecision(
   };
 }
 
-/**
- * Adds only outcomes the learner could actually infer from the feedback.
- * A simulation timeout reveals neither a prediction result nor the potion
- * colour, so recording that hidden outcome would contaminate later evidence.
- */
+/** Adds an outcome only after the caller has actually disclosed its colour. */
 export function recordVisiblePotionOutcome(
   history: PotionEvidenceHistory,
   recipeKey: string,

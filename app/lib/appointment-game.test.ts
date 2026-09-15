@@ -3,8 +3,12 @@ import test from 'node:test';
 import {
   APPOINTMENT_FOODS,
   APPOINTMENT_KIND_ORDER,
+  APPOINTMENT_LOCATION_LABELS,
   APPOINTMENT_LOCATIONS,
+  APPOINTMENT_SIMULATION_QUESTIONS_PER_ROUND,
+  APPOINTMENT_SIMULATION_TOTAL_QUESTIONS,
   APPOINTMENT_WEEKDAYS,
+  buildAppointmentSimulationTrials,
   buildAppointmentTrials,
   validateAppointmentTrial,
 } from './appointment-game.ts';
@@ -14,11 +18,20 @@ test('같은 시드는 같은 약속 문항을 만든다', () => {
   assert.notDeepEqual(buildAppointmentTrials(5, 20260829), buildAppointmentTrials(5, 20260830));
 });
 
-test('실전형 네 라운드를 요일 → 위치 → 메뉴 → 버스 순서로 묶어 출제한다', () => {
+test('유형별 맞춤 연습은 선택한 유형을 공개 순서로 묶어 출제한다', () => {
   const trials = buildAppointmentTrials(5, 17);
   assert.equal(trials.length, 20);
   assert.deepEqual(trials.map((trial) => trial.kind), APPOINTMENT_KIND_ORDER.flatMap((kind) => Array(5).fill(kind)));
   assert.deepEqual(trials.map((trial) => trial.round), [1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4]);
+});
+
+test('실전형은 공개된 4라운드 × 각 10문항 흐름을 지킨다', () => {
+  const trials = buildAppointmentSimulationTrials(17);
+  assert.equal(trials.length, APPOINTMENT_SIMULATION_TOTAL_QUESTIONS);
+  assert.equal(APPOINTMENT_SIMULATION_QUESTIONS_PER_ROUND, 10);
+  assert.deepEqual(trials.map((trial) => trial.kind), APPOINTMENT_KIND_ORDER.flatMap((kind) => Array(10).fill(kind)));
+  assert.deepEqual(trials.map((trial) => trial.questionInRound), APPOINTMENT_KIND_ORDER.flatMap(() => Array.from({ length: 10 }, (_, index) => index + 1)));
+  assert.ok(trials.every((trial) => validateAppointmentTrial(trial).length === 0));
 });
 
 test('연습에서 선택한 라운드만 공식 순서로 출제한다', () => {
@@ -34,12 +47,29 @@ test('후반 문항은 첫 세 라운드에서 사람별 정보가 3개에서 4�
   }
 });
 
-test('요일은 7개, 위치는 4×4 전체, 메뉴는 24종 자극 풀을 사용한다', () => {
+test('요일은 7개, 위치는 4×4 랜드마크 지도, 메뉴는 24종 자극 풀을 사용한다', () => {
   const trials = buildAppointmentTrials(8, 51);
   assert.equal(trials.find((trial) => trial.kind === 'day')?.choices.length, APPOINTMENT_WEEKDAYS.length);
   assert.equal(trials.find((trial) => trial.kind === 'location')?.choices.length, APPOINTMENT_LOCATIONS.length);
+  assert.equal(APPOINTMENT_LOCATION_LABELS.length, APPOINTMENT_LOCATIONS.length);
   assert.equal(APPOINTMENT_FOODS.length, 24);
   assert.ok(trials.filter((trial) => trial.kind === 'food').every((trial) => trial.choices.length === 6));
+});
+
+test('실전형 전반 5문항은 3개, 후반 5문항은 앱 운용값으로 4개를 제시한다', () => {
+  for (const kind of ['day', 'location', 'food'] as const) {
+    const trials = buildAppointmentSimulationTrials(410).filter((trial) => trial.kind === kind);
+    assert.deepEqual(trials.map((trial) => trial.itemsPerPerson), [3, 3, 3, 3, 3, 4, 4, 4, 4, 4]);
+  }
+});
+
+test('버스 선택지는 2023 공개 튜토리얼처럼 5개이며 미탑승 정답은 하나다', () => {
+  for (let seed = 1; seed <= 150; seed += 1) {
+    for (const trial of buildAppointmentTrials(6, seed, ['bus'])) {
+      assert.equal(trial.choices.length, 5);
+      assert.equal(trial.choices.filter((choice) => !trial.people.flat().includes(choice)).length, 1);
+    }
+  }
 });
 
 test('모든 시드에서 AND·NOT 정답 불변식을 지킨다', () => {
@@ -48,10 +78,11 @@ test('모든 시드에서 AND·NOT 정답 불변식을 지킨다', () => {
   }
 });
 
-test('버스 라운드는 각 사람에게 서로 다른 번호 두 개를 제시한다', () => {
+test('버스 라운드는 공개 예시를 반복한 훈련값 2·1·2개를 사용한다', () => {
   for (let seed = 1; seed <= 150; seed += 1) {
     for (const trial of buildAppointmentTrials(6, seed, ['bus'])) {
-      assert.ok(trial.people.every((values) => new Set(values).size === 2));
+      assert.deepEqual(trial.people.map((values) => values.length), [2, 1, 2]);
+      assert.equal(new Set(trial.people.flat()).size, 5);
     }
   }
 });

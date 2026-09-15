@@ -42,6 +42,20 @@ test('사용자에게 공개하지 않은 시간 초과 결과는 이후 근거 
   assert.deepEqual(history, { '0-1': { red: 1, blue: 2 } });
 });
 
+test('독립 훈련에서 공개한 시간 초과 실제색은 다음 동일 레시피의 누적 근거가 된다', () => {
+  const firstTimeout = recordVisiblePotionOutcome({}, '0-1', 'red', true);
+  assert.deepEqual(firstTimeout, { '0-1': { red: 1, blue: 0 } });
+
+  const nextDecision = evaluatePotionEvidenceDecision(firstTimeout['0-1'], 'red', 'blue');
+  assert.equal(nextDecision.preferred, 'red');
+  assert.equal(nextDecision.opportunity, true);
+  assert.equal(nextDecision.aligned, true);
+
+  const secondTimeout = recordVisiblePotionOutcome(firstTimeout, '0-1', 'blue', true);
+  assert.deepEqual(secondTimeout, { '0-1': { red: 1, blue: 1 } });
+  assert.deepEqual(firstTimeout, { '0-1': { red: 1, blue: 0 } });
+});
+
 test('누적 근거가 있는 시간 초과는 근거 판단 분모에 남고 정렬 성공으로 계산되지 않는다', () => {
   const decision = evaluatePotionEvidenceDecision({ blue: 3, red: 1 }, null, 'blue');
   assert.equal(decision.preferred, 'blue');

@@ -50,8 +50,8 @@ test('고정 실전형은 게임별로 필요한 프리셋 메타를 검증한�
   assert.notEqual(getResultComparisonKey(result('rps', simulation)), null);
   assert.equal(getResultComparisonKey(result('rotation', { sessionMode: '실전형 연습' })), null);
   assert.notEqual(getResultComparisonKey(result('rotation', {
-    ...simulation, rotationContent: '알파벳 → 격자 도형', rotationLetters: '전체',
-    rotationTargetIds: 'simulation-all', previewUsed: '숨김',
+    ...simulation, quantity: 2, paceMs: 180000, rotationContent: '알파벳 → 격자 도형', rotationLetters: '전체',
+    rotationTargetIds: 'simulation-all', previewUsed: '숨김', rotationPhaseCount: 2, rotationPhaseDurationMs: 180000,
   })), null);
   assert.notEqual(getResultComparisonKey(result('rps', simulation)), getResultComparisonKey(result('rps', { ...simulation, simulationPresetVersion: 'legacy-training-v3' })));
 });

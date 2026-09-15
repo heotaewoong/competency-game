@@ -42,7 +42,7 @@ export const rotationGuideExamples: RotationGuideExample[] = [
     title: '격자 · 기울어진 반전',
     caption: '외딴 칸을 45° 옮긴 뒤 묶음의 거울상 여부를 확인',
     kind: 'tiles',
-    pattern: [0,1,0,0,1, 1,1,0,1,0, 0,1,0,0,0, 1,0,1,1,0, 0,0,1,0,1],
+    pattern: [0,1,0,0, 1,1,0,1, 0,1,0,0, 1,0,1,1],
     sequence: ['right', 'flip-y'],
   },
   {
@@ -50,7 +50,7 @@ export const rotationGuideExamples: RotationGuideExample[] = [
     title: '격자 · 대각선 반전',
     caption: '테두리 각도, 외딴 칸, 붙은 묶음 방향의 순서로 세 번 검산',
     kind: 'tiles',
-    pattern: [1,0,1,0,0, 0,1,0,0,1, 1,1,0,1,0, 0,1,1,0,0, 1,0,0,1,1],
+    pattern: [1,0,1,0, 0,1,0,1, 1,1,0,1, 0,1,1,0],
     sequence: ['left', 'left', 'flip-y'],
   },
 ];
