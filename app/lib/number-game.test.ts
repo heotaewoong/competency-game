@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildNumberRounds, classifyNumberInputError, numberExpected, type NumberRound } from './number-game.ts';
+import { buildNumberRounds, classifyNumberInputError, numberExpected, numberRoundPosition, type NumberRound } from './number-game.ts';
 
 test('같은 시드는 같은 숫자 라운드를 만든다', () => {
   assert.deepEqual(buildNumberRounds(10, 91), buildNumberRounds(10, 91));
@@ -35,6 +35,26 @@ test('긴 점등 세션에서도 숫자별 출현 횟수 차이는 하나 이하
 test('연습 집중 유형은 선택한 라운드만 만든다', () => {
   assert.ok(buildNumberRounds(5, 8, 'flash').every((round) => round.mode === 'flash'));
   assert.ok(buildNumberRounds(5, 8, 'rules').every((round) => round.mode === 'rules'));
+});
+
+test('홀수·짝수 전체 세션에서 라운드 번호와 라운드 내 진행을 분리한다', () => {
+  const even = buildNumberRounds(10, 17);
+  assert.deepEqual(numberRoundPosition(even, 0), { round: 1, index: 1, total: 5, startsRound: true, endsRound: false });
+  assert.deepEqual(numberRoundPosition(even, 4), { round: 1, index: 5, total: 5, startsRound: false, endsRound: true });
+  assert.deepEqual(numberRoundPosition(even, 5), { round: 2, index: 1, total: 5, startsRound: true, endsRound: false });
+
+  const odd = buildNumberRounds(5, 23);
+  assert.deepEqual(numberRoundPosition(odd, 1), { round: 1, index: 2, total: 2, startsRound: false, endsRound: true });
+  assert.deepEqual(numberRoundPosition(odd, 2), { round: 2, index: 1, total: 3, startsRound: true, endsRound: false });
+  assert.deepEqual(numberRoundPosition(odd, 4), { round: 2, index: 3, total: 3, startsRound: false, endsRound: true });
+});
+
+test('집중 연습도 원래 라운드 번호를 유지한다', () => {
+  const flash = buildNumberRounds(3, 8, 'flash');
+  const rules = buildNumberRounds(3, 8, 'rules');
+  assert.deepEqual(numberRoundPosition(flash, 0), { round: 1, index: 1, total: 3, startsRound: true, endsRound: false });
+  assert.deepEqual(numberRoundPosition(rules, 0), { round: 2, index: 1, total: 3, startsRound: true, endsRound: false });
+  assert.throws(() => numberRoundPosition(rules, 3), RangeError);
 });
 
 test('건너뛸 숫자는 빠지고 두 번 누를 숫자는 정확히 두 번 나온다', () => {

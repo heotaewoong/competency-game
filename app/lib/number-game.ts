@@ -3,6 +3,14 @@ export type NumberRound =
   | { mode: 'flash'; board: number[]; target: number; skip: null; double: [] }
   | { mode: 'rules'; board: number[]; target: null; skip: number; double: number[] };
 
+export type NumberRoundPosition = {
+  round: 1 | 2;
+  index: number;
+  total: number;
+  startsRound: boolean;
+  endsRound: boolean;
+};
+
 function shuffled<T>(items: readonly T[], seed: number) {
   const result = [...items];
   let state = seed >>> 0 || 1;
@@ -28,6 +36,20 @@ export function classifyNumberInputError(round: NumberRound, expected: readonly 
     && expected[position - 1] === expected[position - 2]
     && expected[position] !== value;
   return repeatedCompletedDouble ? 'number-extra' : 'number-order';
+}
+
+export function numberRoundPosition(rounds: readonly NumberRound[], attemptIndex: number): NumberRoundPosition {
+  const current = rounds[attemptIndex];
+  if (!current) throw new RangeError('숫자 누르기 문제 위치가 전체 문제 수를 벗어났습니다.');
+  const indices = rounds.flatMap((round, index) => round.mode === current.mode ? [index] : []);
+  const indexInRound = indices.indexOf(attemptIndex);
+  return {
+    round: current.mode === 'flash' ? 1 : 2,
+    index: indexInRound + 1,
+    total: indices.length,
+    startsRound: indexInRound === 0,
+    endsRound: indexInRound === indices.length - 1,
+  };
 }
 
 export function buildNumberRounds(quantity: number, seed: number, focus: NumberFocus = 'full'): NumberRound[] {

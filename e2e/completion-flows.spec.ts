@@ -48,7 +48,7 @@ async function seedMinimumUntimedPractice(page: Page) {
       rps: 'player',
       path: 'all',
       potion: { comboSize: 1, showEvidence: true },
-      number: 'flash',
+      number: 'full',
       count: 'foundation',
     }));
   }, { configKey: CONFIG_KEY, pacingKey: PACING_KEY });
@@ -105,9 +105,18 @@ async function assertResultStored(page: Page, game: CompletionGame) {
   });
 }
 
-test('가위바위보 최소 연습을 끝까지 완료하고 복습 결과를 저장한다', async ({ page }) => {
+test('가위바위보 최소 연습은 결과 직후 화면을 떠나도 복습 결과를 저장한다', async ({ page }) => {
   const game = completionGames.rps;
   const workspace = await startMinimumUntimedGame(page, game);
+
+  await page.evaluate(() => {
+    const observer = new MutationObserver(() => {
+      if (!document.querySelector('.stage-result')) return;
+      observer.disconnect();
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
 
   for (let round = 0; round < game.quantity; round += 1) {
     await clickWhenEnabled(workspace.locator('.rps-actions button').first());
@@ -168,11 +177,65 @@ test('숫자 누르기 최소 연습을 끝까지 완료하고 복습 결과를 
   const game = completionGames.number;
   const workspace = await startMinimumUntimedGame(page, game);
 
+  await expect(workspace.locator('.number-round-banner')).toContainText('ROUND 1 / 2');
   for (let round = 0; round < game.quantity; round += 1) {
-    await clickWhenEnabled(workspace.locator('.number-board-pro button').first());
+    if (round === 2) {
+      const transition = workspace.locator('.number-round-transition');
+      await expect(transition).toContainText('ROUND 2 / 2');
+      await expect(workspace.locator('.time-strip')).toHaveCount(0);
+      const secondRoundStart = transition.getByRole('button', { name: /2라운드 시작/ });
+      await expect(secondRoundStart).toBeFocused();
+      await secondRoundStart.click();
+      await expect(workspace.locator('.number-round-banner')).toContainText('ROUND 2 / 2');
+    }
+    const banner = workspace.locator('.number-round-banner');
+    await expect(banner.locator('em')).toHaveText(round < 2 ? `${round + 1} / 2 문제` : `${round - 1} / 3 문제`);
+    if ((await banner.textContent())?.includes('ROUND 1')) {
+      await clickWhenEnabled(workspace.locator('.number-board-pro button.target'));
+      continue;
+    }
+    const skip = Number((await workspace.locator('.number-rule span').nth(0).textContent())?.match(/\d+/)?.[0]);
+    const doubles = [...((await workspace.locator('.number-rule span').nth(1).textContent()) ?? '').matchAll(/\d+/g)].map((match) => Number(match[0]));
+    for (let value = 1; value <= 9; value += 1) {
+      if (value === skip) continue;
+      const repeats = doubles.includes(value) ? 2 : 1;
+      for (let repeat = 0; repeat < repeats; repeat += 1) {
+        await clickWhenEnabled(workspace.getByRole('button', { name: String(value), exact: true }));
+      }
+    }
   }
 
   await assertResultStored(page, game);
+});
+
+test('숫자 누르기 실전형은 1라운드 뒤 타이머를 멈추고 3초 후 2라운드를 시작한다', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.addInitScript(() => {
+    Date.now = () => 0;
+    Math.random = () => 0;
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: /숫자 누르기, 난이도 하, 설정 열기/ }).click();
+  const stage = page.locator('section[data-game="number"]');
+  await stage.getByRole('button', { name: /^실전형 연습 시작/ }).click();
+
+  const workspace = page.locator('.game-workspace.game-number');
+  await expect(workspace.locator('.number-round-banner')).toContainText('ROUND 1 / 2', { timeout: 10_000 });
+  for (let question = 0; question < 6; question += 1) {
+    await clickWhenEnabled(workspace.locator('.number-board-pro button.target'));
+  }
+
+  const transition = workspace.locator('.number-round-transition');
+  await expect(transition).toContainText('ROUND 2 / 2');
+  const transitionStartedAt = await page.evaluate(() => performance.now());
+  await expect(transition.locator('.number-transition-countdown')).toHaveAttribute('aria-label', /초 뒤 2라운드 시작/);
+  await expect(workspace.locator('.time-strip')).toHaveCount(0);
+  await expect(workspace.locator('.number-board-pro')).toHaveCount(0);
+  await expect(workspace.locator('.number-round-banner')).toContainText('ROUND 2 / 2', { timeout: 5_000 });
+  const transitionElapsed = await page.evaluate((startedAt) => performance.now() - startedAt, transitionStartedAt);
+  expect(transitionElapsed).toBeGreaterThanOrEqual(2_500);
+  expect(transitionElapsed).toBeLessThan(4_500);
+  await expect(workspace.locator('.time-strip')).toHaveAttribute('data-deadline-active', 'true');
 });
 
 test('개수 비교하기 최소 연습을 끝까지 완료하고 복습 결과를 저장한다', async ({ page }) => {

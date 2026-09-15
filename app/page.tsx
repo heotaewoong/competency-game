@@ -554,14 +554,17 @@ export default function Home() {
   }, []);
 
   function saveResult(result: SessionResult) {
-    const storage = getStorageSafely(() => window.localStorage);
-    if (!storage) {
+    const keepInMemory = (message: string) => {
       const inMemoryNext = mergeSessionResults([result], resultsRef.current);
       resultsRef.current = inMemoryNext;
       setResults(inMemoryNext);
-      const message = '브라우저 저장소에 접근할 수 없어 이번 결과는 현재 화면에만 표시합니다. 새로고침하면 사라질 수 있습니다.';
       setStorageNotice(message);
       return message;
+    };
+    const storage = getStorageSafely(() => window.localStorage);
+    if (!storage) {
+      const message = '브라우저 저장소에 접근할 수 없어 이번 결과는 현재 화면에만 표시합니다. 새로고침하면 사라질 수 있습니다.';
+      return keepInMemory(message);
     }
 
     let generationBefore: string;
@@ -573,45 +576,31 @@ export default function Home() {
         futureSchemaWriteBlockedRef.current = false;
         resultsRef.current = [];
       }
-      const inMemoryNext = mergeSessionResults([result], resultsRef.current);
-      resultsRef.current = inMemoryNext;
       if (futureSchemaWriteBlockedRef.current) {
-        setResults(inMemoryNext);
         const message = '새 형식의 기존 복습 기록을 보호하기 위해 이번 결과는 현재 화면에만 표시합니다. 새로고침하면 사라질 수 있습니다.';
-        setStorageNotice(message);
-        return message;
+        return keepInMemory(message);
       }
       const saved = storage.getItem(resultsStorageKey(generationBefore));
       const parsedEnvelope = parseResultsEnvelope(saved, generationBefore);
       if (!parsedEnvelope.ok && parsedEnvelope.reason !== 'missing') {
-        setResults(inMemoryNext);
         const message = '기존 v4 브라우저 기록이 손상되어 원본 보호를 위해 이번 결과를 저장하지 않았습니다.';
-        setStorageNotice(message);
-        return message;
+        return keepInMemory(message);
       }
       const parsed: unknown = parsedEnvelope.ok ? parsedEnvelope.envelope.results : [];
       if (containsFutureReview(parsed)) {
         futureSchemaWriteBlockedRef.current = true;
-        setResults(inMemoryNext);
         const message = '다른 탭에서 더 새 형식의 기록을 저장해 원본 보호를 위해 이번 결과는 현재 화면에만 표시합니다.';
-        setStorageNotice(message);
-        return message;
+        return keepInMemory(message);
       }
       const normalizedStored = normalizeStoredSessionResults(parsed);
       if (!normalizedStored) {
-        setResults(inMemoryNext);
         const message = '기존 브라우저 기록에 손상된 항목이 있어 원본 보호를 위해 이번 결과를 저장하지 않았습니다.';
-        setStorageNotice(message);
-        return message;
+        return keepInMemory(message);
       }
       storedSnapshot = normalizedStored;
     } catch {
-      const inMemoryNext = mergeSessionResults([result], resultsRef.current);
-      resultsRef.current = inMemoryNext;
-      setResults(inMemoryNext);
       const message = '기존 브라우저 기록을 읽지 못해 원본 보호를 위해 이번 결과를 화면에만 표시합니다.';
-      setStorageNotice(message);
-      return message;
+      return keepInMemory(message);
     }
 
     const next = mergeSessionResults([result], resultsRef.current, storedSnapshot);

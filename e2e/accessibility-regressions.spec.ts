@@ -230,8 +230,8 @@ test('단계 표시와 라운드 칩은 모바일에서도 읽을 수 있는 크
   await expectReadableChip(roundChip);
 });
 
-test('844×360에서도 회전·길·마법약·숫자의 시간제한 조작부가 첫 화면 안에 있다', async ({ page }) => {
-  test.setTimeout(70_000);
+test('844×360과 901px 경계에서도 회전·길·마법약·숫자의 시간제한 조작부가 첫 화면 안에 있다', async ({ page }) => {
+  test.setTimeout(180_000);
   await seedPracticeConfig(page);
   await page.setViewportSize({ width: 844, height: 360 });
   const cases = [
@@ -250,6 +250,15 @@ test('844×360에서도 회전·길·마법약·숫자의 시간제한 조작부
     const readySurface = workspace.locator(entry.ready);
     await expect(readySurface).toBeVisible({ timeout: 8_000 });
     await expectControlsInsideViewport(workspace.locator(entry.controls), 844, 360);
+    if (entry.title === '숫자 누르기') {
+      const roundBanner = workspace.locator('.number-round-banner');
+      await expect(roundBanner).toContainText('ROUND 1 / 2');
+      const bannerBox = await roundBanner.boundingBox();
+      expect(bannerBox).not.toBeNull();
+      expect(bannerBox!.height).toBeGreaterThanOrEqual(28);
+      expect(bannerBox!.y).toBeGreaterThanOrEqual(0);
+      expect(bannerBox!.y + bannerBox!.height).toBeLessThanOrEqual(361);
+    }
     const surfaceBox = await readySurface.boundingBox();
     expect(surfaceBox?.y ?? -1).toBeGreaterThanOrEqual(0);
     expect((surfaceBox?.y ?? 361) + (surfaceBox?.height ?? 0)).toBeLessThanOrEqual(361);
@@ -261,6 +270,31 @@ test('844×360에서도 회전·길·마법약·숫자의 시간제한 조작부
     }));
     expect(overflow.scrollWidth, `${entry.title} 본문의 가로 넘침`).toBeLessThanOrEqual(overflow.width + 1);
     expect.soft(overflow.scrollHeight, `${entry.title} 본문의 세로 넘침`).toBeLessThanOrEqual(overflow.height + 1);
+    if (entry.title === '숫자 누르기') {
+      for (const viewport of [{ width: 844, height: 360 }, { width: 901, height: 360 }, { width: 1024, height: 600 }, { width: 1280, height: 720 }]) {
+        await page.setViewportSize(viewport);
+        await page.waitForTimeout(100);
+        const layout = await workspace.locator('.workspace-body').evaluate((body) => {
+          const bodyRect = body.getBoundingClientRect();
+          const lastButtonRect = body.querySelector('.number-board-pro button:last-child')?.getBoundingClientRect();
+          return lastButtonRect ? {
+            clientWidth: body.clientWidth,
+            scrollWidth: body.scrollWidth,
+            clientHeight: body.clientHeight,
+            scrollHeight: body.scrollHeight,
+            body: { left: bodyRect.left, right: bodyRect.right, top: bodyRect.top, bottom: bodyRect.bottom },
+            lastButton: { left: lastButtonRect.left, right: lastButtonRect.right, top: lastButtonRect.top, bottom: lastButtonRect.bottom },
+          } : null;
+        });
+        expect(layout, `${viewport.width}×${viewport.height} 숫자판 측정`).not.toBeNull();
+        expect(layout!.scrollWidth - layout!.clientWidth, `${viewport.width}×${viewport.height} 숫자판 가로 넘침`).toBeLessThanOrEqual(1);
+        expect(layout!.scrollHeight - layout!.clientHeight, `${viewport.width}×${viewport.height} 숫자판 세로 넘침`).toBeLessThanOrEqual(1);
+        expect(layout!.lastButton.left).toBeGreaterThanOrEqual(layout!.body.left - 1);
+        expect(layout!.lastButton.right).toBeLessThanOrEqual(layout!.body.right + 1);
+        expect(layout!.lastButton.top).toBeGreaterThanOrEqual(layout!.body.top - 1);
+        expect(layout!.lastButton.bottom).toBeLessThanOrEqual(layout!.body.bottom + 1);
+      }
+    }
   }
 });
 
@@ -341,14 +375,64 @@ test('844×360 N-back 응답 단계에서 자극과 모든 선택지가 잘리�
   expect(answerGroupBox).not.toBeNull();
   expect(nextActionBox).not.toBeNull();
   expect((answerGroupBox?.y ?? 0) + (answerGroupBox?.height ?? 0)).toBeLessThanOrEqual((nextActionBox?.y ?? 0) + 1);
-  const stimulusBox = await workspace.locator('.nback-stimulus').boundingBox();
-  expect(stimulusBox?.y ?? -1).toBeGreaterThanOrEqual(0);
-  expect((stimulusBox?.y ?? 361) + (stimulusBox?.height ?? 0)).toBeLessThanOrEqual(361);
-  const overflow = await workspace.locator('.workspace-body').evaluate((element) => ({
-    height: element.clientHeight,
-    scrollHeight: element.scrollHeight,
-  }));
-  expect(overflow.scrollHeight).toBeLessThanOrEqual(overflow.height + 1);
+  for (const viewport of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 844, height: 360 }, { width: 901, height: 360 }, { width: 1024, height: 600 }, { width: 1280, height: 720 }, { width: 1440, height: 900 }]) {
+    await page.setViewportSize(viewport);
+    await page.waitForTimeout(100);
+    const overflow = await workspace.locator('.workspace-body').evaluate((element) => ({
+      width: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      height: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }));
+    expect(overflow.scrollWidth - overflow.width, `${viewport.width}×${viewport.height} N-back 가로 넘침`).toBeLessThanOrEqual(1);
+    expect(overflow.scrollHeight - overflow.height, `${viewport.width}×${viewport.height} N-back 세로 넘침`).toBeLessThanOrEqual(1);
+    const containment = await workspace.locator('.nback-stimulus').evaluate((element) => {
+      const body = element.closest('.workspace-body')?.getBoundingClientRect();
+      const surface = element.getBoundingClientRect();
+      const glyph = element.querySelector('canvas')?.getBoundingClientRect();
+      return body && glyph ? {
+        body: { left: body.left, top: body.top, right: body.right, bottom: body.bottom },
+        surface: { left: surface.left, top: surface.top, right: surface.right, bottom: surface.bottom },
+        glyph: { left: glyph.left, top: glyph.top, right: glyph.right, bottom: glyph.bottom, width: glyph.width, height: glyph.height },
+      } : null;
+    });
+    expect(containment, `${viewport.width}×${viewport.height} 도형 측정`).not.toBeNull();
+    expect(containment!.surface.left).toBeGreaterThanOrEqual(containment!.body.left - 1);
+    expect(containment!.surface.top).toBeGreaterThanOrEqual(containment!.body.top - 1);
+    expect(containment!.surface.right).toBeLessThanOrEqual(containment!.body.right + 1);
+    expect(containment!.surface.bottom).toBeLessThanOrEqual(containment!.body.bottom + 1);
+    expect(containment!.glyph.left).toBeGreaterThanOrEqual(containment!.surface.left - 1);
+    expect(containment!.glyph.top).toBeGreaterThanOrEqual(containment!.surface.top - 1);
+    expect(containment!.glyph.right).toBeLessThanOrEqual(containment!.surface.right + 1);
+    expect(containment!.glyph.bottom).toBeLessThanOrEqual(containment!.surface.bottom + 1);
+    expect(Math.abs(containment!.glyph.width - containment!.glyph.height)).toBeLessThanOrEqual(1);
+    await expectControlsInsideViewport(workspace.locator('.nback-actions button, .nback-stage > .single-action'), viewport.width, viewport.height);
+  }
+});
+
+test('약속 정하기는 답을 고른 즉시 표시 타이머도 멈춘다', async ({ page }) => {
+  await seedPracticeConfig(page);
+  await page.goto('/');
+  await page.getByRole('button', { name: /약속 정하기, 난이도 상, 설정 열기/ }).click();
+  await page.locator('section[data-game="appointment"]').getByRole('button', { name: /^설명·연습 시작/ }).click();
+
+  const workspace = page.locator('.game-workspace.game-appointment');
+  await workspace.getByRole('button', { name: '이 라운드 시작' }).click();
+  for (let person = 0; person < 3; person += 1) {
+    const next = workspace.locator('.appointment-stimulus .single-action');
+    await expect.poll(() => next.getAttribute('aria-disabled')).toBe('false');
+    await next.click();
+  }
+  const deadline = workspace.locator('.appointment-question .time-strip');
+  const runningRemaining = Number(await deadline.getAttribute('aria-valuenow'));
+  await workspace.locator('.appointment-choice-grid button').first().click();
+  await expect(deadline).toHaveAttribute('data-deadline-active', 'false');
+  await expect(deadline).toHaveAttribute('aria-valuetext', '응답 완료 · 다음 문제 준비 중');
+  const stoppedAt = await deadline.getAttribute('aria-valuenow');
+  expect(Number(stoppedAt)).toBeLessThanOrEqual(runningRemaining);
+  expect(Number(stoppedAt)).toBeGreaterThan(0);
+  await page.waitForTimeout(400);
+  await expect(deadline).toHaveAttribute('aria-valuenow', stoppedAt!);
 });
 
 test('약속·개수·N-back 단계 전환은 이전 내부 스크롤 위치를 남기지 않는다', async ({ page }) => {
@@ -611,6 +695,10 @@ test('탭 이탈은 준비와 문제 타이머를 멈추고 명시적 재개를 
 
 test('문항 전환 준비시간은 제한시간과 반응시간 측정을 먼저 소모하지 않는다', async ({ page }) => {
   await seedPracticeConfig(page);
+  await page.addInitScript(({ configKey }) => {
+    const saved = JSON.parse(window.localStorage.getItem(configKey) ?? '{}') as Record<string, { quantity: number; paceMs: number }>;
+    window.localStorage.setItem(configKey, JSON.stringify({ ...saved, rps: { quantity: 9, paceMs: 9_000 } }));
+  }, { configKey: CONFIG_KEY });
   await page.goto('/');
   await page.getByRole('button', { name: /가위바위보, 난이도 하, 설정 열기/ }).click();
   await page.locator('section[data-game="rps"]').getByRole('button', { name: /^설명·연습 시작/ }).click();
@@ -619,7 +707,7 @@ test('문항 전환 준비시간은 제한시간과 반응시간 측정을 먼�
   await expect(rpsWorkspace.locator('.rps-board')).toBeVisible({ timeout: 8_000 });
   const rpsDeadline = rpsWorkspace.locator('.time-strip');
   await expect(rpsDeadline).toHaveAttribute('data-deadline-active', 'true');
-  await rpsWorkspace.locator('.rps-actions button').first().click();
+  await rpsWorkspace.locator('.rps-actions button').first().evaluate((button) => (button as HTMLButtonElement).click());
   await expect(rpsDeadline).toHaveAttribute('data-deadline-active', 'false');
   await expect(rpsWorkspace.locator('.rps-actions button').first()).toBeDisabled();
   await expect(rpsWorkspace.locator('.workspace-progress span')).toContainText('1 / 9');
@@ -638,10 +726,15 @@ test('문항 전환 준비시간은 제한시간과 반응시간 측정을 먼�
 
   const nbackWorkspace = page.locator('.game-workspace.game-nback');
   await expect(nbackWorkspace.locator('.nback-stage')).toBeVisible({ timeout: 8_000 });
+  const nbackDeadline = nbackWorkspace.locator('.time-strip');
   await expect(nbackWorkspace.locator('.time-strip[data-deadline-active="true"]')).toBeVisible({ timeout: 8_000 });
+  const nbackStartingRemaining = Number(await nbackDeadline.getAttribute('aria-valuenow'));
+  const nbackTransitionStartedAt = Date.now();
   await nbackWorkspace.locator('.nback-stimulus').evaluate((element) => { element.setAttribute('data-transition-probe', 'old'); });
   await page.waitForFunction(() => document.querySelector('.game-nback .nback-stimulus')?.getAttribute('data-transition-probe') !== 'old', null, { timeout: 4_000, polling: 20 });
-  const nbackDeadline = nbackWorkspace.locator('.time-strip');
+  const nbackTransitionElapsed = Date.now() - nbackTransitionStartedAt;
+  expect(nbackTransitionElapsed).toBeGreaterThanOrEqual(nbackStartingRemaining - 500);
+  expect(nbackTransitionElapsed).toBeLessThanOrEqual(nbackStartingRemaining + 750);
   await expect(nbackDeadline).toHaveAttribute('data-deadline-active', 'true');
   const nbackBudget = await nbackDeadline.evaluate((element) => ({
     maximum: Number(element.getAttribute('aria-valuemax')),
@@ -863,4 +956,62 @@ test('도형 회전 격자 자극은 공개 화면과 같은 4×4 구조를 유�
   });
   expect(geometry.columns).toBe(4);
   expect(Math.abs(geometry.width - geometry.height)).toBeLessThanOrEqual(1);
+});
+
+test('도형 회전 핵심 조작은 휴대폰 가로와 일반 데스크톱 비율에서 내부 스크롤 없이 보인다', async ({ page }) => {
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await page.addInitScript(({ configKey }) => {
+    window.localStorage.setItem(configKey, JSON.stringify({ rotation: { quantity: 1, paceMs: 90_000 } }));
+    window.localStorage.setItem('nineflow-rotation-preferences-v1', JSON.stringify({
+      contentMode: 'letters',
+      selectedLetters: ['F'],
+      selectedTransforms: ['turn-left-45'],
+      showPreview: false,
+    }));
+  }, { configKey: CONFIG_KEY });
+  await page.goto('/');
+  await page.getByRole('button', { name: /도형 회전하기, 난이도 중, 설정 열기/ }).click();
+  await page.locator('section[data-game="rotation"]').getByRole('button', { name: /^설명·연습 시작/ }).click();
+
+  const workspace = page.locator('.game-workspace.game-rotation');
+  await expect(workspace.locator('.rotation-comparison')).toBeVisible({ timeout: 8_000 });
+  const viewports = [
+    { width: 768, height: 1024 },
+    { width: 844, height: 360 },
+    { width: 901, height: 360 },
+    { width: 901, height: 720 },
+    { width: 1024, height: 600 },
+    { width: 1280, height: 720 },
+    { width: 1440, height: 900 },
+    { width: 1920, height: 1080 },
+  ];
+
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    await page.waitForTimeout(100);
+    const layout = await workspace.locator('.workspace-body').evaluate((body) => {
+      const bodyRect = body.getBoundingClientRect();
+      const tracked = Array.from(body.querySelectorAll('.rotation-comparison, .rotation-controls, .rotation-submit-row, .operation-sequence'));
+      return {
+        clientWidth: body.clientWidth,
+        scrollWidth: body.scrollWidth,
+        clientHeight: body.clientHeight,
+        scrollHeight: body.scrollHeight,
+        body: { left: bodyRect.left, right: bodyRect.right, top: bodyRect.top, bottom: bodyRect.bottom },
+        tracked: tracked.map((element) => {
+          const rect = element.getBoundingClientRect();
+          return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+        }),
+      };
+    });
+    expect(layout.scrollWidth - layout.clientWidth, `${viewport.width}×${viewport.height} 내부 가로 넘침`).toBeLessThanOrEqual(2);
+    expect(layout.scrollHeight - layout.clientHeight, `${viewport.width}×${viewport.height} 내부 세로 넘침`).toBeLessThanOrEqual(2);
+    expect(layout.tracked.length).toBe(4);
+    for (const rect of layout.tracked) {
+      expect(rect.left, `${viewport.width}×${viewport.height} 조작 좌측`).toBeGreaterThanOrEqual(layout.body.left - 1);
+      expect(rect.right, `${viewport.width}×${viewport.height} 조작 우측`).toBeLessThanOrEqual(layout.body.right + 1);
+      expect(rect.top, `${viewport.width}×${viewport.height} 조작 상단`).toBeGreaterThanOrEqual(layout.body.top - 1);
+      expect(rect.bottom, `${viewport.width}×${viewport.height} 조작 하단`).toBeLessThanOrEqual(layout.body.bottom + 1);
+    }
+  }
 });

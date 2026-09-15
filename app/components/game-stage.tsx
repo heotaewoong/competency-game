@@ -72,7 +72,7 @@ import {
 } from '../lib/appointment-game';
 import { buildPathPuzzles, createPathSessionScore, finalizePathTrialScore, nextFenceValue, pathPuzzleMeta, simulatePath, type Fence, type PathFocus, type Side, type Vehicle } from '../lib/path-game';
 import { buildPotionTrials, evaluatePotionEvidenceDecision, POTION_INGREDIENTS, POTION_RECIPE_COMBOS, recordVisiblePotionOutcome, summarizePotionPerformance, type PotionComboSize } from '../lib/potion-game';
-import { buildNumberRounds, classifyNumberInputError, numberExpected, type NumberFocus } from '../lib/number-game';
+import { buildNumberRounds, classifyNumberInputError, numberExpected, numberRoundPosition, type NumberFocus } from '../lib/number-game';
 import {
   compactReviewPayload,
   hasReviewData,
@@ -272,12 +272,16 @@ function DeadlineBar({ duration, label, className = '', active = true }: { durat
     // A new deadline intentionally starts at its full duration.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setRemaining(duration);
-  }, [active, duration]);
+  }, [duration]);
 
   useEffect(() => {
     if (timerRef.current !== null) { window.clearInterval(timerRef.current); timerRef.current = null; }
-    if (!active) return;
     const now = performance.now();
+    if (!active) {
+      clockRef.current = pausePausableTimer(clockRef.current, now);
+      setRemaining(clockRef.current.remainingMs);
+      return;
+    }
     if (isPaused) {
       clockRef.current = pausePausableTimer(clockRef.current, now);
       setRemaining(clockRef.current.remainingMs);
@@ -290,10 +294,14 @@ function DeadlineBar({ duration, label, className = '', active = true }: { durat
       if (next === 0 && timerRef.current !== null) { window.clearInterval(timerRef.current); timerRef.current = null; }
     };
     update();
-    timerRef.current = window.setInterval(update, 100);
+    timerRef.current = window.setInterval(update, 250);
     return () => { if (timerRef.current !== null) { window.clearInterval(timerRef.current); timerRef.current = null; } };
   }, [active, duration, isPaused]);
-  return <div className={`time-strip ${active ? '' : 'is-settling'} ${className}`.trim()} role="progressbar" aria-label={active ? label : `${label} · 입력 준비 중`} aria-valuemin={0} aria-valuemax={duration} aria-valuenow={Math.round(remaining)} aria-valuetext={active ? `${(remaining / 1000).toFixed(1)}초 남음` : '입력 준비 중'} data-deadline-active={active ? 'true' : 'false'}><span className="time-track" aria-hidden="true"><i style={{ animation: 'none', transform: `scaleX(${duration > 0 ? remaining / duration : 0})` }} /></span><span className="deadline-text" aria-hidden="true">{active ? `${(remaining / 1000).toFixed(1)}초` : '준비'}</span></div>;
+  const remainingScale = duration > 0 ? Math.max(0, Math.min(1, remaining / duration)) : 0;
+  const progressStyle = active
+    ? ({ '--duration': `${duration}ms`, '--remaining-scale': remainingScale, animationPlayState: isPaused ? 'paused' : 'running' } as CSSProperties)
+    : ({ '--remaining-scale': remainingScale, animation: 'none', transform: `scaleX(${remainingScale})` } as CSSProperties);
+  return <div className={`time-strip ${active ? '' : 'is-settling'} ${className}`.trim()} role="progressbar" aria-label={active ? label : `${label} · 응답 완료`} aria-valuemin={0} aria-valuemax={duration} aria-valuenow={Math.round(remaining)} aria-valuetext={active ? `${(remaining / 1000).toFixed(1)}초 남음` : '응답 완료 · 다음 문제 준비 중'} data-deadline-active={active ? 'true' : 'false'}><span className="time-track" aria-hidden="true"><i style={progressStyle} /></span><span className="deadline-text" aria-hidden="true">{active ? `${(remaining / 1000).toFixed(1)}초` : '완료'}</span></div>;
 }
 
 function median(values: number[]) {
@@ -999,12 +1007,26 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
     visibilityPausedRef.current = false;
     setVisibilityPaused(false);
     setResult(completed);
-    try {
-      setSaveNotice(onSave(completed));
-    } catch {
-      setSaveNotice('결과 저장 중 오류가 발생했지만 이번 결과 화면은 유지합니다.');
-    }
     setPhase('result');
+    let saved = false;
+    const persistResult = () => {
+      if (saved) return;
+      saved = true;
+      window.removeEventListener('pagehide', persistResult);
+      try {
+        setSaveNotice(onSave(completed));
+      } catch {
+        setSaveNotice('결과 저장 중 오류가 발생했지만 이번 결과 화면은 유지합니다.');
+      }
+    };
+    window.addEventListener('pagehide', persistResult, { once: true });
+    const fallback = window.setTimeout(persistResult, 500);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        window.clearTimeout(fallback);
+        window.setTimeout(persistResult, 0);
+      });
+    });
   }
 
   function restart(nextMode: SessionMode = sessionMode) {
@@ -1394,7 +1416,7 @@ function NBackPracticeOptions({ value, onChange }: { value: NBackPreferences; on
         <legend>진행 방식</legend>
         <div className="rotation-mode-options nback-progression-options" role="radiogroup" aria-label="도형 순서 진행 방식">
           <button type="button" role="radio" aria-checked={value.progression === 'fixed'} tabIndex={value.progression === 'fixed' ? 0 : -1} className={value.progression === 'fixed' ? 'active' : ''} onKeyDown={(event) => navigateOption(event, 0, progressions, (progression) => onChange({ ...value, progression }))} onClick={() => onChange({ ...value, progression: 'fixed' })}><b>고정 간격</b><small>응답해도 설정한 시간이 끝난 뒤 전환</small></button>
-          <button type="button" role="radio" aria-checked={value.progression === 'fast'} tabIndex={value.progression === 'fast' ? 0 : -1} className={value.progression === 'fast' ? 'active' : ''} onKeyDown={(event) => navigateOption(event, 1, progressions, (progression) => onChange({ ...value, progression }))} onClick={() => onChange({ ...value, progression: 'fast' })}><b>정답 빠른 전환</b><small>정답이면 약 0.3초 뒤 다음 도형</small></button>
+          <button type="button" role="radio" aria-checked={value.progression === 'fast'} tabIndex={value.progression === 'fast' ? 0 : -1} className={value.progression === 'fast' ? 'active' : ''} onKeyDown={(event) => navigateOption(event, 1, progressions, (progression) => onChange({ ...value, progression }))} onClick={() => onChange({ ...value, progression: 'fast' })}><b>응답 빠른 전환</b><small>정오답과 관계없이 약 0.3초 뒤 다음 도형</small></button>
         </div>
       </fieldset>
     </section>
@@ -1657,7 +1679,7 @@ function GameRouter({ gameId, glyphMnemonics, nbackPreferences, rotationPreferen
   return <MouseGame {...props} config={config} />;
 }
 
-function GameFrame({ gameId, current, total, children, helper, simulationHelper, feedback, statusMessage, showFeedbackInSimulation = false, bodyFocusable = false, onClose, progressUnit, zeroLabel = '시작 전' }: { gameId: GameId; current: number; total: number; children: ReactNode; helper: string; simulationHelper?: string; feedback?: string; statusMessage?: string; showFeedbackInSimulation?: boolean; bodyFocusable?: boolean; onClose: () => void; progressUnit?: string; zeroLabel?: string }) {
+function GameFrame({ gameId, current, total, children, helper, simulationHelper, feedback, statusMessage, showFeedbackInSimulation = false, bodyFocusable = false, onClose, progressLabel, progressUnit, zeroLabel = '시작 전' }: { gameId: GameId; current: number; total: number; children: ReactNode; helper: string; simulationHelper?: string; feedback?: string; statusMessage?: string; showFeedbackInSimulation?: boolean; bodyFocusable?: boolean; onClose: () => void; progressLabel?: string; progressUnit?: string; zeroLabel?: string }) {
   const game = getGame(gameId);
   const { mode } = useContext(SessionModeContext);
   const { openGameSwitcher, openFeedback } = useContext(StageActionsContext);
@@ -1668,7 +1690,8 @@ function GameFrame({ gameId, current, total, children, helper, simulationHelper,
     ? 'is-success'
     : /^(오답|시간|20회|모양|물음표|정답은|모든|경로는|순서)/.test(visibleFeedback) ? 'is-error' : '';
   const liveDetail = visibleFeedback || statusMessage;
-  const progressText = current === 0 ? `${total}${unit} 중 ${zeroLabel}` : `${total}${unit} 중 ${current}번째`;
+  const progressContext = progressLabel ? `${progressLabel}. ` : '';
+  const progressText = `${progressContext}${current === 0 ? `${total}${unit} 중 ${zeroLabel}` : `${total}${unit} 중 ${current}번째`}`;
   const liveMessage = `${progressText}${liveDetail ? `. ${liveDetail}` : ''}`;
   const footerHelper = mode === 'practice' ? helper : simulationHelper ?? '피드백 없이 고정 설정으로 진행 중';
   useLayoutEffect(() => {
@@ -1678,7 +1701,7 @@ function GameFrame({ gameId, current, total, children, helper, simulationHelper,
     <div className={`game-workspace game-${gameId}`} data-mode={mode} role="region" aria-labelledby={`${gameId}-workspace-title`} tabIndex={-1}>
       <header className="workspace-head">
         <div><p>{game.no} · {game.skill} <span className="mode-chip">{mode === 'practice' ? '연습' : '실전형 연습'}</span></p><h2 id={`${gameId}-workspace-title`}>{game.title}</h2></div>
-        <div className="workspace-progress"><span>{current} / {total} {unit}</span><i role="progressbar" aria-label={`${unit} 진행률`} aria-valuemin={current === 0 ? 0 : 1} aria-valuemax={total} aria-valuenow={current} aria-valuetext={progressText}><b style={{ width: `${Math.round((current / total) * 100)}%` }} /></i></div>
+        <div className="workspace-progress"><span>{progressLabel ? `${progressLabel} · ` : ''}{current} / {total} {unit}</span><i role="progressbar" aria-label={`${progressLabel ? `${progressLabel} ` : ''}${unit} 진행률`} aria-valuemin={current === 0 ? 0 : 1} aria-valuemax={total} aria-valuenow={current} aria-valuetext={progressText}><b style={{ width: `${Math.round((current / total) * 100)}%` }} /></i></div>
         <div className="workspace-actions"><button type="button" data-game-shortcut-ignore className="workspace-switch" aria-label="게임 바꾸기" onClick={openGameSwitcher}>게임 바꾸기</button><button type="button" data-game-shortcut-ignore className="workspace-report" aria-label="문제 신고" onClick={openFeedback}>문제 신고</button><button data-game-shortcut-ignore className="session-close" aria-label={`${mode === 'practice' ? '연습' : '실전형 연습'} 닫기`} onClick={onClose}>×</button></div>
       </header>
       <div ref={bodyRef} className="workspace-body" tabIndex={bodyFocusable ? 0 : undefined} aria-label={bodyFocusable ? `${game.title} 문제와 응답 영역` : undefined}>{children}</div>
@@ -2656,8 +2679,8 @@ function AppointmentGame({ onFinish, onClose, config, preferences }: GameProps &
       <div className="appointment-shell" ref={phaseContainerRef}>
         <AppointmentRoundRail currentRound={trial.round} selectedRounds={selectedRounds} />
         {phase === 'roundIntro' && <section className="appointment-round-intro" tabIndex={-1} aria-labelledby="appointment-round-title"><span>ROUND {trial.round} / 4</span><h3 id="appointment-round-title">{trial.roundLabel}</h3><p>{trial.title}</p><div><b>{trial.kind === 'bus' ? '제외 규칙' : '공통 규칙'}</b><small>{trial.kind === 'bus' ? '세 사람에게 한 번도 나오지 않은 번호' : '첫 사람 → 둘째 → 셋째의 교집합'}</small></div>{mode === 'practice' ? <button type="button" className="single-action" onClick={beginRound}>이 라운드 시작 <i>→</i></button> : <p className="auto-next">잠시 후 자동으로 시작합니다.</p>}</section>}
-        {phase === 'stimulus' && <section className="appointment-stimulus" tabIndex={-1}>{guidedPacing ? <p className="guided-pacing-note" role="status">음성 안내 직접 진행 중 · 제한시간 없음</p> : <DeadlineBar key={`${trialIndex}-${person}`} duration={presentationMs} label={`${personNames[person]} 정보 제시시간`} />}<div className="appointment-phase-meta"><span>{personNames[person]}</span><b>{person + 1} / 3</b><small>{trial.questionInRound} / {trial.questionsInRound}문항</small></div><h3>{trial.kind === 'bus' ? '이 친구가 이용한 버스를 기억하세요' : '이 친구가 고른 항목을 기억하세요'}</h3><PersonMemory trial={trial} person={person} />{mode === 'practice' ? <button type="button" className="single-action" aria-disabled={presentationAdvanceLocked} onKeyDown={(event) => { if (event.repeat) event.preventDefault(); }} onClick={(event) => { if (event.detail > 1) return; nextPerson(); }}>{guidedPacing ? '내용을 들었어요 · ' : ''}{person < 2 ? '다음 친구' : '질문 보기'} <i>→</i></button> : <p className="auto-next">제시시간이 끝나면 자동으로 이동합니다.</p>}</section>}
-        {phase === 'answer' && <section className="appointment-question" tabIndex={-1}>{guidedPacing ? <p className="guided-pacing-note" role="status">음성 안내 직접 진행 중 · 응답 제한시간 없음</p> : <DeadlineBar key={`${trialIndex}-answer`} duration={answerLimit} label="응답 제한시간" />}<div className="appointment-phase-meta"><span>{trial.kind === 'bus' ? '한 번도 안 나온 것' : '세 사람의 공통 항목'}</span><b>QUESTION</b><small>{trial.questionInRound} / {trial.questionsInRound}문항</small></div><h3>{trial.title}</h3><AppointmentChoices trial={trial} locked={locked} showNumberShortcuts={mode === 'practice'} onChoose={choose} /></section>}
+        {phase === 'stimulus' && <section className="appointment-stimulus" tabIndex={-1}>{guidedPacing ? <p className="guided-pacing-note" role="status">음성 안내 직접 진행 중 · 제한시간 없음</p> : <DeadlineBar key={`${trialIndex}-${person}`} duration={presentationMs} label={`${personNames[person]} 정보 제시시간`} />}<div className="appointment-phase-meta"><span>{personNames[person]}</span><b>{person + 1} / 3</b><small>{trial.questionInRound} / {trial.questionsInRound}문항</small></div><h3>{trial.kind === 'bus' ? '이 친구가 이용한 버스를 기억하세요' : '이 친구가 고른 항목을 기억하세요'}</h3><PersonMemory trial={trial} person={person} />{mode === 'practice' ? <button type="button" className="single-action" aria-disabled={presentationAdvanceLocked} onKeyDown={(event) => { if (event.repeat) event.preventDefault(); }} onClick={nextPerson}>{guidedPacing ? '내용을 들었어요 · ' : ''}{person < 2 ? '다음 친구' : '질문 보기'} <i>→</i></button> : <p className="auto-next">제시시간이 끝나면 자동으로 이동합니다.</p>}</section>}
+        {phase === 'answer' && <section className="appointment-question" tabIndex={-1}>{guidedPacing ? <p className="guided-pacing-note" role="status">음성 안내 직접 진행 중 · 응답 제한시간 없음</p> : <DeadlineBar key={`${trialIndex}-answer`} duration={answerLimit} label="응답 제한시간" active={!locked} />}<div className="appointment-phase-meta"><span>{trial.kind === 'bus' ? '한 번도 안 나온 것' : '세 사람의 공통 항목'}</span><b>QUESTION</b><small>{trial.questionInRound} / {trial.questionsInRound}문항</small></div><h3>{trial.title}</h3><AppointmentChoices trial={trial} locked={locked} showNumberShortcuts={mode === 'practice'} onChoose={choose} /></section>}
       </div>
     </GameFrame>
   );
@@ -2895,7 +2918,7 @@ function PathGame({ onFinish, onClose, config }: GameProps & { config: PracticeC
 
   return (
     <GameFrame gameId="path" current={round + 1} total={puzzles.length} helper="넓은 화면에서는 / 또는 \\ 방향을 직접 선택하고, 작은 화면에서는 칸 전체를 눌러 없음 → / → \\ 순서로 바꿉니다." feedback={feedback} statusMessage={statusMessage} onClose={onClose}>
-      {guidedPacing ? <p className="guided-pacing-note" role="status">시간 제한 없이 연습 중 · 경로를 완성한 뒤 직접 확인하세요</p> : <DeadlineBar key={round} duration={config.paceMs} label="문제 제한시간" />}
+      {guidedPacing ? <p className="guided-pacing-note" role="status">시간 제한 없이 연습 중 · 경로를 완성한 뒤 직접 확인하세요</p> : <DeadlineBar key={round} duration={config.paceMs} label="문제 제한시간" active={!locked} />}
       <section className="path-control-panel" aria-label="길 만들기 풀이 상태와 제출">
         <header><span>PUZZLE CONTROL</span><b>울타리 계획</b><p>같은 색의 차량과 손님을 연결한 뒤, 목표 울타리 수에 맞춰 확인하세요.</p></header>
         <div className="path-toolbar"><span>현재 조작 기록 <b>{clicks}</b></span><span>정답 울타리 수 <b>{puzzle.target}</b></span>{mode === 'practice' && <span className={`path-type-chip ${puzzleMeta.interaction}`}><b>{interactionLabel}</b> T {puzzle.target} {comparison} B {puzzleMeta.baseFenceCount}<small>{pairLabel}{puzzleMeta.orderHint === 'parallel-first' ? ' · 평행 먼저' : ''}</small></span>}<button disabled={locked} onClick={resetPath}>전체 초기화</button></div>
@@ -3320,7 +3343,7 @@ function NBackGame({ onFinish, onClose, glyphMnemonics, config, preferences }: G
     setSelected(answer);
     const score = scoreNBackResponse(trial, answer, responseRef.current);
     if (mode === 'practice') setFeedback(score.correct ? '정답 · 응답 저장됨' : `오답 · 정답은 ${nbackDecisionLabel(trial.answer, trial.task)}입니다.`);
-    if (!guidedPacing && progression === 'fast' && score.correct) {
+    if (!guidedPacing && progression === 'fast') {
       setEarlyAdvancePending(true);
     }
   }
@@ -3345,7 +3368,10 @@ function NBackGame({ onFinish, onClose, glyphMnemonics, config, preferences }: G
   const roundLabel = mode === 'practice' ? 'PRACTICE' : `ROUND ${trial.round}`;
   const helper = trial.task === 'n2' ? '← 2번째 전과 같음 · Space 2번째 전과 다름' : '← 2번째 전과 같음 · → 3번째 전과 같음 · Space 둘 다 다름';
   const spokenGlyph = mode === 'practice' && showName ? `${glyphShapeNames[trial.variant]}, 암기명 ${glyphMnemonics[trial.variant]}` : glyphShapeNames[trial.variant];
-  const statusMessage = countdown !== null ? `${countdown}초 뒤 시작합니다.` : trial.warmup ? `현재 도형 ${spokenGlyph}. 입력 없이 기억하세요.${guidedPacing ? ' 기억한 뒤 다음 도형 버튼을 누르세요.' : ''}` : selected ? `현재 도형 ${spokenGlyph}. 응답 저장됨.${guidedPacing ? ' 다음 도형 버튼을 누르세요.' : ''}` : `현재 도형 ${spokenGlyph}. 지금 분류하세요.`;
+  const roundTransition = countdown !== null && index > 0 && trials[index - 1]?.round !== trial.round;
+  const countdownHeading = roundTransition ? `${trial.round}라운드 전환` : mode === 'simulation' ? `${trial.round}라운드 시작` : '연습 시작';
+  const selectedStatus = guidedPacing ? '응답 저장됨. 다음 도형 버튼을 누르세요.' : progression === 'fast' ? '응답 저장됨. 곧 다음 도형으로 이동합니다.' : '응답 저장됨. 고정 간격이 끝나면 다음 도형으로 이동합니다.';
+  const statusMessage = countdown !== null ? `${countdownHeading}. ${countdown}초 뒤 시작합니다.` : trial.warmup ? `현재 도형 ${spokenGlyph}. 입력 없이 기억하세요.${guidedPacing ? ' 기억한 뒤 다음 도형 버튼을 누르세요.' : ''}` : selected ? `현재 도형 ${spokenGlyph}. ${selectedStatus}` : `현재 도형 ${spokenGlyph}. 지금 분류하세요.`;
   const answerClass = (decision: NBackDecision) => {
     const classes = selected === decision ? ['selected'] : [];
     if (mode === 'practice' && selected !== null) {
@@ -3359,7 +3385,7 @@ function NBackGame({ onFinish, onClose, glyphMnemonics, config, preferences }: G
     <GameFrame gameId="nback" current={countdown !== null ? completedScored : scoredProgress} total={scoredTotal} zeroLabel="기억 구간" helper={helper} feedback={feedback} statusMessage={statusMessage} onClose={onClose}>
       <div className="nback-stage" ref={stageRef}>
         {countdown !== null ? (
-          <div className="nback-countdown" role="timer" aria-live="polite" aria-label={`${countdown}초 뒤 도형 순서 게임 시작`}><span>{roundLabel} · {taskLabel}</span><b>{countdown}</b><small>{helper}</small></div>
+          <div className="nback-countdown" role="timer" aria-live="polite" aria-label={`${countdownHeading} · ${countdown}초 뒤 도형 순서 게임 시작`}><span>{roundLabel} · {taskLabel}</span><strong>{countdownHeading}</strong><b>{countdown}</b><small>{roundTransition ? `${taskLabel} 규칙으로 바뀝니다. ` : ''}{helper}</small></div>
         ) : (
           <>
             <div className="nback-status"><div><span>{roundLabel} · 묶음 {trial.group + 1}</span><b>{taskLabel}{trial.warmup ? ' · 기억 준비' : ' · 비교 판단'}</b></div>{mode === 'practice' && <button type="button" onClick={(event) => { toggleNameLabels(); restoreGameShortcutFocus(event.currentTarget); }}>이름표 {showName ? '숨기기' : '보기'}</button>}</div>
@@ -3391,20 +3417,25 @@ function NumberGame({ onFinish, onClose, config }: GameProps & { config: Practic
   const { number: focus } = useContext(FocusedPracticeContext);
   const [seed] = useState(newSessionSeed);
   const rounds = useMemo(() => buildNumberRounds(config.quantity, seed, focus), [config.quantity, focus, seed]);
-  const [round, setRound] = useState(0);
+  const [attemptIndex, setAttemptIndex] = useState(0);
   const [cursor, setCursor] = useState(0);
   const [passed, setPassed] = useState(0);
   const [errors, setErrors] = useState(0);
   const [rts, setRts] = useState<number[]>([]);
   const [feedback, setFeedback] = useState('');
   const [locked, setLocked] = useState(false);
+  const [phaseTransition, setPhaseTransition] = useState(false);
+  const [transitionCountdown, setTransitionCountdown] = useState<number | null>(null);
   const responseClock = useActiveElapsedClock();
   const resolvedRef = useRef(false);
   const inputRef = useRef<number[]>([]);
   const reviewAttemptsRef = useRef<GenericReviewAttempt[]>([]);
   const boardRef = useRef<HTMLDivElement>(null);
+  const transitionRef = useRef<HTMLElement>(null);
   const schedule = useManagedTimeout();
-  const roundConfig = rounds[round];
+  const roundConfig = rounds[attemptIndex];
+  const roundPosition = numberRoundPosition(rounds, attemptIndex);
+  const phaseName = roundConfig.mode === 'flash' ? '점등 숫자' : '예외 규칙';
   const expected = numberExpected(roundConfig);
 
   function finishRound(success: boolean, message: string, errorCode: string | null = null, errorPosition = inputRef.current.length) {
@@ -3422,10 +3453,10 @@ function NumberGame({ onFinish, onClose, config }: GameProps & { config: Practic
       : errorCode === 'number-extra' ? '두 번 누르기 규칙이 끝난 숫자를 한 번 더 선택했습니다.'
       : `기대 순서 ${expected[Math.min(errorPosition, expected.length - 1)]} 대신 다른 숫자를 선택했습니다.`;
     reviewAttemptsRef.current.push(genericReviewAttempt({
-      index: round,
+      index: attemptIndex,
       status: success ? 'correct' : 'error',
       errorCodes: errorCode ? [errorCode] : [],
-      title: `${round + 1}번 · ${roundConfig.mode === 'flash' ? '점등 숫자' : '예외 규칙'}`,
+      title: `${roundPosition.round}R ${roundPosition.index}번 · ${phaseName}`,
       prompt: roundConfig.mode === 'flash' ? '불이 들어온 숫자 선택' : `건너뛰기 ${roundConfig.skip} · 두 번 ${roundConfig.double.join('·')}`,
       expected: expected.join(' → '),
       selected: inputRef.current.length ? inputRef.current.join(' → ') : '응답 없음',
@@ -3435,32 +3466,57 @@ function NumberGame({ onFinish, onClose, config }: GameProps & { config: Practic
     }));
     setPassed(nextPassed); setErrors(nextErrors); setRts(nextRts); setFeedback(message);
     schedule(() => {
-      if (round === rounds.length - 1) onFinish(resultFor('number', nextPassed, rounds.length, nextRts, nextErrors, undefined, compactReviewPayload('number', reviewAttemptsRef.current)));
+      if (attemptIndex === rounds.length - 1) onFinish(resultFor('number', nextPassed, rounds.length, nextRts, nextErrors, undefined, compactReviewPayload('number', reviewAttemptsRef.current)));
       else {
-        schedule(() => {
-          resolvedRef.current = false;
-          inputRef.current = [];
-          setRound((value) => value + 1);
-          setCursor(0);
-          setFeedback('');
-          setLocked(false);
-        }, ROUND_INPUT_SETTLE_MS);
+        const nextIndex = attemptIndex + 1;
+        const changesRound = rounds[nextIndex].mode !== roundConfig.mode;
+        resolvedRef.current = false;
+        inputRef.current = [];
+        setAttemptIndex(nextIndex);
+        setCursor(0);
+        setFeedback('');
+        if (changesRound) {
+          setPhaseTransition(true);
+          setTransitionCountdown(mode === 'simulation' ? 3 : null);
+        } else setLocked(false);
       }
-    }, mode === 'practice' ? 1000 : 420);
+    }, mode === 'practice' ? 750 : 360);
+  }
+
+  function beginNextRound() {
+    setPhaseTransition(false);
+    setTransitionCountdown(null);
+    setLocked(false);
+    resolvedRef.current = false;
   }
 
   useLayoutEffect(() => {
-    if (locked) return;
+    if (locked || phaseTransition) return;
     resolvedRef.current = false;
     responseClock.restart();
-  }, [locked, responseClock, round]);
-  usePausableTimeout(() => finishRound(false, '시간 초과 · 다음 문제로 이동합니다.', 'timeout', inputRef.current.length), config.paceMs, !locked && !guidedPacing, round);
+  }, [attemptIndex, locked, phaseTransition, responseClock]);
+  usePausableTimeout(() => finishRound(false, '시간 초과 · 다음 문제로 이동합니다.', 'timeout', inputRef.current.length), config.paceMs, !locked && !guidedPacing && !phaseTransition, attemptIndex);
+  usePausableTimeout(beginNextRound, 3000, phaseTransition && mode === 'simulation', `number-round-transition-${attemptIndex}`);
+  usePausableTimeout(() => {
+    setTransitionCountdown((value) => value === null ? null : Math.max(1, value - 1));
+  }, 1000, phaseTransition && transitionCountdown !== null && transitionCountdown > 1, `number-round-countdown-${attemptIndex}-${transitionCountdown ?? 'manual'}`);
 
   useEffect(() => {
-    if (locked || isPaused) return;
+    if (locked || isPaused || phaseTransition) return;
     const frame = window.requestAnimationFrame(() => boardRef.current?.focus({ preventScroll: true }));
     return () => window.cancelAnimationFrame(frame);
-  }, [isPaused, locked, round]);
+  }, [attemptIndex, isPaused, locked, phaseTransition]);
+
+  useEffect(() => {
+    if (!phaseTransition || isPaused) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = mode === 'practice'
+        ? transitionRef.current?.querySelector<HTMLButtonElement>('button')
+        : transitionRef.current;
+      target?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isPaused, mode, phaseTransition]);
 
   function choose(value: number) {
     if (isPaused || locked) return;
@@ -3486,17 +3542,33 @@ function NumberGame({ onFinish, onClose, config }: GameProps & { config: Practic
   });
 
   const statusMessage = roundConfig.mode === 'flash'
-    ? `점등 숫자 문제. 현재 목표 숫자는 ${expected[cursor]}입니다.`
-    : `예외 규칙 문제. ${roundConfig.skip}은 건너뛰고 ${roundConfig.double.join('과 ')}은 두 번 누릅니다. 현재 ${cursor}/${expected.length}개 입력했습니다.`;
+    ? `${roundPosition.round}라운드 ${roundPosition.index}번째 문제. 현재 목표 숫자는 ${expected[cursor]}입니다.`
+    : `${roundPosition.round}라운드 ${roundPosition.index}번째 문제. ${roundConfig.skip}은 건너뛰고 ${roundConfig.double.join('과 ')}은 두 번 누릅니다. 현재 ${cursor}/${expected.length}개 입력했습니다.`;
+  const phaseHelper = roundConfig.mode === 'flash'
+    ? '배열이 바뀌면 불이 들어온 숫자 하나를 누릅니다.'
+    : `건너뛰기 ${roundConfig.skip} · 두 번 누르기 ${roundConfig.double.join('·')}`;
+  const roundBadge = focus === 'full' ? `ROUND ${roundPosition.round} / 2` : `ROUND ${roundPosition.round} 유형 집중`;
 
   return (
-    <GameFrame gameId="number" current={round + 1} total={rounds.length} helper={`${roundConfig.mode === 'flash' ? 'ROUND 1 · 배열이 바뀌면 불이 들어온 숫자 하나를 누릅니다.' : `ROUND 2 · 건너뛰기 ${roundConfig.skip} · 두 번 누르기 ${roundConfig.double.join('·')}`} 숫자키 1~9 사용 가능`} feedback={feedback} statusMessage={statusMessage} onClose={onClose}>
-      <div className="number-layout">
-        {guidedPacing ? <p className="guided-pacing-note" role="status">시간 제한 없이 연습 중 · 규칙을 확인한 뒤 순서대로 누르세요</p> : <DeadlineBar key={round} duration={config.paceMs} label="라운드 제한시간" active={!locked} />}
-        <div className="number-rule">{roundConfig.mode === 'flash' ? <span className="basic">불이 들어온 숫자를 누르세요</span> : <><span>건너뛰기 <b>{roundConfig.skip}</b></span><span>두 번 누르기 <b>{roundConfig.double.join(' · ')}</b></span></>}<em>입력 {cursor} / {expected.length}</em></div>
-        {roundConfig.mode === 'flash' && <p className="sr-only" aria-live="polite" aria-atomic="true">현재 목표 숫자 {expected[cursor]}</p>}
-        <div ref={boardRef} className="number-board-pro" tabIndex={-1} aria-label="1부터 9까지의 숫자 입력판">{roundConfig.board.map((value) => { const currentTarget = roundConfig.mode === 'flash' && value === expected[cursor]; return <button className={currentTarget ? 'target' : ''} aria-current={currentTarget ? 'step' : undefined} aria-label={currentTarget ? `${value}, 현재 목표` : String(value)} disabled={locked} key={value} onKeyDown={(event) => { if (event.repeat) event.preventDefault(); }} onClick={() => choose(value)}>{value}</button>; })}</div>
-      </div>
+    <GameFrame gameId="number" current={phaseTransition ? 0 : roundPosition.index} total={roundPosition.total} progressLabel={`${roundPosition.round}라운드 · ${phaseName}`} zeroLabel="전환 준비" helper={`ROUND ${roundPosition.round} · ${phaseHelper} 숫자키 1~9 사용 가능`} feedback={feedback} statusMessage={phaseTransition ? `2라운드 전환 준비. ${phaseHelper}` : statusMessage} onClose={onClose}>
+      {phaseTransition ? (
+        <section ref={transitionRef} className="number-round-transition" role="region" tabIndex={-1} aria-labelledby="number-round-transition-title">
+          <span>ROUND 2 / 2</span>
+          <h3 id="number-round-transition-title">이제 예외 규칙을 적용합니다</h3>
+          <p><b>{roundConfig.skip}</b>은 건너뛰고, <b>{roundConfig.double.join(' · ')}</b>은 두 번 누르세요.</p>
+          {mode === 'practice'
+            ? <button type="button" className="single-action" onClick={beginNextRound}>2라운드 시작 <i>→</i></button>
+            : <div className="number-transition-countdown" role="timer" aria-label={`${transitionCountdown ?? 0}초 뒤 2라운드 시작`}><b>{transitionCountdown}</b><small>초 뒤 자동 시작</small></div>}
+        </section>
+      ) : (
+        <div className="number-layout">
+          <div className="number-round-banner" aria-label={`${roundPosition.round}라운드 ${focus === 'full' ? '' : '유형 집중 연습, '}${phaseName}, ${roundPosition.total}문제 중 ${roundPosition.index}번째`}><span>{roundBadge}</span><b>{phaseName}</b><em>{roundPosition.index} / {roundPosition.total} 문제</em></div>
+          {guidedPacing ? <p className="guided-pacing-note" role="status">시간 제한 없이 연습 중 · 규칙을 확인한 뒤 순서대로 누르세요</p> : <DeadlineBar key={attemptIndex} duration={config.paceMs} label="문제 제한시간" active={!locked} />}
+          <div className="number-rule">{roundConfig.mode === 'flash' ? <span className="basic">불이 들어온 숫자를 누르세요</span> : <><span>건너뛰기 <b>{roundConfig.skip}</b></span><span>두 번 누르기 <b>{roundConfig.double.join(' · ')}</b></span></>}<em>입력 {cursor} / {expected.length}</em></div>
+          {roundConfig.mode === 'flash' && <p className="sr-only" aria-live="polite" aria-atomic="true">현재 목표 숫자 {expected[cursor]}</p>}
+          <div ref={boardRef} className="number-board-pro" tabIndex={-1} aria-label="1부터 9까지의 숫자 입력판">{roundConfig.board.map((value) => { const currentTarget = roundConfig.mode === 'flash' && value === expected[cursor]; return <button className={currentTarget ? 'target' : ''} aria-current={currentTarget ? 'step' : undefined} aria-label={currentTarget ? `${value}, 현재 목표` : String(value)} disabled={locked} key={value} onKeyDown={(event) => { if (event.repeat) event.preventDefault(); }} onClick={() => choose(value)}>{value}</button>; })}</div>
+        </div>
+      )}
     </GameFrame>
   );
 }
@@ -3599,7 +3671,7 @@ function CountGame({ onFinish, onClose, config }: GameProps & { config: Practice
   const rightTokens = Array.from({ length: spec.right }, () => pair[1]).join(' ');
   const accessiblePhaseMessage = phase === 'show' ? `왼쪽 자극: ${leftTokens}. 오른쪽 자극: ${rightTokens}.` : phaseMessage;
   return <GameFrame gameId="count" current={round + 1} total={specs.length} helper={phaseMessage} feedback={feedback} statusMessage={accessiblePhaseMessage} bodyFocusable onClose={onClose}>
-    <div className="count-stage-shell" ref={countStageRef}><div className="stage-sequence" aria-label={`현재 ${phaseMessage}`}><span className={phase === 'blank' ? 'active' : 'done'}>준비</span><span className={phase === 'show' ? 'active' : phase === 'answer' ? 'done' : ''}>제시</span><span className={phase === 'answer' ? 'active' : ''}>응답</span></div>{phase === 'blank' ? <div className="count-fixation" aria-label="다음 문제 준비">＋</div> : <div className={`count-wrap phase-${phase}`}>{guidedPacing && (phase === 'show' || phase === 'answer') ? <p className="guided-pacing-note" role="status">음성 안내 직접 진행 중 · {phase === 'show' ? '제시' : '응답'} 제한시간 없음</p> : (phase === 'show' || phase === 'answer') && <DeadlineBar key={`${round}-${phase}`} duration={phase === 'show' ? config.paceMs : answerLimit} label={phase === 'show' ? '단어 제시시간' : '응답 제한시간'} />}<div className="count-board"><button disabled={phase !== 'answer' || locked} aria-label={phase === 'show' ? `왼쪽 자극: ${leftTokens}` : '왼쪽 선택'} onClick={() => choose('left')}>{phase === 'show' ? <CountCloud word={pair[0]} count={spec.left} offset={round} /> : <div className="count-hidden">?</div>}<span>{phase === 'answer' ? '← 왼쪽' : ' '}</span></button><i /><button disabled={phase !== 'answer' || locked} aria-label={phase === 'show' ? `오른쪽 자극: ${rightTokens}` : '오른쪽 선택'} onClick={() => choose('right')}>{phase === 'show' ? <CountCloud word={pair[1]} count={spec.right} offset={round + 3} /> : <div className="count-hidden">?</div>}<span>{phase === 'answer' ? '오른쪽 →' : ' '}</span></button></div>{phase === 'show' && guidedPacing && <button type="button" className="single-action accessible-next-action" onClick={beginCountAnswer}>내용을 들었어요 · 응답으로 이동 <i>→</i></button>}</div>}</div>
+    <div className="count-stage-shell" ref={countStageRef}><div className="stage-sequence" aria-label={`현재 ${phaseMessage}`}><span className={phase === 'blank' ? 'active' : 'done'}>준비</span><span className={phase === 'show' ? 'active' : phase === 'answer' ? 'done' : ''}>제시</span><span className={phase === 'answer' ? 'active' : ''}>응답</span></div>{phase === 'blank' ? <div className="count-fixation" aria-label="다음 문제 준비">＋</div> : <div className={`count-wrap phase-${phase}`}>{guidedPacing && (phase === 'show' || phase === 'answer') ? <p className="guided-pacing-note" role="status">음성 안내 직접 진행 중 · {phase === 'show' ? '제시' : '응답'} 제한시간 없음</p> : (phase === 'show' || phase === 'answer') && <DeadlineBar key={`${round}-${phase}`} duration={phase === 'show' ? config.paceMs : answerLimit} label={phase === 'show' ? '단어 제시시간' : '응답 제한시간'} active={!locked} />}<div className="count-board"><button disabled={phase !== 'answer' || locked} aria-label={phase === 'show' ? `왼쪽 자극: ${leftTokens}` : '왼쪽 선택'} onClick={() => choose('left')}>{phase === 'show' ? <CountCloud word={pair[0]} count={spec.left} offset={round} /> : <div className="count-hidden">?</div>}<span>{phase === 'answer' ? '← 왼쪽' : ' '}</span></button><i /><button disabled={phase !== 'answer' || locked} aria-label={phase === 'show' ? `오른쪽 자극: ${rightTokens}` : '오른쪽 선택'} onClick={() => choose('right')}>{phase === 'show' ? <CountCloud word={pair[1]} count={spec.right} offset={round + 3} /> : <div className="count-hidden">?</div>}<span>{phase === 'answer' ? '오른쪽 →' : ' '}</span></button></div>{phase === 'show' && guidedPacing && <button type="button" className="single-action accessible-next-action" onClick={beginCountAnswer}>내용을 들었어요 · 응답으로 이동 <i>→</i></button>}</div>}</div>
   </GameFrame>;
 }
 
@@ -3754,7 +3826,7 @@ function MouseGame({ onFinish, onClose, config }: GameProps & { config: Practice
     <GameFrame gameId="mouse" current={round + 1} total={trials.length} helper={mode === 'practice' ? '생쥐 → 빈 격자 → 고양이 → 색 표식 · 응답은 1~8' : '위치를 빠르게 기억하고 빨강부터 판단하세요.'} feedback={feedback} statusMessage={accessibleStageMessage} onClose={onClose}>
       {stage === 'memory' || stage === 'blank' || stage === 'cats' || stage === 'highlight' ? <div className="mouse-layout" ref={presentationRef}>
         {mode === 'practice' && <div className="stage-sequence" aria-label={`위치 확인 단계 ${presentationStep} / 4`}><span className={presentationStep === 1 ? 'active' : presentationStep > 1 ? 'done' : ''}>생쥐</span><span className={presentationStep === 2 ? 'active' : presentationStep > 2 ? 'done' : ''}>기억</span><span className={presentationStep === 3 ? 'active' : presentationStep > 3 ? 'done' : ''}>고양이</span><span className={presentationStep === 4 ? 'active' : ''}>색 표식</span></div>}
-        {guidedPacing ? <p className="guided-pacing-note" role="status">음성 안내 직접 진행 중 · 제한시간 없음</p> : <DeadlineBar key={`${round}-${stage}`} duration={presentationDuration} label={`${stageMessage} 제시시간`} />}
+        {guidedPacing ? <p className="guided-pacing-note" role="status">음성 안내 직접 진행 중 · 제한시간 없음</p> : <DeadlineBar key={`${round}-${stage}`} duration={presentationDuration} label={`${stageMessage} 제시시간`} active={!locked} />}
         <div className="mouse-board-pro" role="img" aria-label={boardLabel}>{Array.from({ length: 36 }, (_, cell) => {
           const mouse = stage === 'memory' && trial.mice.includes(cell);
           const cat = (stage === 'cats' || stage === 'highlight') && catCells.includes(cell);
@@ -3772,7 +3844,7 @@ function MouseGame({ onFinish, onClose, config }: GameProps & { config: Practice
           <div className="mouse-actor-key" aria-label="등장 캐릭터 안내"><span><MouseMarker size="compact" />생쥐</span><span><CatMarker tone="red" size="compact" />빨강</span><span><CatMarker tone="blue" size="compact" />파랑</span></div>
         </div>}
       </div> : <div className={`cat-decision ${stage}`} ref={decisionRef}>
-        {guidedPacing ? <p className="guided-pacing-note" role="status">음성 안내 직접 진행 중 · 응답 제한시간 없음</p> : <DeadlineBar key={`${round}-${stage}`} duration={decisionMs} label={`${stage === 'red' ? '빨간' : '파란'} 고양이 판단 제한시간`} className="decision-time" />}
+        {guidedPacing ? <p className="guided-pacing-note" role="status">음성 안내 직접 진행 중 · 응답 제한시간 없음</p> : <DeadlineBar key={`${round}-${stage}`} duration={decisionMs} label={`${stage === 'red' ? '빨간' : '파란'} 고양이 판단 제한시간`} className="decision-time" active={!locked} />}
         <div className="target-cat"><span>{stage === 'red' ? '빨간 고양이' : '파란 고양이'}</span><div><CatMarker tone={stage} size="hero" /></div><h3>생쥐를 찾았나요? 확신도까지 선택하세요.</h3></div>
         <div className="decision-groups" role="group" aria-label={`${stage === 'red' ? '빨간' : '파란'} 고양이의 찾았다·놓쳤다와 확신도`}>
           <section><b>놓쳤다</b><div>{MOUSE_DECISION_OPTIONS.filter((option) => !option.caught).map((option) => <button className="missed" disabled={locked} aria-label={`놓쳤다, ${option.label}, 단축키 ${option.key}`} onKeyDown={(event) => { if (event.repeat) event.preventDefault(); }} onClick={(event) => { if (event.detail > 1) return; finishDecision(false, option.confidence); }} key={option.key}><b>{option.label}</b><span>{option.key}</span></button>)}</div></section>
