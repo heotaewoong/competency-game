@@ -6,7 +6,7 @@ const CONFIG_KEY = 'nineflow-practice-config-v1';
 const PACING_KEY = 'nineflow-practice-pacing-v1';
 
 type CompletionGame = {
-  id: 'rps' | 'appointment' | 'path' | 'potion' | 'number' | 'count';
+  id: 'rps' | 'rotation' | 'appointment' | 'path' | 'potion' | 'nback' | 'number' | 'count' | 'mouse';
   title: string;
   difficulty: '하' | '중' | '상';
   quantityLabel: string;
@@ -16,11 +16,14 @@ type CompletionGame = {
 
 const completionGames = {
   rps: { id: 'rps', title: '가위바위보', difficulty: '하', quantityLabel: '문제 수', quantity: 9, landmark: '.rps-board' },
+  rotation: { id: 'rotation', title: '도형 회전하기', difficulty: '중', quantityLabel: '문제 수', quantity: 1, landmark: '.rotation-stage-layout' },
   appointment: { id: 'appointment', title: '약속 정하기', difficulty: '상', quantityLabel: '라운드당 문항', quantity: 1, landmark: '.appointment-shell' },
   path: { id: 'path', title: '길 만들기', difficulty: '상', quantityLabel: '문제 수', quantity: 3, landmark: '.path-shell' },
   potion: { id: 'potion', title: '마법약 만들기', difficulty: '중', quantityLabel: '시행 수', quantity: 28, landmark: '.potion-layout' },
+  nback: { id: 'nback', title: '도형 순서 기억하기', difficulty: '상', quantityLabel: '문제 수', quantity: 1, landmark: '.nback-stage' },
   number: { id: 'number', title: '숫자 누르기', difficulty: '하', quantityLabel: '문제 수', quantity: 5, landmark: '.number-board-pro' },
   count: { id: 'count', title: '개수 비교하기', difficulty: '하', quantityLabel: '문제 수', quantity: 5, landmark: '.count-stage-shell' },
+  mouse: { id: 'mouse', title: '고양이 술래잡기', difficulty: '중', quantityLabel: '라운드 수', quantity: 3, landmark: '.mouse-layout' },
 } as const satisfies Record<string, CompletionGame>;
 
 async function seedMinimumUntimedPractice(page: Page) {
@@ -29,19 +32,25 @@ async function seedMinimumUntimedPractice(page: Page) {
     Math.random = () => 0;
     window.localStorage.setItem(configKey, JSON.stringify({
       rps: { quantity: 9, paceMs: 8000 },
+      rotation: { quantity: 1, paceMs: 15000 },
       appointment: { quantity: 1, paceMs: 6000 },
       path: { quantity: 3, paceMs: 120000 },
       potion: { quantity: 28, paceMs: 12000 },
+      nback: { quantity: 1, paceMs: 3000 },
       number: { quantity: 5, paceMs: 60000 },
       count: { quantity: 5, paceMs: 2500 },
+      mouse: { quantity: 3, paceMs: 700 },
     }));
     window.localStorage.setItem(pacingKey, JSON.stringify({
       rps: true,
+      rotation: true,
       appointment: true,
       path: true,
       potion: true,
+      nback: true,
       number: true,
       count: true,
+      mouse: true,
     }));
     window.localStorage.setItem('nineflow-appointment-preferences-v1', JSON.stringify({ selectedRounds: ['day'] }));
     window.localStorage.setItem('nineflow-focused-practice-v1', JSON.stringify({
@@ -50,7 +59,9 @@ async function seedMinimumUntimedPractice(page: Page) {
       potion: { comboSize: 1, showEvidence: true },
       number: 'full',
       count: 'foundation',
+      mouse: 'foundation',
     }));
+    window.localStorage.setItem('nineflow-nback-preferences-v1', JSON.stringify({ task: 'n2', group: 0, progression: 'fixed' }));
   }, { configKey: CONFIG_KEY, pacingKey: PACING_KEY });
 }
 
@@ -245,6 +256,45 @@ test('개수 비교하기 최소 연습을 끝까지 완료하고 복습 결과�
   for (let round = 0; round < game.quantity; round += 1) {
     await clickWhenEnabled(workspace.getByRole('button', { name: /내용을 들었어요 · 응답으로 이동/ }));
     await clickWhenEnabled(workspace.getByRole('button', { name: '왼쪽 선택' }));
+  }
+
+  await assertResultStored(page, game);
+});
+
+test('도형 회전하기 최소 연습을 완료하고 복습 결과를 저장한다', async ({ page }) => {
+  const game = completionGames.rotation;
+  const workspace = await startMinimumUntimedGame(page, game);
+
+  await clickWhenEnabled(workspace.locator('.rotation-op-grid button').first());
+  await clickWhenEnabled(workspace.getByRole('button', { name: /답안 제출/ }));
+  await clickWhenEnabled(workspace.getByRole('button', { name: /결과 보기/ }));
+
+  await assertResultStored(page, game);
+});
+
+test('도형 순서 기억하기 최소 연습을 완료하고 복습 결과를 저장한다', async ({ page }) => {
+  const game = completionGames.nback;
+  const workspace = await startMinimumUntimedGame(page, game);
+
+  for (let warmup = 0; warmup < 2; warmup += 1) {
+    await clickWhenEnabled(workspace.getByRole('button', { name: /기억했어요 · 다음 도형/ }));
+  }
+  await clickWhenEnabled(workspace.locator('.nback-actions button').first());
+  await clickWhenEnabled(workspace.getByRole('button', { name: /응답 완료 · 다음 도형/ }));
+
+  await assertResultStored(page, game);
+});
+
+test('고양이 술래잡기 최소 연습을 완료하고 복습 결과를 저장한다', async ({ page }) => {
+  const game = completionGames.mouse;
+  const workspace = await startMinimumUntimedGame(page, game);
+
+  for (let round = 0; round < game.quantity; round += 1) {
+    for (let presentation = 0; presentation < 4; presentation += 1) {
+      await clickWhenEnabled(workspace.getByRole('button', { name: /내용을 들었어요 · 다음 단계/ }));
+    }
+    await clickWhenEnabled(workspace.locator('.cat-decision.red .decision-groups button').first());
+    await clickWhenEnabled(workspace.locator('.cat-decision.blue .decision-groups button').first());
   }
 
   await assertResultStored(page, game);

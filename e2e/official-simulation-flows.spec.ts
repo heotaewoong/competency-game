@@ -51,7 +51,11 @@ async function runPastDeadline(page: Page, deadline: Locator) {
   await page.clock.runFor(remaining + 100);
 }
 
-test('약속 정하기 실전형은 4라운드 각 10문항을 무응답으로 자동 진행해 결과에 도달한다', async ({ page }) => {
+async function expectAllChoicesDisabled(choices: Locator) {
+  await expect.poll(() => choices.evaluateAll((items) => items.every((item) => (item as HTMLButtonElement).disabled))).toBe(true);
+}
+
+test('약속 정하기 실전형은 각 라운드의 실제 정답을 잠그고 40문항 채점까지 진행한다', async ({ page }) => {
   test.setTimeout(180_000);
 
   await page.goto('/');
@@ -94,6 +98,7 @@ test('약속 정하기 실전형은 4라운드 각 10문항을 무응답으로 �
       await expect(workspace.locator('.appointment-round-intro, .appointment-round-rail')).toHaveCount(0);
       await expect(workspace.locator('.appointment-question-progress')).toHaveAttribute('aria-label', `${round.number}라운드 ${round.label}, ${question}번 문항, ${10 - question}문항 남음`);
       await expect(stimulus.locator('.appointment-phase-meta small')).toHaveText(`${question} / 10문항`);
+      const observedPeople: string[][] = [];
 
       for (let person = 1; person <= 3; person += 1) {
         // 직전 사람의 320ms 중복 전환 잠금과 React effect 등록을 먼저 끝낸다.
@@ -107,6 +112,15 @@ test('약속 정하기 실전형은 4라운드 각 10문항을 무응답으로 �
         }
         if (round.number === 3) await expect(stimulus.locator('.food-memory > .food-card')).toHaveCount(question <= 5 ? 3 : 4);
         if (round.number === 4) await expect(stimulus.locator('.bus-memory > .bus-card')).toHaveCount(person === 2 ? 1 : 2);
+        if (question === 1) {
+          if (round.number === 1) observedPeople.push((await stimulus.locator('.day-memory small').allTextContents()).map((value) => value.trim()));
+          if (round.number === 2) observedPeople.push((await stimulus.locator('.location-memory > i.selected small').allTextContents()).map((value) => {
+            const [row, column] = value.trim().split('-').map(Number);
+            return `${String.fromCharCode(64 + row)}${column}`;
+          }));
+          if (round.number === 3) observedPeople.push((await stimulus.locator('.food-memory .food-card b').allTextContents()).map((value) => value.trim()));
+          if (round.number === 4) observedPeople.push((await stimulus.locator('.bus-memory .bus-card b').allTextContents()).map((value) => value.trim().replace(/번$/, '')));
+        }
         if (person === 1 && (question === 1 || question === 6)) await expectStageFitsWithoutScroll(workspace);
         await runPastDeadline(page, stimulus.locator('.time-strip'));
       }
@@ -114,25 +128,44 @@ test('약속 정하기 실전형은 4라운드 각 10문항을 무응답으로 �
       const questionPanel = workspace.locator('.appointment-question');
       await expect(questionPanel).toBeVisible();
       await expect(questionPanel.locator('.appointment-phase-meta small')).toHaveText(`${question} / 10문항`);
-      await expect(questionPanel.locator('.appointment-choice-grid button')).toHaveCount(round.choiceCount);
+      const choices = questionPanel.locator('.appointment-choice-grid button');
+      await expect(choices).toHaveCount(round.choiceCount);
       if (round.number === 4) await expect(questionPanel.locator('.bus-choice-grid .bus-stimulus')).toHaveCount(0);
       if (question === 1 || question === 6) {
         await expectStageFitsWithoutScroll(workspace);
-        await expectChoiceTouchTargets(questionPanel.locator('.appointment-choice-grid button'));
+        await expectChoiceTouchTargets(choices);
       }
 
       const answerDeadline = questionPanel.locator('.time-strip');
       // 응답 화면의 timeout effect가 등록된 뒤 2.7초 제한을 넘긴다.
       await page.clock.runFor(400);
-      await runPastDeadline(page, answerDeadline);
-      await expect(answerDeadline).toHaveAttribute('data-deadline-active', 'false');
-
-      // 무응답 피드백 체류가 끝나 다음 문항 또는 다음 라운드 안내로 이동한다.
-      await page.clock.runFor(400);
+      if (question === 1) {
+        const choiceLabels = await choices.evaluateAll((items) => items.map((item) => item.getAttribute('aria-label') ?? ''));
+        const answer = round.number === 4
+          ? choiceLabels.map((value) => value.replace(/번$/, '')).find((value) => observedPeople.every((values) => !values.includes(value)))
+          : observedPeople[0].find((value) => observedPeople.slice(1).every((values) => values.includes(value)));
+        expect(answer).toBeTruthy();
+        const answerIndex = round.number === 2
+          ? (answer!.charCodeAt(0) - 65) * 4 + Number(answer!.slice(1)) - 1
+          : choiceLabels.indexOf(round.number === 4 ? `${answer}번` : answer!);
+        expect(answerIndex).toBeGreaterThanOrEqual(0);
+        await choices.nth(answerIndex).click();
+        await expectAllChoicesDisabled(choices);
+        await expect(answerDeadline).toHaveAttribute('data-deadline-active', 'false');
+        await page.clock.runFor(400);
+        await expect(workspace.locator('.workspace-progress > span')).toContainText(`${overallQuestion + 1} / 40`);
+        await expect(workspace.locator('.appointment-stimulus')).toBeVisible();
+      } else {
+        await runPastDeadline(page, answerDeadline);
+        await expect(answerDeadline).toHaveAttribute('data-deadline-active', 'false');
+        // 무응답 피드백 체류가 끝나 다음 문항 또는 다음 라운드 안내로 이동한다.
+        await page.clock.runFor(400);
+      }
     }
   }
 
   const result = page.locator('.stage-result');
   await expect(page.getByRole('heading', { name: '약속 정하기 결과' })).toBeVisible();
-  await expect(result.locator('.result-metrics article').filter({ hasText: '오류' }).locator('b')).toHaveText('40');
+  await expect(result.locator('.result-metrics article').filter({ hasText: '정확도' }).locator('b')).toHaveText('10%');
+  await expect(result.locator('.result-metrics article').filter({ hasText: '오류' }).locator('b')).toHaveText('36');
 });

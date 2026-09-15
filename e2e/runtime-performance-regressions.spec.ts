@@ -8,6 +8,7 @@ test('게임을 열면 뒤 화면 페인트와 전체 화면 블러를 중지한
   await expect(page.locator('.site-shell')).toHaveClass(/is-game-open/);
   await expect.poll(() => page.locator('.topbar').evaluate((element) => window.getComputedStyle(element).opacity)).toBe('0');
   await expect.poll(() => page.locator('.topbar').evaluate((element) => window.getComputedStyle(element).pointerEvents)).toBe('none');
+  await expect.poll(() => page.locator('.mori-hero').evaluate((element) => window.getComputedStyle(element).animationPlayState)).toBe('paused');
   await expect.poll(() => page.locator('.stage-backdrop').evaluate((element) => window.getComputedStyle(element).backdropFilter)).toBe('none');
 });
 

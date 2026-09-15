@@ -333,7 +333,8 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 .feedback-status { min-height: 18px; margin: 10px 0 0; color: #68758a; font-size: 10px; }.feedback-actions { margin-top: 8px; display: flex; align-items: center; gap: 8px; }.feedback-actions button, .feedback-actions a { min-height: 46px; padding: 0 13px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; font-size: 11px; font-weight: 800; }.feedback-copy { border: 1px solid #d7dee8; color: #56647a; background: #fff; }.feedback-actions a { color: #526179; }.feedback-submit { margin-left: auto; border: 0; color: #fff; background: #24796f; }.feedback-submit span { margin-left: 16px; }.feedback-footnote { display: block; margin-top: 10px; color: #5d697c; font-size: 11px; line-height: 1.5; }
 
 /* shared game shell */
-.stage-backdrop { position: fixed; inset: 0; z-index: 1000; overflow: auto; overscroll-behavior: contain; padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); display: grid; place-items: center; background: rgba(8, 14, 27, .78); backdrop-filter: blur(8px); }
+.site-shell.is-game-open > :not(.stage-backdrop) { opacity: 0; pointer-events: none; }
+.stage-backdrop { position: fixed; inset: 0; z-index: 1000; overflow: auto; overscroll-behavior: contain; padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); display: grid; place-items: center; background: rgba(8, 14, 27, .78); }
 .stage-loading { min-width: 240px; padding: 24px; display: grid; place-items: center; gap: 12px; border-radius: 16px; color: #31405a; background: #fff; box-shadow: 0 24px 70px rgba(0,0,0,.25); text-align: center; }
 .stage-loading i { width: 30px; height: 30px; border: 3px solid #dfe3f6; border-top-color: var(--brand); border-radius: 50%; animation: stage-spin .8s linear infinite; }
 .stage-loading b { font-size: 13px; }
@@ -1377,6 +1378,7 @@ body {
   filter: drop-shadow(0 20px 19px rgba(31, 39, 73, .18));
   animation: mori-breathe 4.8s ease-in-out infinite;
 }
+.site-shell.is-game-open .mori-hero { animation-play-state: paused; }
 .hero-rail .continue-card {
   --accent: var(--hero-accent);
   position: relative;
