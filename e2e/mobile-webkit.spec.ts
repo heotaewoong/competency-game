@@ -38,6 +38,7 @@ test('Mobile Safari에서도 키보드로 연 native 창을 닫으면 진입 버
     [page.locator('.readiness-banner button'), '응시 준비센터', '설정 저장하고 닫기'],
   ] as const) {
     for (const escape of [true, false]) {
+      await expect(trigger).toBeEnabled();
       await trigger.press('Enter');
       const dialog = page.getByRole('dialog', { name });
       await expectNativeDialogOpen(dialog);

@@ -28,6 +28,7 @@ test('백업 창을 닫으면 두 진입 버튼의 키보드 초점이 복원된
   await page.goto('/');
   for (const trigger of [page.locator('.records-data-button'), page.getByRole('button', { name: '기록 백업·복원', exact: true })]) {
     for (const closeName of ['Escape', '내 기록 백업·복원 닫기', '닫기']) {
+      await expect(trigger).toBeEnabled();
       await trigger.press('Enter');
       const dialog = page.getByRole('dialog', { name: '내 기록 백업·복원' });
       await expect(dialog.getByRole('button', { name: '내 기록 백업·복원 닫기' })).toBeFocused();
