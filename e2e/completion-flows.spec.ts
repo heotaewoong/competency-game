@@ -114,6 +114,15 @@ async function assertResultStored(page: Page, game: CompletionGame) {
     found: true,
     hasReviewAttempts: true,
   });
+
+  // Persisted game-generated reviews must survive the same strict loader used
+  // on the user's next visit, not merely exist immediately after completion.
+  await page.reload();
+  await expect(page.locator('.header-status')).toHaveAttribute('aria-label', '완료한 연습 1회, 기록으로 이동');
+  await page.getByRole('button', { name: `${game.title} 최근 세션 복습`, exact: true }).click();
+  const review = page.getByRole('dialog', { name: '내 실수 복습', exact: true });
+  await expect(review).toBeVisible();
+  await expect(review).toContainText(game.title);
 }
 
 test('가위바위보 최소 연습은 결과 직후 화면을 떠나도 복습 결과를 저장한다', async ({ page }) => {

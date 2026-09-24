@@ -489,8 +489,7 @@ function usePausableTimeout(callback: () => void, delay: number, enabled: boolea
   }, [arm, clear, delay, resetKey]);
 
   useEffect(() => {
-    if (!enabled) { clear(); return; }
-    if (isPaused) {
+    if (!enabled || isPaused) {
       if (timerRef.current !== null) {
         clear();
         clockRef.current = pausePausableTimer(clockRef.current, performance.now());
@@ -2831,6 +2830,7 @@ function PathGame({ onFinish, onClose, config }: GameProps & { config: PracticeC
   const scoreRef = useRef(createPathSessionScore());
   const reviewAttemptsRef = useRef<GenericReviewAttempt[]>([]);
   const pathGridRef = useRef<HTMLDivElement>(null);
+  const pathGridFocusedButtonRef = useRef<HTMLButtonElement | null>(null);
   const schedule = useManagedTimeout();
   const puzzle = puzzles[round];
   const puzzleMeta = pathPuzzleMeta(puzzle);
@@ -2886,12 +2886,25 @@ function PathGame({ onFinish, onClose, config }: GameProps & { config: PracticeC
   }, [responseClock, round]);
   useEffect(() => {
     if (locked || isPaused) return;
-    const frame = window.requestAnimationFrame(() => {
+    const focusCurrentCell = () => {
       const choice = pathGridRef.current?.querySelector<HTMLButtonElement>(`[data-cell="${pathGridFocus.index}"][data-orientation="${pathGridFocus.orientation}"]`);
       const cycle = pathGridRef.current?.querySelector<HTMLButtonElement>(`[data-cycle-cell="${pathGridFocus.index}"]`);
       (choice && choice.offsetParent !== null ? choice : cycle)?.focus({ preventScroll: true });
-    });
-    return () => window.cancelAnimationFrame(frame);
+    };
+    const frame = window.requestAnimationFrame(focusCurrentCell);
+    const compactLayout = window.matchMedia('(max-width: 900px), (pointer: coarse)');
+    const restoreHiddenCellFocus = () => {
+      const previous = pathGridFocusedButtonRef.current;
+      const active = document.activeElement;
+      // A hidden button loses native focus during the responsive control swap.
+      // Do not move focus when the user is operating another visible control.
+      if (previous && previous.offsetParent === null && (active === previous || active === document.body)) focusCurrentCell();
+    };
+    compactLayout.addEventListener('change', restoreHiddenCellFocus);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      compactLayout.removeEventListener('change', restoreHiddenCellFocus);
+    };
   }, [isPaused, locked, pathGridFocus.index, pathGridFocus.orientation, round]);
   usePausableTimeout(() => advanceRound(false, '시간 초과 · 다음 문제로 이동합니다.', { errorCode: 'timeout', selected: `울타리 ${Object.keys(fencesRef.current).length}개 배치`, explanation: '제한시간 안에 경로 확인을 완료하지 못했습니다.' }), config.paceMs, !locked && !guidedPacing, round);
 
@@ -3038,7 +3051,7 @@ function PathGame({ onFinish, onClose, config }: GameProps & { config: PracticeC
       <div className="path-shell">
         <div className="edge-row top">{Array.from({ length: 5 }, (_, index) => <EdgeMarker side="top" index={index} vehicles={puzzle.vehicles} key={index} />)}</div>
         <div className="edge-column left">{Array.from({ length: 5 }, (_, index) => <EdgeMarker side="left" index={index} vehicles={puzzle.vehicles} key={index} />)}</div>
-        <div ref={pathGridRef} className="path-grid" role="group" aria-label="울타리 배치 격자" aria-describedby="path-keyboard-help">{Array.from({ length: 25 }, (_, index) => {
+        <div ref={pathGridRef} className="path-grid" role="group" aria-label="울타리 배치 격자" aria-describedby="path-keyboard-help" onFocusCapture={(event) => { if (event.target instanceof HTMLButtonElement) pathGridFocusedButtonRef.current = event.target; }}>{Array.from({ length: 25 }, (_, index) => {
           const row = Math.floor(index / 5);
           const col = index % 5;
           const fence = fences[`${row}-${col}`];
