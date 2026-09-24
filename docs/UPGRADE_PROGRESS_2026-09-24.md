@@ -76,3 +76,14 @@ RED 증거: `C:\TEMP\cg-timer-boundary-red-20260924`, `C:\TEMP\cg-keyboard-red-2
 ## 규칙 재확인
 
 2026-09-24 공식 페이지 1회 대조 결과, 현행 JOBDA 게임별 비공개 규칙을 새로 확정할 근거는 없었다. `PUBLIC_RULE_EVIDENCE.md`의 공개/독립값 경계를 유지한다. 길 만들기 클릭 예산 정책, 현행 가위바위보 4번째 라운드 세부는 미확정이므로 추정 구현하지 않는다.
+
+## 12:46 후속 점검 — 설정 설명의 한국어 줄바꿈
+
+- 시작 HEAD `4797b29`, 작업 트리 clean, remote main 일치. 공개 alias는 1차 배포 `dpl_4X7zHcKM2B6NwgPdQxjrLg2xhkvq` 유지. 직전 제품 CI는 성공했으며 문서 전용 후속 CI만 진행 중이었다. 중복 제품 배포/테스트는 없었다.
+- 공개 385×778 화면에서 도형 회전 과제 설명의 `순서를`가 중간에서 나뉘는 것을 DOM Range의 실제 줄 영역으로 재현했다. 이전 약속 설명 화면 관찰과 같은 원인이다. RED: `C:\TEMP\cg-korean-wrap-red-20260924`(첫 실패 후 중단).
+- `app/globals.css`의 `.stage-intro :where(p, dd)`에 `word-break: keep-all; overflow-wrap: anywhere`만 추가. 설정 문단·설정값에 한정하며 게임 자극·입력·타이머·채점·별도 시작 버튼 스타일은 변경하지 않는다. 긴 토큰은 화면 밖으로 넘치지 않도록 예외 줄바꿈을 허용한다.
+- 기존 `e2e/ux-performance.spec.ts`에 기본/큰 글자 각 1개 검사를 추가. 9종 설정에서 320×568, 385×778, 844×360의 실제 어절 분리·수평 넘침·시작 버튼 위치와 클릭 가능성을 검사한다.
+- 수정 파일: `app/globals.css`, `e2e/ux-performance.spec.ts`, 이 문서. 새 제품 파일/의존성 없음.
+- 정적 확인: 타입 검사, 변경한 E2E 파일 ESLint, Next production build 통과. 원본과 검증본의 CSS/E2E SHA256 일치. 로컬 전체 lint는 환경 지연으로 중지했으며 기존 설정의 원격 전체 CI에서 다시 확인한다.
+- 로컬 브라우저 **23/23 통과(3.6분)**: UX 10개·9종 모바일 시작/종료·Mobile Safari 4개. 신규 2개는 총 54개 게임/화면/글자 크기 조합에서 실제 한국어 어절·가로 넘침·시작 버튼을 확인했다. 기본/큰 글자 약속 설정 화면 두 장을 직접 검수했다. GREEN: `C:\TEMP\cg-korean-wrap-green-20260924`.
+- 상태: 검증된 CSS와 회귀 검사 및 이 기록만 선택 커밋·push한 뒤 원격 전체 CI와 기존 프로젝트 배포를 진행한다. 아직 이 줄바꿈 변경은 공개 배포하지 않았다.

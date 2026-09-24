@@ -2437,6 +2437,10 @@ body {
   scroll-padding-block: 20px;
 }
 .stage-panel[data-game="nback"] .stage-content:has(> .stage-intro) > .stage-intro { width: min(1080px, 100%); }
+.stage-intro :where(p, dd) {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
 .intro-flow {
   margin: 18px 0 0;
   padding: 0;

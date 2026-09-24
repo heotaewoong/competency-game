@@ -163,3 +163,51 @@ test('큰 글자는 설정 핵심 설명을 12px 이상으로 키우고 320px �
   }));
   expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1);
 });
+
+for (const textScale of ['standard', 'large'] as const) {
+  test(`${textScale} 글자에서 9개 게임 설명은 어절을 유지하고 작은 화면의 시작 버튼을 가리지 않는다`, async ({ page }) => {
+    test.setTimeout(120_000);
+    await page.addInitScript(({ key, textScale }) => {
+      localStorage.setItem(key, JSON.stringify({ contrast: 'standard', textScale, motion: 'reduce' }));
+    }, { key: ACCESSIBILITY_KEY, textScale });
+    await page.goto('/');
+    const cards = page.locator('.game-card-hitarea');
+    await expect(cards).toHaveCount(9);
+
+    for (let game = 0; game < 9; game += 1) {
+      await cards.nth(game).click();
+      const stage = page.locator('.stage-panel');
+      const brief = stage.locator('.intro-rule > p');
+      await expect(brief).toBeVisible();
+      await page.evaluate(() => document.fonts.ready);
+      const gameId = await stage.getAttribute('data-game');
+
+      for (const viewport of [{ width: 320, height: 568 }, { width: 385, height: 778 }, { width: 844, height: 360 }]) {
+        await page.setViewportSize(viewport);
+        const brokenWords = await brief.evaluate((element) => {
+          const text = element.firstChild!;
+          return [...(text.textContent ?? '').matchAll(/[가-힣]{2,}/g)].flatMap((match) => {
+            const range = document.createRange();
+            range.setStart(text, match.index!);
+            range.setEnd(text, match.index! + match[0].length);
+            return range.getClientRects().length > 1 ? [match[0]] : [];
+          });
+        });
+        expect(brokenWords, `${gameId} ${viewport.width}×${viewport.height} 한글 어절`).toEqual([]);
+        const overflow = await stage.locator('.stage-intro').evaluate((element) => element.scrollWidth - element.clientWidth);
+        expect(overflow, `${gameId} 가로 넘침`).toBeLessThanOrEqual(1);
+        for (const start of await stage.locator('.intro-start-options button').all()) {
+          const box = await start.boundingBox();
+          expect(box).not.toBeNull();
+          expect(box!.y).toBeGreaterThanOrEqual(0);
+          expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
+          await start.click({ trial: true });
+        }
+        if (gameId === 'appointment' && viewport.width === 385) {
+          await stage.screenshot({ path: test.info().outputPath(`appointment-${textScale}-word-wrap.png`) });
+        }
+      }
+      await stage.getByRole('button', { name: '연습 닫기', exact: true }).click();
+    }
+  });
+}
