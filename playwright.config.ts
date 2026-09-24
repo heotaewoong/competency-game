@@ -42,7 +42,7 @@ export default defineConfig({
     },
     {
       name: 'desktop-safari-focus',
-      testMatch: ['**/game-opener-focus.spec.ts', '**/checkbox-focus-scroll.spec.ts'],
+      testMatch: ['**/game-opener-focus.spec.ts', '**/checkbox-focus-scroll.spec.ts', '**/nback-guided-settings.spec.ts'],
       use: { ...devices['Desktop Safari'] },
     },
     {

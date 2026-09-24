@@ -1179,7 +1179,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
                     ? <>
                         <SessionSettings gameId={gameId} value={practiceConfig} onChange={savePracticeConfig} guidedPacing={guidedPacing} onGuidedPacingChange={saveGuidedPacing} />
                         {gameId === 'appointment' && <AppointmentPracticeOptions value={appointmentPreferences} questionsPerRound={practiceConfig.quantity} onChange={saveAppointmentPreferences} />}
-                        {gameId !== 'appointment' && <details className="advanced-settings practice-advanced-settings"><summary><span><b>세부 훈련 설정</b><small>유형·힌트·난이도를 더 정교하게 조절합니다</small></span><em>설정 열기</em></summary><div className="advanced-settings-content"><FocusedPracticeOptions gameId={gameId} value={focusedPractice} onChange={saveFocusedPractice} />{gameId === 'rotation' && <RotationPracticeOptions value={rotationPreferences} onChange={saveRotationPreferences} />}{gameId === 'nback' && <NBackPracticeOptions value={nbackPreferences} onChange={saveNBackPreferences} />}</div></details>}
+                        {gameId !== 'appointment' && <details className="advanced-settings practice-advanced-settings"><summary><span><b>세부 훈련 설정</b><small>유형·힌트·난이도를 더 정교하게 조절합니다</small></span><em>설정 열기</em></summary><div className="advanced-settings-content"><FocusedPracticeOptions gameId={gameId} value={focusedPractice} onChange={saveFocusedPractice} />{gameId === 'rotation' && <RotationPracticeOptions value={rotationPreferences} onChange={saveRotationPreferences} />}{gameId === 'nback' && <NBackPracticeOptions value={nbackPreferences} onChange={saveNBackPreferences} guidedPacing={guidedPacing} />}</div></details>}
                       </>
                     : <SimulationPreset gameId={gameId} />}
                 </div>
@@ -1456,7 +1456,7 @@ function NBackGroupPicker({ value, onChange, label }: { value: number | null; on
   );
 }
 
-function NBackPracticeOptions({ value, onChange }: { value: NBackPreferences; onChange: (value: NBackPreferences) => void }) {
+function NBackPracticeOptions({ value, onChange, guidedPacing }: { value: NBackPreferences; onChange: (value: NBackPreferences) => void; guidedPacing: boolean }) {
   const tasks: NBackTask[] = ['n2', 'n23'];
   const progressions: NBackPreferences['progression'][] = ['fixed', 'fast'];
   function navigateOption<T>(event: React.KeyboardEvent<HTMLButtonElement>, index: number, options: readonly T[], select: (option: T) => void) {
@@ -1479,12 +1479,13 @@ function NBackPracticeOptions({ value, onChange }: { value: NBackPreferences; on
         </div>
       </fieldset>
       <NBackGroupPicker value={value.group} onChange={(group) => onChange({ ...value, group })} label="출제 도형 묶음" />
-      <fieldset className="nback-progression-picker">
+      <fieldset className="nback-progression-picker" disabled={guidedPacing} aria-describedby={guidedPacing ? 'nback-progression-note' : undefined}>
         <legend>진행 방식</legend>
         <div className="rotation-mode-options nback-progression-options" role="radiogroup" aria-label="도형 순서 진행 방식">
           <button type="button" role="radio" aria-checked={value.progression === 'fixed'} tabIndex={value.progression === 'fixed' ? 0 : -1} className={value.progression === 'fixed' ? 'active' : ''} onKeyDown={(event) => navigateOption(event, 0, progressions, (progression) => onChange({ ...value, progression }))} onClick={() => onChange({ ...value, progression: 'fixed' })}><b>고정 간격</b><small>응답해도 설정한 시간이 끝난 뒤 전환</small></button>
           <button type="button" role="radio" aria-checked={value.progression === 'fast'} tabIndex={value.progression === 'fast' ? 0 : -1} className={value.progression === 'fast' ? 'active' : ''} onKeyDown={(event) => navigateOption(event, 1, progressions, (progression) => onChange({ ...value, progression }))} onClick={() => onChange({ ...value, progression: 'fast' })}><b>응답 빠른 전환</b><small>정오답과 관계없이 약 0.3초 뒤 다음 도형</small></button>
         </div>
+        {guidedPacing && <p id="nback-progression-note" className="glyph-legend-note" role="status">지금은 직접 다음 도형으로 이동합니다. 자동 전환 설정은 ‘시간 제한 없이 연습’을 끄면 다시 적용됩니다.</p>}
       </fieldset>
     </section>
   );

@@ -501,7 +501,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 .stage-panel[data-game="nback"] .nback-practice-options .rotation-mode-options { margin-top: 0; gap: 8px; }
 .stage-panel[data-game="nback"] .nback-practice-options .rotation-mode-options > button,
 .stage-panel[data-game="nback"] .nback-simulation-preset .nback-group-options > button { position: relative; min-width: 0; min-height: 72px; padding: 11px 12px; align-content: center; gap: 5px; overflow: hidden; border-color: #d1e1df; border-radius: 13px; color: #516864; background: rgba(255,255,255,.92); box-shadow: 0 3px 12px rgba(28,78,73,.04); transition: border-color .15s ease, box-shadow .15s ease, transform .12s ease, background .15s ease; }
-.stage-panel[data-game="nback"] .nback-practice-options .rotation-mode-options > button:hover,
+.stage-panel[data-game="nback"] .nback-practice-options .rotation-mode-options > button:hover:not(:disabled),
 .stage-panel[data-game="nback"] .nback-simulation-preset .nback-group-options > button:hover { border-color: #81b3ae; background: #fbfefd; box-shadow: 0 7px 18px rgba(28,78,73,.08); transform: translateY(-1px); }
 .stage-panel[data-game="nback"] .nback-practice-options .rotation-mode-options > button:focus-visible,
 .stage-panel[data-game="nback"] .nback-simulation-preset .nback-group-options > button:focus-visible { outline: 3px solid rgba(18,103,214,.28); outline-offset: 2px; }
