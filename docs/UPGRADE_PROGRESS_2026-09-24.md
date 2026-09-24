@@ -2,12 +2,12 @@
 
 ## 작업 범위
 
-- 사용자 요청: 오늘 22:00 KST까지 실제 게임 흐름, 속도, 오류를 우선 개선한다.
+- 사용자 최신 요청(17:53 KST): 오늘 밤 자정, **2026-09-25 00:00 KST까지** 실제 게임 흐름·오류·속도·기능·사용자 친화적 디자인 개선을 이어간다. 이전 22:00 종료 조건을 대체한다.
 - 원본: `G:\내 드라이브\0.project_money\competency-game`
 - 검증: `C:\TEMP\competency-game-fix-20260915`
 - 공개 주소: https://heobrain-competency-game.vercel.app/
 - 승인 범위: 이 프로젝트 수정, GitHub main push, 기존 Vercel 프로젝트 프로덕션 배포 및 라이브 검증.
-- 시간 예약: 이 작업의 heartbeat `22`, 매 정시, 2026-09-24 22:00 KST까지. 마지막 실행은 결과 정리 후 자동화를 중지한다.
+- 시간 예약: 이 작업의 heartbeat `22`, 매 정시, **2026-09-25 00:00 KST까지**. 자정 이후 새 변경·배포를 시작하지 않고 결과 정리 후 자동화를 PAUSED로 바꾼다.
 - 현행 공식 비공개 문항 수·시간·채점값을 추측하지 않는다. 공개 규칙과 독립 훈련값의 구분을 유지한다.
 
 ## 확인한 기준선
@@ -191,3 +191,14 @@ RED 증거: `C:\TEMP\cg-timer-boundary-red-20260924`, `C:\TEMP\cg-keyboard-red-2
 - 최종 공개 URL 검사 **5/5(24.0초)** 통과: `C:\TEMP\cg-pause-boundary-production-final-20260924`. 신규 NBack 정확한200ms·중복 만료/채점, Number 정확한1,900ms·명시적 재개, 기존 RPS2개·회전 재생을 검증했다. 신규2개에서는 pageerror/console.error도0건이다. 앞선 WebKit5초 실패 및 이번 로컬 Chromium클릭 대기 실패의 원인이 해결됐다는 뜻은 아니다.
 - 이번 선택 변경은 진행 문서 수정과 신규 E2E2개뿐이다. 검증된 파일만 main에 커밋·push하고 원격 전체 CI를 확인한다. 앱 번들이 같으므로 불필요한 Vercel 재배포는 하지 않으며 공개 제품은 `3db2b98`/`dpl_BWF3jHQNQRszxCKsApEAewQUShRo`를 유지한다. 소유한4187 서버와 모든 로컬 검사 실행은 종료했고 listener 없음 확인, 공식 자료용 임시 브라우저 탭도 닫았다.
 - 다음 heartbeat: 최신 main 커밋의 Quality Gate 상태를 먼저 확인한다(신규2개 포함 예상119개 브라우저 검사; 성공 전119/119로 표현하지 않음). 원격 CI가 실패하면 해당 실패부터 조사한다. 간헐적 초기 UI/자동화 클릭 대기 지연은 열린 검증 항목으로 유지하되 같은 검사를 무작정 반복하거나 측정 없이 게임 구조를 바꾸지 않는다. 오늘22:00 종료/자동화22 PAUSED 조건 유지.
+
+## 17:53 사용자 연장 — N-back 중복 만료의 실제 화면 중단 수정
+
+- 사용자 최신 요청에 따라 종료를 2026-09-25 00:00 KST로 연장했다. 자동화22의 이름·prompt·종료 시각을 기존 대상/매 정시 일정과 함께 갱신하고 ACTIVE readback을 확인했다. 위 과거 기록의22:00 조건은 이 지시로 대체한다.
+- 시작 원본 `18aef474700806fc209e4eb4515c434b240d4a20` clean, origin 유지. 공개 alias는 제품 `3db2b98`/배포 `dpl_BWF3jHQNQRszxCKsApEAewQUShRo` 유지, 최근30분 서버 error로그 없음. 서버 로그가 없다는 것은 클라이언트 오류가 없다는 증거가 아니다.
+- [CI35976059869](https://github.com/heotaewoong/competency-game/actions/runs/35976059869) **실패**: 타입·전체 lint·단위203·build 성공, 브라우저118통과/1실패. 신규 NBack 경계 검사의 같은 위치에서 최초 실행과2회 재시도 모두 실패했다. 증거를 `C:\TEMP\cg-ci-35976059869`에 내려받아 캡처와 trace를 직접 확인했다. 단순5초 대기 실패가 아니라 route 오류 화면이며 `TypeError: Cannot read properties of undefined (reading 'task')`가 기록됐다. 이전 Windows 로컬/공개 통과만으로 오류 없음으로 결론 내리지 않는다.
+- 원인: fast300ms와 원래deadline이 모두 만료된 뒤 pause/resume할 때, 첫 완료가 다음 문항을 렌더하고 layout effect가 boolean 완료 가드를 다시 열었다. passive timer 정리 전에 같은 문항의 이전 콜백이 도착하면 중복 채점/배열 범위 밖 이동이 가능했다. NBack 중앙 `finishCurrentTrial`만 완료 index를 기억하도록 바꾸고 이미 완료한 index 이하의 입력·완료를 차단했다. layout effect의 완료 가드 초기화는 제거하되 답안·반응시간 초기화는 유지했다.
+- 공용 타이머·다른8개 게임·공개 규칙·제한시간·채점식·디자인·의존성·저장 형식은 변경하지 않았다. 기존 경계 검사를 제거하거나 timeout을 늘리지 않았다(Ponytail lite). 읽기 전용 독립 검토에서 guided 수동 이동, 실전2라운드, 세션 remount의 단조 index 조건과 원본/검증본 해시 일치를 확인했다.
+- 수정 원본은 G:에 보존하고 C:\TEMP 전용 복사본에서 타입·lint·단위·build·NBack 기능 검사를 진행한다. 실제 실패했던 Linux 전체 CI가 성공하기 전에는 공개 승격하지 않는다. 아직 수정본 배포/통과를 주장하지 않는다.
+- C:\TEMP 수정본 타입·전체 lint·단위 전체·production build 성공. NBack 관련 기존 브라우저 **10/10 통과(1.7분)**: `C:\TEMP\cg-nback-guard-local-20260924`. fast pause200ms/중복0ms 만료, guided 수동 완료·저장, 실전형 앱 프리셋47문항/2라운드, 모바일 진입·종료, 작은 가로 화면/큰 글자/터치 영역/내부 스크롤을 확인했다. 큰 글자3개 답안 캡처도 직접 확인했다. 추적 앱·검사·설정 파일의 원본/검증본 해시 일치.
+- 나머지8개 게임 완료 진입점의 독립 읽기 전용 감사에서는 같은 종류의 확정 신규 문제가 없었다. 단일 완료 timer, 상호 배타적 단계, 기존 문항·사람별 전환 guard를 확인했으며 코드 일괄 변경을 하지 않았다. 이 정적 감사는 전체 실행 검사를 대신하지 않는다. 검증한 앱 파일과 이 문서만 커밋하여 전체 Linux CI를 시작한다.

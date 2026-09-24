@@ -3319,7 +3319,7 @@ function NBackGame({ onFinish, onClose, glyphMnemonics, config, preferences }: G
   const responseClock = useActiveElapsedClock();
   const answerRef = useRef<NBackDecision | null>(null);
   const responseRef = useRef<number | null>(null);
-  const resolvedRef = useRef(false);
+  const lastCompletedIndexRef = useRef(-1);
   const scoreRef = useRef<NBackScoreState>(newNBackScore());
   const reviewAttemptsRef = useRef<GenericReviewAttempt[]>([]);
   const trial = trials[index];
@@ -3384,8 +3384,9 @@ function NBackGame({ onFinish, onClose, glyphMnemonics, config, preferences }: G
   }, [glyphMnemonics, index, trials]);
 
   const finishCurrentTrial = useCallback(() => {
-    if (resolvedRef.current) return;
-    resolvedRef.current = true;
+    // Keep completed trials closed even if an old timer fires after the next layout commits.
+    if (index <= lastCompletedIndexRef.current) return;
+    lastCompletedIndexRef.current = index;
     setEarlyAdvancePending(false);
     const score = scoreTrial(trial);
     if (index === trials.length - 1) {
@@ -3433,7 +3434,6 @@ function NBackGame({ onFinish, onClose, glyphMnemonics, config, preferences }: G
 
   useLayoutEffect(() => {
     if (countdown !== null || inputSettling) return;
-    resolvedRef.current = false;
     answerRef.current = null;
     responseRef.current = null;
     responseClock.restart();
@@ -3454,7 +3454,7 @@ function NBackGame({ onFinish, onClose, glyphMnemonics, config, preferences }: G
   }, ROUND_INPUT_SETTLE_MS, inputSettling && countdown === null, `nback-input-settle-${index}`);
 
   function choose(answer: NBackDecision) {
-    if (isPaused || inputSettling || countdown !== null || trial.warmup || resolvedRef.current || answerRef.current !== null) return;
+    if (isPaused || inputSettling || countdown !== null || trial.warmup || index <= lastCompletedIndexRef.current || answerRef.current !== null) return;
     answerRef.current = answer;
     responseRef.current = Math.round(responseClock.elapsed());
     setSelected(answer);
