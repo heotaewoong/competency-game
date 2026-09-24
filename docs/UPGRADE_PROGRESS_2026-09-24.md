@@ -130,3 +130,10 @@ RED 증거: `C:\TEMP\cg-timer-boundary-red-20260924`, `C:\TEMP\cg-keyboard-red-2
 - `app/globals.css` 기존 짧은가로 media 영역에2줄만 추가해 3개답안 버튼 내부를 문구 위/단축키 아래로 배치한다. 버튼/영역 크기·2개답안·타이머·규칙·입력은 변경하지 않는다.
 - 회귀검사 추가: `e2e/readiness-data.spec.ts` 백업충돌1개, `e2e/accessibility-regressions.spec.ts` 기본/큰글자2개. 신규파일·의존성 없음. 원본/검증본4개 수정파일 SHA256 일치. 단위전체·타입·변경대상 ESLint·Next production build 통과.
 - 별도4187 production server에서 백업/저장세대/준비센터/모바일Safari/N-back **21/21 통과(2분)**. 기본·큰글자 수정 후 스크린샷 직접 검수, 기존80점/설정 보존 및 새 기록만 추가 후 새로고침 확인. `C:\TEMP\cg-backup-nback-green-20260924`. 서버는 검증 후 종료한다. 수정파일은 위4개와 이 문서이며 전체 원격CI 성공 전 공개 승격하지 않는다.
+- 제품 커밋 `cff6aa6085c0294b70a287e45da518f302ff63e7` main push 완료. [Quality Gate 35960221708](https://github.com/heotaewoong/competency-game/actions/runs/35960221708) 성공(12분2초): 단위203/203, Chromium·Mobile Safari110/110(10.6분), 타입·전체lint·production build 통과. 실패/불안정 재시도 없음. 로컬4187 서버 종료했으며 루트만 배포를 진행했다.
+- 깨끗한 기존 릴리스 폴더의 동일 커밋에서 Vercel 후보 `dpl_H6NPF5X26XmWJ8fwCjypsE8rLuqV`, `competency-game-nuynhzzxx-heotaewoongs-projects.vercel.app` READY. Node22/Next16.3.3, 빌드28초. `--prod --skip-domain` 후보1개만 생성하고 전체CI 성공 후 이 산출물을 promote했다. 새환경변수/자격증명/의존성/결제 설정 변경 없음.
+- 후보 인증 조회 HTTP200·보안 헤더 유지, 공개 alias는 CI 대기 중 이전 검증본 유지 확인. 원본과 검증본의 실행코드/자산/검사/설정100개 파일 전부 SHA256 일치. CSS 독립 리뷰에서 P1/P2없음: 실제 media 범위는 높이600px이하 가로모드이며 최소너비 제한은 없다. 새 규칙은 그 안의3개답안 버튼에만 적용한다.
+- 승격 후 `heobrain-competency-game.vercel.app` alias의 deployment ID가 `dpl_H6NPF5X26XmWJ8fwCjypsE8rLuqV`와 일치한다. 지정URL HTTP200, 리다이렉트0. 인앱 브라우저 새로고침 → 백업·복원 대화상자 열기/닫기 확인, 브라우저error로그 없음, 기존사용자기록5회와 환경설정 보존. 실제 백업충돌/복원 조작은 별도테스트컨텍스트에서 수행하며 사용자기록에 테스트파일을 가져오지 않았다.
+- 새 배포 최근30분 Vercel error 조회는 `No logs found`. 관찰 구간에 한정하며 무오류 보장은 아니다. 공식 비공개 규칙을 추정하거나 새로운 게임 분량/채점으로 바꾸지 않았다.
+- 공개URL 대상 별도검사 **21/21 통과(2.1분)**: `C:\TEMP\cg-backup-nback-production-20260924`. 기본/큰글자3개답안 캡처 직접검수, 백업충돌·복원·손상/세대보호·Safari터치/이전 확인. 4차 릴리스 검증완료: 2026-09-24 14:47 KST 전후. 제품커밋은 `cff6aa6`, 이후 문서전용 기록커밋은 재배포하지 않는다. 소유한서버·검사·배포 실행없음.
+- 다음 점검: 문서전용 후속CI·Git·공개alias부터 확인한다. 백업대화상자를 닫은 직후 인앱 AX 초점이 페이지로 표시된 관찰은 지연/실제복구누락 여부를 추가재현할 후보이며 아직 확정오류로 판정하지 않았다. 기존사용자기록을 변경하지 않는 분리된 테스트에서 확인한다. 오늘22:00 이후 새개발/배포금지·자동화22종료 조건은 유지한다.
