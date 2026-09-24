@@ -41,6 +41,11 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
     {
+      name: 'desktop-safari-focus',
+      testMatch: ['**/game-opener-focus.spec.ts', '**/checkbox-focus-scroll.spec.ts'],
+      use: { ...devices['Desktop Safari'] },
+    },
+    {
       name: 'mobile-safari',
       testMatch: '**/mobile-webkit.spec.ts',
       use: {
