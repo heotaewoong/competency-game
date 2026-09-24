@@ -2988,6 +2988,7 @@ function PathGame({ onFinish, onClose, config }: GameProps & { config: PracticeC
   }
 
   function navigatePathGrid(event: React.KeyboardEvent<HTMLButtonElement>, index: number, orientation: Fence) {
+    if (event.repeat && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); return; }
     let nextIndex = index;
     let nextOrientation = orientation;
     if (event.key === '/' || event.code === 'Slash') nextOrientation = 'slash';
@@ -3009,6 +3010,7 @@ function PathGame({ onFinish, onClose, config }: GameProps & { config: PracticeC
   }
 
   function navigatePathCycleGrid(event: React.KeyboardEvent<HTMLButtonElement>, index: number, row: number, col: number) {
+    if (event.repeat && (event.key === 'Enter' || event.key === ' ' || event.key === '/' || event.code === 'Slash' || event.key === '\\' || event.code === 'Backslash')) { event.preventDefault(); return; }
     if (event.key === '/' || event.code === 'Slash') {
       event.preventDefault();
       toggleCellFence(row, col, 'slash');
@@ -3048,7 +3050,7 @@ function PathGame({ onFinish, onClose, config }: GameProps & { config: PracticeC
       {guidedPacing ? <p className="guided-pacing-note" role="status">시간 제한 없이 연습 중 · 경로를 완성한 뒤 직접 확인하세요</p> : <DeadlineBar key={round} duration={config.paceMs} label="문제 제한시간" active={!locked} />}
       <section className="path-control-panel" aria-label="길 만들기 풀이 상태와 제출">
         <header><span>PUZZLE CONTROL</span><b>울타리 계획</b><p>같은 색의 차량과 손님을 연결한 뒤, 목표 울타리 수에 맞춰 확인하세요.</p></header>
-        <div className="path-toolbar"><span>현재 조작 기록 <b>{clicks}</b></span><span>정답 울타리 수 <b>{puzzle.target}</b></span>{mode === 'practice' && <span className={`path-type-chip ${puzzleMeta.interaction}`}><b>{interactionLabel}</b> T {puzzle.target} {comparison} B {puzzleMeta.baseFenceCount}<small>{pairLabel}{puzzleMeta.orderHint === 'parallel-first' ? ' · 평행 먼저' : ''}</small></span>}<button disabled={locked} onClick={resetPath}>전체 초기화</button></div>
+        <div className="path-toolbar"><span>현재 조작 기록 <b>{clicks}</b></span><span>정답 울타리 수 <b>{puzzle.target}</b></span>{mode === 'practice' && <span className={`path-type-chip ${puzzleMeta.interaction}`}><b>{interactionLabel}</b> T {puzzle.target} {comparison} B {puzzleMeta.baseFenceCount}<small>{pairLabel}{puzzleMeta.orderHint === 'parallel-first' ? ' · 평행 먼저' : ''}</small></span>}<button disabled={locked} onKeyDown={(event) => { if (event.repeat) event.preventDefault(); }} onClick={resetPath}>전체 초기화</button></div>
         <button className="path-submit primary-submit" disabled={locked || checking} onKeyDown={(event) => { if (event.repeat) event.preventDefault(); }} onClick={(event) => { if (event.detail > 1) return; submit(); }}>{checking ? '경로 확인 중…' : '경로 확인'}</button>
       </section>
       <p className="sr-only">{puzzle.vehicles.map(pathVehicleSummary).join('. ')}</p>
