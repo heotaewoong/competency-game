@@ -6,9 +6,21 @@ async function startRps(page: Page) {
   });
   await page.goto('/');
   await page.getByRole('button', { name: /가위바위보, 난이도 하, 설정 열기/ }).click();
-  await page.locator('section[data-game="rps"]').getByRole('button', { name: /^설명·연습 시작/ }).click();
+  const stage = page.locator('section[data-game="rps"]');
+  await expect(stage).toBeVisible();
+  // Keep host/browser delays from consuming the 2.5 s question before the
+  // deadline-before-callback condition is injected below.
+  const clockOrigin = Date.UTC(2030, 0, 5);
+  await page.clock.install({ time: clockOrigin });
+  await page.clock.pauseAt(clockOrigin + 60_000);
+  await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
   const workspace = page.locator('.game-workspace.game-rps');
+  for (const second of ['3', '2', '1']) {
+    await expect(workspace.locator('.game-preparation > b')).toHaveText(second);
+    await page.clock.runFor(1050);
+  }
   await expect(workspace.locator('.rps-board')).toBeVisible({ timeout: 8000 });
+  await expect(workspace.locator('.workspace-progress span')).toContainText('1 / 9');
   return workspace;
 }
 
@@ -30,12 +42,13 @@ async function pauseAfterDeadlineBeforeCallback(page: Page) {
 test('만료 직전에 처리되지 못한 문제 타이머는 일시정지 후 재개할 때 한 번 완료된다', async ({ page }) => {
   const workspace = await startRps(page);
   await pauseAfterDeadlineBeforeCallback(page);
+  await page.clock.runFor(1400);
   await expect(workspace.locator('.workspace-progress span')).toContainText('2 / 9', { timeout: 3500 });
   await expect(workspace.locator('.rps-actions button').first()).toBeEnabled();
   // A second pause must not replay the already completed first-question timer.
   await workspace.getByRole('button', { name: '연습 닫기' }).click();
   await page.getByRole('alertdialog').getByRole('button', { name: '계속 연습' }).click();
-  await page.waitForTimeout(150);
+  await page.clock.runFor(150);
   await expect(workspace.locator('.workspace-progress span')).toContainText('2 / 9');
 });
 
@@ -44,6 +57,7 @@ test('만료 직전에 처리되지 못한 피드백 전환은 일시정지 후 
   await workspace.locator('.rps-actions button').first().click();
   await expect(workspace.locator('.rps-actions button').first()).toBeDisabled();
   await pauseAfterDeadlineBeforeCallback(page);
+  await page.clock.runFor(400);
   await expect(workspace.locator('.workspace-progress span')).toContainText('2 / 9', { timeout: 2000 });
   await expect(workspace.locator('.rps-actions button').first()).toBeEnabled();
 });
