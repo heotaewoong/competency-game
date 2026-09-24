@@ -182,12 +182,14 @@ export function ReadinessCenter({
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (!dialog.open) dialog.showModal();
     const focusFrame = window.requestAnimationFrame(() => closeRef.current?.focus());
     return () => {
       window.cancelAnimationFrame(focusFrame);
       runIdRef.current += 1;
       if (dialog.open) dialog.close();
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
     };
   }, []);
 

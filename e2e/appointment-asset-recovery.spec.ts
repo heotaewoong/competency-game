@@ -72,6 +72,7 @@ test('실전형 메뉴 그림 대기는 10초 뒤 재시도 안내로 끝나며 
   await expect(page.locator('.game-workspace, .stage-result')).toHaveCount(0);
   await failure.getByRole('button', { name: '시작 취소' }).click();
   await expect(stage.locator('.stage-intro')).toBeVisible();
+  await expect(stage.getByRole('button', { name: /^실전형 연습 시작/ })).toBeFocused();
   await pending?.abort().catch(() => undefined);
 });
 
@@ -84,6 +85,7 @@ test('그림 대기를 취소하고 다른 게임으로 이동한 뒤 늦게 로
   await expect(loading).toBeVisible();
   await expect.poll(() => Boolean(pending)).toBe(true);
   await loading.getByRole('button', { name: '시작 취소' }).click();
+  await expect(stage.getByRole('button', { name: /^설명·연습 시작/ })).toBeFocused();
   await stage.getByRole('button', { name: '연습 닫기', exact: true }).click();
   await page.getByRole('button', { name: /숫자 누르기, 난이도 하, 설정 열기/ }).click();
   await pending?.continue();

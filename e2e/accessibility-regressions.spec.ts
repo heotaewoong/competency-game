@@ -932,6 +932,57 @@ test('개수 비교하기는 클릭과 키 입력이 겹쳐도 한 문항만 채
   await expect(workspace.locator('.workspace-progress span')).toContainText('2 / 5');
 });
 
+test('개수 비교하기는 Enter를 누른 채 응답으로 이동해도 자동 채점하지 않는다', async ({ page }) => {
+  await seedPracticeConfig(page);
+  await page.goto('/');
+  await page.getByRole('button', { name: /개수 비교하기, 난이도 하, 설정 열기/ }).click();
+  const stage = page.locator('section[data-game="count"]');
+  await expect(stage).toBeVisible();
+  await stage.getByText('시간 제한 없이 연습', { exact: true }).click();
+  const clockOrigin = Date.UTC(2030, 0, 6);
+  await page.clock.install({ time: clockOrigin });
+  await page.clock.pauseAt(clockOrigin + 60_000);
+  await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
+
+  const workspace = page.locator('.game-workspace.game-count');
+  for (const second of ['3', '2', '1']) {
+    await expect(workspace.locator('.game-preparation > b')).toHaveText(second);
+    await page.clock.runFor(1050);
+  }
+  await page.clock.runFor(400);
+  const beginAnswer = workspace.getByRole('button', { name: /내용을 들었어요 · 응답으로 이동/ });
+  await expect(beginAnswer).toBeVisible();
+  await page.clock.runFor(50);
+  await expect(beginAnswer).toBeFocused();
+  await page.keyboard.down('Enter');
+
+  const firstChoice = workspace.getByRole('button', { name: '왼쪽 선택' });
+  await expect(firstChoice).toBeVisible();
+  await page.clock.runFor(50);
+  await expect(firstChoice).toBeFocused();
+  await expect(firstChoice).toBeEnabled();
+  // A second down without an intervening up is a real repeated keydown.
+  await page.keyboard.down('Enter');
+  await expect(firstChoice).toBeEnabled();
+  await expect(workspace.locator('.workspace-foot > b')).toHaveText('');
+  await expect(workspace.locator('.workspace-progress span')).toContainText('1 / 5');
+
+  await page.keyboard.up('Enter');
+  await page.keyboard.down('Enter');
+  await expect(firstChoice).toBeDisabled();
+  await expect(workspace.locator('.workspace-foot > b')).toContainText(/(정답|오답) ·/);
+  await page.clock.runFor(1400);
+  await expect(workspace.locator('.workspace-progress span')).toContainText('2 / 5');
+  await page.clock.runFor(400);
+  await expect(beginAnswer).toBeVisible();
+  await page.clock.runFor(50);
+  await expect(beginAnswer).toBeFocused();
+  await page.keyboard.down('Enter');
+  await expect(workspace.locator('.count-wrap.phase-show')).toBeVisible();
+  await expect(beginAnswer).toBeFocused();
+  await page.keyboard.up('Enter');
+});
+
 test('고양이 술래잡기는 연습에서 빨강·파랑 판단을 색상별로 피드백한다', async ({ page }) => {
   await seedPracticeConfig(page);
   await page.setViewportSize({ width: 844, height: 360 });

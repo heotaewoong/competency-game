@@ -24,6 +24,40 @@ async function expectDialogFooterInsideViewport(dialog: import('@playwright/test
   expect(bounds!.footerBottom).toBeLessThanOrEqual(bounds!.viewportBottom + 1);
 }
 
+test('백업 창을 닫으면 두 진입 버튼의 키보드 초점이 복원된다', async ({ page }) => {
+  await page.goto('/');
+  for (const trigger of [page.locator('.records-data-button'), page.getByRole('button', { name: '기록 백업·복원', exact: true })]) {
+    for (const closeName of ['Escape', '내 기록 백업·복원 닫기', '닫기']) {
+      await trigger.press('Enter');
+      const dialog = page.getByRole('dialog', { name: '내 기록 백업·복원' });
+      await expect(dialog.getByRole('button', { name: '내 기록 백업·복원 닫기' })).toBeFocused();
+      if (closeName === 'Escape') await page.keyboard.press('Escape');
+      else await dialog.getByRole('button', { name: closeName, exact: true }).click();
+      await expect(dialog).toHaveCount(0);
+      await expect.soft(trigger).toBeFocused();
+    }
+  }
+});
+
+test('준비센터를 닫으면 홈과 게임 내부 진입 버튼의 키보드 초점이 복원된다', async ({ page }) => {
+  await page.goto('/');
+  for (const nested of [false, true]) {
+    if (nested) await page.getByRole('button', { name: /가위바위보, 난이도 하, 설정 열기/ }).click();
+    const trigger = nested
+      ? page.locator('section[data-game="rps"]').getByRole('button', { name: '응시 준비센터 열기' })
+      : page.locator('.readiness-banner button');
+    for (const closeName of ['Escape', '응시 준비센터 닫기', '설정 저장하고 닫기']) {
+      await trigger.press('Enter');
+      const dialog = page.getByRole('dialog', { name: '응시 준비센터' });
+      await expect(dialog.getByRole('button', { name: '응시 준비센터 닫기' })).toBeFocused();
+      if (closeName === 'Escape') await page.keyboard.press('Escape');
+      else await dialog.getByRole('button', { name: closeName, exact: true }).click();
+      await expect(dialog).toHaveCount(0);
+      await expect.soft(trigger).toBeFocused();
+    }
+  }
+});
+
 test('준비센터에서 자동·직접 점검과 접근성 설정을 완료하고 다시 복원한다', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /준비 점검 시작/ }).click();

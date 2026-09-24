@@ -31,6 +31,24 @@ async function expectNativeDialogOpen(dialog: Locator) {
   })), { timeout: 15_000 }).toEqual({ tagName: 'DIALOG', open: true });
 }
 
+test('Mobile Safari에서도 키보드로 연 native 창을 닫으면 진입 버튼에 복귀한다', async ({ page }) => {
+  await page.goto('/');
+  for (const [trigger, name, closeName] of [
+    [page.locator('.records-data-button'), '내 기록 백업·복원', '닫기'],
+    [page.locator('.readiness-banner button'), '응시 준비센터', '설정 저장하고 닫기'],
+  ] as const) {
+    for (const escape of [true, false]) {
+      await trigger.press('Enter');
+      const dialog = page.getByRole('dialog', { name });
+      await expectNativeDialogOpen(dialog);
+      if (escape) await page.keyboard.press('Escape');
+      else await dialog.getByRole('button', { name: closeName, exact: true }).click();
+      await expect(dialog).toHaveCount(0);
+      await expect(trigger).toBeFocused();
+    }
+  }
+});
+
 test('Mobile Safari 홈과 native 준비센터에서 터치·접근성 설정이 동작한다', async ({ page }) => {
   await page.goto('/');
 
