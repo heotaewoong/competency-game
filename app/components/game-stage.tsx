@@ -104,6 +104,7 @@ type GameProps = { onFinish: (result: RawResult) => void; onClose: () => void };
 const ReviewDialog = dynamic(() => import('./review-dialog').then((module) => module.ReviewDialog), { ssr: false });
 
 function shouldIgnoreGameShortcut(event: KeyboardEvent) {
+  if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return true;
   const target = event.target;
   if (!(target instanceof HTMLElement)) return true;
   // Clicking a choice disables the focused button. Browsers then move focus to body;
@@ -189,16 +190,50 @@ const DEFAULT_NBACK_PREFERENCES: NBackPreferences = {
 };
 const DEFAULT_APPOINTMENT_PREFERENCES: AppointmentPreferences = { selectedRounds: [...APPOINTMENT_KIND_ORDER] };
 let appointmentFoodAtlas: HTMLImageElement | null = null;
+let appointmentFoodAtlasLoad: Promise<boolean> | null = null;
 
 function preloadAppointmentFoodAtlas() {
-  if (typeof window === 'undefined' || appointmentFoodAtlas) return;
-  const image = new window.Image();
-  image.decoding = 'async';
-  image.onerror = () => {
-    if (appointmentFoodAtlas === image) appointmentFoodAtlas = null;
-  };
-  image.src = '/assets/appointment/food-sprite-v1.webp';
-  appointmentFoodAtlas = image;
+  if (typeof window === 'undefined') return Promise.resolve(false);
+  if (appointmentFoodAtlasLoad) return appointmentFoodAtlasLoad;
+  appointmentFoodAtlasLoad = new Promise<boolean>((resolve) => {
+    const image = new window.Image();
+    appointmentFoodAtlas = image;
+    image.decoding = 'async';
+    let settled = false;
+    const finish = (loaded: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      image.onload = null;
+      image.onerror = null;
+      if (!loaded) {
+        appointmentFoodAtlas = null;
+        appointmentFoodAtlasLoad = null;
+        image.removeAttribute('src');
+      }
+      resolve(loaded);
+    };
+    const timeout = window.setTimeout(() => finish(false), 10_000);
+    image.onload = () => finish(image.naturalWidth > 0);
+    image.onerror = () => finish(false);
+    image.src = '/assets/appointment/food-sprite-v1.webp';
+  });
+  return appointmentFoodAtlasLoad;
+}
+
+function AppointmentAssetDialog({ status, onRetry, onCancel }: { status: 'loading' | 'error'; onRetry: () => void; onCancel: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    dialog.showModal();
+    return () => { if (dialog.open) dialog.close(); };
+  }, []);
+  return <div className="session-confirm-backdrop" role="presentation"><dialog ref={dialogRef} className="session-confirm appointment-asset-dialog" role="alertdialog" aria-modal="true" aria-labelledby="appointment-asset-title" aria-describedby="appointment-asset-description" onCancel={(event) => { event.preventDefault(); onCancel(); }}>
+    <h2 id="appointment-asset-title">{status === 'loading' ? '메뉴 그림을 준비하고 있습니다' : '메뉴 그림을 불러오지 못했습니다'}</h2>
+    <p id="appointment-asset-description" role="status">{status === 'loading' ? '그림이 모두 준비된 뒤 연습을 시작합니다. 아직 제한시간과 채점은 시작되지 않았습니다.' : '연결 상태를 확인한 뒤 다시 시도해 주세요. 연습은 시작되지 않았고 기록도 저장되지 않았습니다.'}</p>
+    <div><button type="button" onClick={onCancel}>시작 취소</button>{status === 'error' && <button type="button" className="confirm-resume" onClick={onRetry}>다시 불러오기</button>}</div>
+  </dialog></div>;
 }
 
 const DEFAULT_FOCUSED_PRACTICE: FocusedPracticePreferences = {
@@ -362,7 +397,9 @@ function genericReviewAttempt(input: Omit<GenericReviewAttempt, 'kind' | 'id'> &
   };
 }
 
-type ManagedTimer = { handle: number | null; clock: PausableTimerState; callback: () => void };
+// A pause may reach zero before the queued callback runs. On resume, fire that
+// callback at 0 ms; track completion separately so it cannot run twice.
+type ManagedTimer = { handle: number | null; clock: PausableTimerState; callback: () => void; fired: boolean };
 
 function useManagedTimeout() {
   const isPaused = useContext(GamePauseContext);
@@ -370,10 +407,12 @@ function useManagedTimeout() {
   const timers = useRef<Map<number, ManagedTimer>>(new Map());
   const nextId = useRef(1);
   const arm = useCallback((id: number, timer: ManagedTimer) => {
-    if (timer.handle !== null || timer.clock.remainingMs <= 0) return;
+    if (timer.handle !== null || timer.fired) return;
     const now = performance.now();
     timer.clock = resumePausableTimer(timer.clock, now);
     timer.handle = window.setTimeout(() => {
+      if (timer.fired) return;
+      timer.fired = true;
       timers.current.delete(id);
       timer.handle = null;
       timer.clock = pausePausableTimer(timer.clock, performance.now());
@@ -400,7 +439,7 @@ function useManagedTimeout() {
   }, []);
   return useCallback((callback: () => void, delay: number) => {
     const id = nextId.current++;
-    const timer: ManagedTimer = { handle: null, clock: createPausableTimer(delay), callback };
+    const timer: ManagedTimer = { handle: null, clock: createPausableTimer(delay), callback, fired: false };
     timers.current.set(id, timer);
     if (!pausedRef.current) arm(id, timer);
     return () => {
@@ -417,6 +456,7 @@ function usePausableTimeout(callback: () => void, delay: number, enabled: boolea
   const callbackRef = useRef(callback);
   const pausedRef = useRef(isPaused);
   const enabledRef = useRef(enabled);
+  const firedRef = useRef(false);
   const clockRef = useRef<PausableTimerState>(createPausableTimer(delay));
   const timerRef = useRef<number | null>(null);
   useEffect(() => {
@@ -429,9 +469,11 @@ function usePausableTimeout(callback: () => void, delay: number, enabled: boolea
     timerRef.current = null;
   }, []);
   const arm = useCallback(() => {
-    if (!enabledRef.current || pausedRef.current || timerRef.current !== null || clockRef.current.remainingMs <= 0) return;
+    if (!enabledRef.current || pausedRef.current || timerRef.current !== null || firedRef.current) return;
     clockRef.current = resumePausableTimer(clockRef.current, performance.now());
     timerRef.current = window.setTimeout(() => {
+      if (firedRef.current) return;
+      firedRef.current = true;
       timerRef.current = null;
       clockRef.current = pausePausableTimer(clockRef.current, performance.now());
       callbackRef.current();
@@ -440,6 +482,7 @@ function usePausableTimeout(callback: () => void, delay: number, enabled: boolea
 
   useEffect(() => {
     clear();
+    firedRef.current = false;
     clockRef.current = createPausableTimer(delay);
     arm();
     return clear;
@@ -610,6 +653,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
   const [reviewOpen, setReviewOpen] = useState(false);
   const [readinessOpen, setReadinessOpen] = useState(false);
   const [saveNotice, setSaveNotice] = useState('');
+  const [assetLoadStatus, setAssetLoadStatus] = useState<'loading' | 'error' | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingSessionAction | null>(null);
   const [sessionMode, setSessionMode] = useState<SessionMode>('practice');
   const [guidedPacing, setGuidedPacing] = useState(false);
@@ -631,9 +675,13 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
   const overlayWasOpenRef = useRef(false);
   const overlayOpenRef = useRef(false);
   const visibilityPausedRef = useRef(false);
+  const startRequestRef = useRef(0);
+  const requestedModeRef = useRef<SessionMode>('practice');
   const game = getGame(gameId);
-  const overlayOpen = switcherOpen || feedbackOpen || strategyGuideOpen || reviewOpen || readinessOpen || pendingAction !== null || visibilityPaused;
+  const overlayOpen = switcherOpen || feedbackOpen || strategyGuideOpen || reviewOpen || readinessOpen || pendingAction !== null || visibilityPaused || assetLoadStatus !== null;
   const sessionPaused = overlayOpen;
+
+  useEffect(() => () => { startRequestRef.current += 1; }, []);
 
   usePausableTimeout(
     () => setPrepCountdown((value) => value === 1 ? null : (value ?? 1) - 1),
@@ -1036,9 +1084,23 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
   }
 
   function restart(nextMode: SessionMode = sessionMode) {
-    visibilityPausedRef.current = false;
-    setVisibilityPaused(false);
-    setVisibilityPauseCount(0);
+    void startSession(nextMode);
+  }
+
+  async function startSession(nextMode: SessionMode = sessionMode) {
+    const request = ++startRequestRef.current;
+    requestedModeRef.current = nextMode;
+    if (gameId === 'appointment' && (nextMode === 'simulation' || appointmentPreferences.selectedRounds.includes('food'))) {
+      if (!appointmentFoodAtlas?.complete || appointmentFoodAtlas.naturalWidth === 0) setAssetLoadStatus('loading');
+      const loaded = await preloadAppointmentFoodAtlas();
+      if (startRequestRef.current !== request) return;
+      if (!loaded) { setAssetLoadStatus('error'); return; }
+    }
+    setAssetLoadStatus(null);
+    const startsHidden = document.visibilityState === 'hidden';
+    visibilityPausedRef.current = startsHidden;
+    setVisibilityPaused(startsHidden);
+    setVisibilityPauseCount(startsHidden ? 1 : 0);
     finishedRun.current = false;
     setSaveNotice('');
     setResult(null);
@@ -1048,18 +1110,9 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
     setPhase('play');
   }
 
-  function startSession(nextMode: SessionMode = sessionMode) {
-    if (gameId === 'appointment' && (nextMode === 'simulation' || appointmentPreferences.selectedRounds.includes('food'))) {
-      preloadAppointmentFoodAtlas();
-    }
-    visibilityPausedRef.current = false;
-    setVisibilityPaused(false);
-    setVisibilityPauseCount(0);
-    finishedRun.current = false;
-    setSaveNotice('');
-    setSessionMode(nextMode);
-    setPrepCountdown(gameId === 'nback' ? null : 3);
-    setPhase('play');
+  function cancelPendingStart() {
+    startRequestRef.current += 1;
+    setAssetLoadStatus(null);
   }
 
   const selectedAppointmentRounds = APPOINTMENT_ROUNDS.filter((round) => appointmentPreferences.selectedRounds.includes(round.kind));
@@ -1151,6 +1204,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
         {readinessOpen && <ReadinessCenter gameId={gameId} onChecked={onReadinessChecked} onClose={() => setReadinessOpen(false)} />}
         {pendingAction && <SessionActionConfirmation action={pendingAction} onCancel={() => setPendingAction(null)} onConfirm={confirmPendingAction} />}
         {visibilityPaused && <VisibilityPauseDialog count={visibilityPauseCount} onResume={resumeVisibilityPause} />}
+        {assetLoadStatus && <AppointmentAssetDialog status={assetLoadStatus} onRetry={() => void startSession(requestedModeRef.current)} onCancel={cancelPendingStart} />}
       </section>
     </div>
   );
@@ -1181,7 +1235,7 @@ function ModeSelector({ mode, onChange }: { mode: SessionMode; onChange: (mode: 
           <span>연습 모드</span><b>내 설정으로 반복</b><small>분량·속도 조절 · 이름표 · 학습 도움</small>
         </button>
         <button ref={simulationRef} type="button" role="radio" aria-checked={mode === 'simulation'} tabIndex={mode === 'simulation' ? 0 : -1} className={mode === 'simulation' ? 'active' : ''} onKeyDown={navigate} onClick={() => onChange('simulation')}>
-          <span>실전형 연습</span><b>고정 설정으로 집중</b><small>앱 자체 고정값 · 이름표/정오 피드백 숨김</small>
+          <span>실전형 연습</span><b>고정 설정으로 집중</b><small>앱 자체 고정값 · 도움 표시 최소화</small>
         </button>
       </div>
     </section>
@@ -1361,7 +1415,7 @@ function SimulationPreset({ gameId }: { gameId: GameId }) {
         <div><dt>자료상 시간</dt><dd>{publicDuration}</dd></div>
         {gameId === 'count' && <div><dt>훈련용 응답 제한</dt><dd>{formatPace(Math.max(2500, config.paceMs * 3))}</dd></div>}
         {gameId === 'mouse' && <><div><dt>훈련용 중간 제시</dt><dd>빈칸 0.5초 · 고양이 1.2초 · 색 0.9초</dd></div><div><dt>훈련용 응답 제한</dt><dd>색마다 {formatPace(Math.max(4000, config.paceMs * 4))}</dd></div></>}
-        <div><dt>도움 표시</dt><dd>숨김</dd></div>
+        <div><dt>도움 표시</dt><dd>{gameId === 'potion' ? '해설 숨김 · 학습에 필요한 제조 결과 표시' : '숨김'}</dd></div>
       </dl>
       {gameId === 'path' && <p>2023 개발사 영상은 경로가 맞더라도 목표보다 많은 울타리를 쓰면 감점된다고 설명합니다. 비공개 감점식은 흉내 내지 않고 경로 성공과 목표 울타리 일치를 별도 기록하며, 클릭 제한 대신 전체 조작 수를 남깁니다.</p>}
       <p>공개된 라운드·판정·조작 순서를 유지합니다. 공개 튜토리얼 화면에서 확인한 분량은 이 버전의 연습 프로필에만 적용하며 현행 기업 초대의 총문항을 보장하지 않습니다. 그 밖의 공개되지 않은 수량·시간·채점식은 독립 훈련값이며 JOBDA 공식 모의검사나 동일 문항을 뜻하지 않습니다.</p>
@@ -2426,11 +2480,9 @@ function RotationGame({ onFinish, onClose, config, preferences, onPreviewChange 
   }
 
   const onRotationKey = useEffectEvent((event: KeyboardEvent) => {
-    if (isPaused || event.repeat || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+    if (isPaused || event.repeat || shouldIgnoreGameShortcut(event)) return;
     const target = event.target instanceof HTMLElement ? event.target : null;
-    if (target?.closest('[data-game-shortcut-ignore]')) return;
     if (target?.closest('button')) return;
-    if (event.key === 'Enter' && target?.closest('.session-close, a, input, textarea, select')) return;
     const operation = rotationOperations.find((item) => item.key === event.key);
     if (operation) { event.preventDefault(); addOperation(operation.id); return; }
     if (event.key === 'Backspace') { event.preventDefault(); undoOperation(); return; }
@@ -2548,6 +2600,7 @@ function AppointmentRoundRail({ currentRound, selectedRounds }: { currentRound: 
 function AppointmentChoices({ trial, locked, showNumberShortcuts, onChoose }: { trial: AppointmentTrial; locked: boolean; showNumberShortcuts: boolean; onChoose: (value: string) => void }) {
   const { mode } = useContext(SessionModeContext);
   function moveLocationFocus(event: ReactKeyboardEvent<HTMLFieldSetElement>) {
+    if (shouldIgnoreGameShortcut(event.nativeEvent)) return;
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
     const current = event.target instanceof HTMLElement ? event.target.closest<HTMLButtonElement>('button') : null;
     const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));

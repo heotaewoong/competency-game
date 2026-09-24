@@ -479,11 +479,22 @@ test('약속 정하기는 답을 고른 즉시 표시 타이머도 멈춘다', a
   await seedPracticeConfig(page);
   await page.goto('/');
   await page.getByRole('button', { name: /약속 정하기, 난이도 상, 설정 열기/ }).click();
-  await page.locator('section[data-game="appointment"]').getByRole('button', { name: /^설명·연습 시작/ }).click();
+  const stage = page.locator('section[data-game="appointment"]');
+  await expect(stage).toBeVisible();
+  // Keep assertions inside the 900 ms feedback window even on a busy host.
+  const clockOrigin = Date.UTC(2030, 0, 2);
+  await page.clock.install({ time: clockOrigin });
+  await page.clock.pauseAt(clockOrigin + 60_000);
+  await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
 
   const workspace = page.locator('.game-workspace.game-appointment');
+  for (const second of ['3', '2', '1']) {
+    await expect(workspace.locator('.game-preparation > b')).toHaveText(second);
+    await page.clock.runFor(1050);
+  }
   await workspace.getByRole('button', { name: '이 라운드 시작' }).click();
   for (let person = 0; person < 3; person += 1) {
+    if (person > 0) await page.clock.runFor(350);
     const next = workspace.locator('.appointment-stimulus .single-action');
     await expect.poll(() => next.getAttribute('aria-disabled')).toBe('false');
     await next.click();
@@ -496,8 +507,10 @@ test('약속 정하기는 답을 고른 즉시 표시 타이머도 멈춘다', a
   const stoppedAt = await deadline.getAttribute('aria-valuenow');
   expect(Number(stoppedAt)).toBeLessThanOrEqual(runningRemaining);
   expect(Number(stoppedAt)).toBeGreaterThan(0);
-  await page.waitForTimeout(400);
+  await page.clock.runFor(400);
   await expect(deadline).toHaveAttribute('aria-valuenow', stoppedAt!);
+  await page.clock.runFor(550);
+  await expect(page.locator('.stage-result')).toBeVisible();
 });
 
 test('약속·개수·N-back 단계 전환은 이전 내부 스크롤 위치를 남기지 않는다', async ({ page }) => {
@@ -714,17 +727,21 @@ test('탭 이탈은 준비와 문제 타이머를 멈추고 명시적 재개를 
   await seedPracticeConfig(page);
   await page.goto('/');
   await page.getByRole('button', { name: /가위바위보, 난이도 하, 설정 열기/ }).click();
-  await page.locator('section[data-game="rps"]').getByRole('button', { name: /^설명·연습 시작/ }).click();
+  const stage = page.locator('section[data-game="rps"]');
+  await expect(stage).toBeVisible();
+  const clockOrigin = Date.UTC(2030, 0, 3);
+  await page.clock.install({ time: clockOrigin });
+  await page.clock.pauseAt(clockOrigin + 60_000);
+  await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
 
   const preparationCountdown = page.locator('.game-preparation > b');
   await expect(preparationCountdown).toBeVisible();
   await setDocumentVisibility(page, 'hidden');
-  // A coarse whole-second label can already have a queued render at the exact
-  // visibility boundary. Let that in-flight render settle, then assert that no
-  // additional hidden-tab time is consumed.
-  await page.waitForTimeout(150);
+  // Advance browser time explicitly so a busy test host cannot skip the
+  // preparation or first question while the runner observes the pause state.
+  await page.clock.runFor(150);
   const pausedPreparationValue = await preparationCountdown.textContent();
-  await page.waitForTimeout(1_400);
+  await page.clock.runFor(1_400);
   await expect(preparationCountdown).toHaveText(pausedPreparationValue ?? '');
   await setDocumentVisibility(page, 'visible');
 
@@ -735,6 +752,10 @@ test('탭 이탈은 준비와 문제 타이머를 멈추고 명시적 재개를 
   await resume.click();
 
   const workspace = page.locator('.game-workspace.game-rps');
+  for (let second = Number(pausedPreparationValue); second > 0; second -= 1) {
+    await expect(preparationCountdown).toHaveText(String(second));
+    await page.clock.runFor(1050);
+  }
   await expect(workspace.locator('.rps-board')).toBeVisible({ timeout: 8_000 });
   await workspace.getByRole('button', { name: '문제 신고' }).click();
   const pendingDialog = page.getByRole('alertdialog', { name: '현재 세션을 종료하고 의견을 작성할까요?' });
@@ -744,17 +765,19 @@ test('탭 이탈은 준비와 문제 타이머를 멈추고 명시적 재개를 
   await expect(pauseDialog).toBeHidden();
   await pendingDialog.getByRole('button', { name: '계속 연습' }).click();
   await setDocumentVisibility(page, 'hidden');
-  await page.waitForTimeout(3_000);
+  await page.clock.runFor(3_000);
   await setDocumentVisibility(page, 'visible');
   await expect(pauseDialog).toBeVisible();
   await expect(pauseDialog).toContainText('탭 이탈 3회');
   await expect(workspace.locator('.workspace-progress span')).toContainText('1 / 9');
-  await page.waitForTimeout(2_800);
+  await page.clock.runFor(2_800);
   await expect(workspace.locator('.workspace-progress span')).toContainText('1 / 9');
   await pauseDialog.getByRole('button', { name: '준비됐어요 · 계속하기' }).click();
+  await page.clock.runFor(50);
   await expect(pauseDialog).toBeHidden();
   await expect(workspace).toBeFocused();
   await workspace.locator('.rps-actions button').first().click();
+  await page.clock.runFor(1400);
   await expect(workspace.locator('.workspace-progress span')).toContainText('2 / 9', { timeout: 3_000 });
 });
 

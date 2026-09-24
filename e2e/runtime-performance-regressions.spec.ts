@@ -42,3 +42,29 @@ test('연속 resize 이벤트는 준비 상태 저장소를 한 번만 다시 �
   await page.waitForTimeout(250);
   expect(await page.evaluate(() => (window as typeof window & { __readinessProbeWrites: number }).__readinessProbeWrites)).toBe(1);
 });
+
+test('준비센터가 열린 상태에서도 연속 resize는 저장소를 한 번만 점검한다', async ({ page }) => {
+  await page.addInitScript(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    Object.defineProperty(window, '__readinessProbeWrites', { value: 0, writable: true, configurable: true });
+    Storage.prototype.setItem = function setItem(key, value) {
+      if (key === '__nineflow_readiness_probe__') {
+        (window as typeof window & { __readinessProbeWrites: number }).__readinessProbeWrites += 1;
+      }
+      return originalSetItem.call(this, key, value);
+    };
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: '준비센터', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '응시 준비센터' });
+  await expect(dialog.getByRole('button', { name: '다시 점검' })).toBeEnabled();
+  await page.evaluate(() => {
+    // Home also observes resize when a saved summary exists. Isolate the open
+    // dialog's own storage probe; its current assessment remains in memory.
+    window.localStorage.removeItem('nineflow-readiness-check-v1');
+    (window as typeof window & { __readinessProbeWrites: number }).__readinessProbeWrites = 0;
+    for (let index = 0; index < 40; index += 1) window.dispatchEvent(new Event('resize'));
+  });
+  await page.waitForTimeout(250);
+  expect(await page.evaluate(() => (window as typeof window & { __readinessProbeWrites: number }).__readinessProbeWrites)).toBe(1);
+});

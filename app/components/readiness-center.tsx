@@ -192,13 +192,21 @@ export function ReadinessCenter({
   }, []);
 
   useEffect(() => {
+    let resizeTimer: number | null = null;
     const initialFrame = window.requestAnimationFrame(() => { void runCheck(); });
     const refresh = () => { void runCheck(); };
-    const refreshViewport = () => setAssessment(captureCurrentReadinessAssessment());
+    const refreshViewport = () => {
+      if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(() => {
+        resizeTimer = null;
+        setAssessment(captureCurrentReadinessAssessment());
+      }, 150);
+    };
     window.addEventListener('online', refresh);
     window.addEventListener('offline', refresh);
     window.addEventListener('resize', refreshViewport);
     return () => {
+      if (resizeTimer !== null) window.clearTimeout(resizeTimer);
       window.cancelAnimationFrame(initialFrame);
       window.removeEventListener('online', refresh);
       window.removeEventListener('offline', refresh);
