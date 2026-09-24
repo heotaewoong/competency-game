@@ -372,6 +372,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 .session-settings > div:first-child button, .rotation-practice-options > header > button { min-height: 44px; padding: 8px 11px; }
 .session-stepper > div { grid-template-columns: 44px minmax(48px, auto) 44px; }.session-steppers button { width: 44px; height: 44px; }
 .rotation-letter-picker > div:last-child { grid-template-columns: repeat(7, minmax(44px, 1fr)); }.rotation-letter-picker button { min-height: 44px; }
+.rotation-preview-setting { position: relative; }
 .rotation-preview-setting:focus-within { outline-color: #1267d6; }
 .accessible-pacing-setting { margin-top: 12px; border-color: #c8d8ee; background: #f7faff; }
 .guided-pacing-note { width: fit-content; margin: 0 auto 10px; padding: 7px 11px; border: 1px solid #b9cde9; border-radius: 999px; color: #334e70; background: #f1f7ff; font-size: 11px; font-weight: 800; line-height: 1.4; }
