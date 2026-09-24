@@ -2368,6 +2368,8 @@ body {
   .nback-stage:has(.nback-stimulus) .nback-actions button { min-height: 52px; padding: 6px 7px; gap: 4px; }
   .nback-stage:has(.nback-stimulus) .nback-actions b { font-size: 11px; white-space: nowrap; }
   .nback-stage:has(.nback-stimulus) .nback-actions span { min-width: 26px; padding: 4px; }
+  .nback-stage:has(.nback-stimulus) .nback-actions.three-options button { grid-template-columns: 1fr; justify-items: center; gap: 2px; padding: 4px; }
+  .nback-stage:has(.nback-stimulus) .nback-actions.three-options b { justify-self: center; }
   .nback-stage:has(.nback-actions) .nback-actions { align-self: start; }
   .nback-stage:has(.nback-actions) .nback-actions button { height: 48px; min-height: 48px; }
   .nback-stage:has(.nback-actions) > .single-action { height: 44px; min-height: 44px; margin: 0; padding: 6px 10px; align-self: end; font-size: 11px; }

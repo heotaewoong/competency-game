@@ -731,7 +731,8 @@ export default function Home() {
 
     const existingIds = new Set([...inMemorySnapshot, ...storedSnapshot].map((result) => result.id));
     const uniqueCandidateIds = new Set([...imported, ...inMemorySnapshot, ...storedSnapshot].map((result) => result.id));
-    const next = mergeSessionResults(imported, inMemorySnapshot, storedSnapshot);
+    // Restoring a backup adds missing sessions; it must not replace local ones.
+    const next = mergeSessionResults(inMemorySnapshot, storedSnapshot, imported);
     const outcome = persistResultsEnvelope(storage, generationBefore, next);
     if (!outcome.stored) return { ok: false, message: '브라우저 저장 공간이 부족하거나 차단되어 기록을 가져오지 못했습니다.' };
     try {

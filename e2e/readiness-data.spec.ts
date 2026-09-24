@@ -184,6 +184,49 @@ test('기록 JSON을 내려받고 검증된 파일만 병합하며 확인 후 �
   await peer.close();
 });
 
+
+test('백업의 중복 ID는 기존 점수를 덮어쓰지 않고 새 기록만 추가한다', async ({ page }) => {
+  const existing = {
+    id: 'keep-local-result', gameId: 'rps', completedAt: '2026-09-09T12:00:00.000Z',
+    accuracy: 80, medianRt: 720, stability: 74, errors: 2,
+    detail: { sessionMode: '연습 모드', quantity: 9, paceMs: 4500 },
+  };
+  const added = {
+    id: 'new-backup-result', gameId: 'count', completedAt: '2026-09-10T02:00:00.000Z',
+    accuracy: 60, medianRt: 940, stability: 65, errors: 2,
+  };
+  await page.addInitScript(({ prefix, generationKey, saved }) => {
+    if (sessionStorage.getItem('backup-collision-seeded')) return;
+    sessionStorage.setItem('backup-collision-seeded', '1');
+    localStorage.setItem(generationKey, 'backup-collision');
+    localStorage.setItem(`${prefix}backup-collision`, JSON.stringify({
+      version: 4, generation: 'backup-collision', results: [saved],
+    }));
+  }, { prefix: RESULTS_PREFIX, generationKey: RESULTS_GENERATION_KEY, saved: existing });
+  await page.goto('/');
+  await expect(page.locator('.header-status')).toContainText('1');
+  await page.locator('.records-data-button').click();
+  const dialog = page.getByRole('dialog', { name: '내 기록 백업·복원' });
+  await dialog.locator('input[type="file"]').setInputFiles({
+    name: 'duplicate-backup.json', mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({
+      format: 'nineflow-practice-results', version: 1, exportedAt: '2026-09-10T03:00:00.000Z',
+      results: [{ ...existing, accuracy: 0, errors: 9, detail: undefined }, added],
+    })),
+  });
+  await expect(dialog).toContainText('검증 완료: 2개 기록');
+  await dialog.getByRole('button', { name: '기존 기록과 합치기' }).click();
+  await expect(dialog).toContainText('새로 추가 1개, 현재 총 2개');
+  await page.reload();
+  await expect(page.locator('.header-status')).toContainText('2');
+  const stored = await page.evaluate(({ prefix, generationKey }) => {
+    const generation = localStorage.getItem(generationKey);
+    return JSON.parse(localStorage.getItem(`${prefix}${generation}`) ?? '{}').results;
+  }, { prefix: RESULTS_PREFIX, generationKey: RESULTS_GENERATION_KEY });
+  expect(stored).toHaveLength(2);
+  expect(stored).toEqual(expect.arrayContaining([existing, added]));
+});
+
 test('게임 내부에서 저장한 환경 차단은 화면 복구 즉시 해제되고 새로고침 뒤에도 유지된다', async ({ page }) => {
   await page.setViewportSize({ width: 300, height: 300 });
   await page.goto('/');

@@ -413,6 +413,66 @@ test('700~768px 태블릿에서도 길 만들기 보드가 가로로 밀리지 �
   }
 });
 
+for (const textScale of ['standard', 'large'] as const) {
+  test(`844×360 ${textScale} 글자 N-back 3개 답안의 문구와 단축키가 겹치지 않는다`, async ({ page }, testInfo) => {
+    await seedPracticeConfig(page);
+    await page.addInitScript(({ accessibilityKey, pacingKey, textScale }) => {
+      localStorage.setItem(accessibilityKey, JSON.stringify({ contrast: 'standard', textScale, motion: 'reduce' }));
+      localStorage.setItem(pacingKey, JSON.stringify({ nback: true }));
+      localStorage.setItem('nineflow-nback-preferences-v1', JSON.stringify({ task: 'n23', group: 0, progression: 'fixed' }));
+    }, { accessibilityKey: ACCESSIBILITY_KEY, pacingKey: PACING_KEY, textScale });
+    await page.setViewportSize({ width: 844, height: 360 });
+    await page.goto('/');
+    await expect(page.locator('html')).toHaveAttribute('data-text-scale', textScale);
+    await page.getByRole('button', { name: /도형 순서 기억하기, 난이도 상, 설정 열기/ }).click();
+    await page.locator('section[data-game="nback"]').getByRole('button', { name: /^설명·연습 시작/ }).click();
+
+    const workspace = page.locator('.game-workspace.game-nback');
+    for (let index = 0; index < 3; index += 1) {
+      const nextGlyph = workspace.getByRole('button', { name: /기억했어요 · 다음 도형/ });
+      await expect(nextGlyph).toBeEnabled({ timeout: 8_000 });
+      await nextGlyph.click();
+    }
+    const actions = workspace.locator('.nback-actions.three-options button');
+    await expect(actions).toHaveCount(3);
+    await page.evaluate(() => document.fonts.ready);
+    const measurements = await actions.evaluateAll((buttons) => buttons.map((button) => {
+      const label = button.querySelector('b')!;
+      const key = button.querySelector('span')!;
+      const textRect = (element: Element) => {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        return range.getBoundingClientRect();
+      };
+      const compact = (rect: DOMRect) => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height });
+      const bounds = button.getBoundingClientRect();
+      const labelRect = textRect(label);
+      const keyRect = key.getBoundingClientRect();
+      const keyTextRect = textRect(key);
+      return {
+        label: label.textContent,
+        button: compact(bounds),
+        labelText: compact(labelRect),
+        shortcut: compact(keyRect),
+        shortcutText: compact(keyTextRect),
+        overlapWidth: Math.min(labelRect.right, keyRect.right) - Math.max(labelRect.left, keyRect.left),
+        overlapHeight: Math.min(labelRect.bottom, keyRect.bottom) - Math.max(labelRect.top, keyRect.top),
+        outsideButton: [labelRect, keyTextRect].flatMap((rect, index) =>
+          rect.left < bounds.left - 1 || rect.right > bounds.right + 1 || rect.top < bounds.top - 1 || rect.bottom > bounds.bottom + 1
+            ? [index === 0 ? 'label' : 'shortcut'] : []),
+      };
+    }));
+    await testInfo.attach(`nback-three-options-${textScale}`, { body: JSON.stringify(measurements, null, 2), contentType: 'application/json' });
+    await workspace.screenshot({ path: testInfo.outputPath(`nback-three-options-${textScale}.png`) });
+    for (const item of measurements) {
+      expect.soft(item.labelText.width, `${item.label} 실제 글자 영역`).toBeGreaterThan(0);
+      expect.soft(item.overlapWidth <= 1 || item.overlapHeight <= 1, `${item.label} 문구와 단축키 겹침: ${item.overlapWidth}×${item.overlapHeight}px`).toBe(true);
+      expect.soft(item.outsideButton, `${item.label} 버튼 밖으로 잘리는 글자`).toEqual([]);
+    }
+    await expectControlsInsideViewport(actions, 844, 360);
+  });
+}
+
 test('844×360 N-back 응답 단계에서 자극과 모든 선택지가 잘리지 않는다', async ({ page }) => {
   await seedPracticeConfig(page);
   await page.setViewportSize({ width: 844, height: 360 });
