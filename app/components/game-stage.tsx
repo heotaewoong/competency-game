@@ -676,6 +676,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
   const onCloseRef = useRef(onClose);
   const onSwitchRef = useRef(onSwitch);
   const overlayWasOpenRef = useRef(false);
+  const reviewReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   const overlayOpenRef = useRef(false);
   const visibilityPausedRef = useRef(false);
   const startRequestRef = useRef(0);
@@ -835,6 +836,8 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
     if (!wasOpen || overlayOpen) return;
     const focusFrame = window.requestAnimationFrame(() => {
       const panel = panelRef.current;
+      const reviewOpener = reviewReturnFocusRef.current;
+      reviewReturnFocusRef.current = null;
       if (phaseRef.current === 'play') {
         const workspace = panel?.querySelector<HTMLElement>('.game-workspace');
         if (workspace) {
@@ -843,6 +846,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
         }
       }
       const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      if (phaseRef.current === 'result' && reviewOpener?.isConnected && !reviewOpener.closest('[inert]')) { reviewOpener.focus({ preventScroll: true }); return; }
       if (panel && active && panel.contains(active) && active !== panel && !active.closest('[inert]')) return;
       const fallback = Array.from(panel?.querySelectorAll<HTMLElement>('.stage-content button:not(:disabled), .stage-content a[href], .stage-content summary, .stage-content [tabindex]:not([tabindex="-1"])') ?? []).find((element) => element.offsetParent !== null && !element.closest('[inert]'));
       (fallback ?? panel)?.focus();
@@ -1198,7 +1202,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
           </>
         )}
         {phase === 'play' && <GamePauseContext.Provider value={sessionPaused}><SessionModeContext.Provider value={{ mode: sessionMode, showGlyphNames }}><GuidedPacingContext.Provider value={sessionMode === 'practice' && guidedPacing}><FocusedPracticeContext.Provider value={sessionMode === 'practice' ? focusedPractice : DEFAULT_FOCUSED_PRACTICE}><StageActionsContext.Provider value={{ openGameSwitcher, openFeedback }}>{prepCountdown !== null ? <GamePreparation gameId={gameId} countdown={prepCountdown} total={gameId === 'rotation' && sessionMode === 'simulation' ? 2 : gameId === 'appointment' ? (sessionMode === 'simulation' ? APPOINTMENT_SIMULATION_TOTAL_QUESTIONS : practiceConfig.quantity * appointmentPreferences.selectedRounds.length) : (sessionMode === 'practice' ? practiceConfig : simulationConfig(gameId)).quantity} onClose={requestClose} /> : <GameRouter key={`${gameId}-${run}`} gameId={gameId} config={sessionMode === 'practice' ? practiceConfig : simulationConfig(gameId)} glyphMnemonics={glyphMnemonics} nbackPreferences={nbackPreferences} rotationPreferences={rotationPreferences} appointmentPreferences={appointmentPreferences} onRotationPreviewChange={(showPreview) => saveRotationPreferences({ ...rotationPreferences, showPreview })} onFinish={finish} onClose={requestClose} />}</StageActionsContext.Provider></FocusedPracticeContext.Provider></GuidedPacingContext.Provider></SessionModeContext.Provider></GamePauseContext.Provider>}
-        {phase === 'result' && result && <ResultView result={result} mode={sessionMode} storageNotice={saveNotice} onClose={requestClose} onRestart={() => restart()} onOpenGuide={() => setStrategyGuideOpen(true)} onReview={() => setReviewOpen(true)} />}
+        {phase === 'result' && result && <ResultView result={result} mode={sessionMode} storageNotice={saveNotice} onClose={requestClose} onRestart={() => restart()} onOpenGuide={() => setStrategyGuideOpen(true)} onReview={(opener) => { reviewReturnFocusRef.current = opener; setReviewOpen(true); }} />}
         </div>
         {switcherOpen && <GameSwitcher currentGameId={gameId} sessionWasStopped={switcherEndedSession} onClose={() => setSwitcherOpen(false)} onSelect={(nextGameId) => { setSwitcherOpen(false); if (nextGameId !== gameId) onSwitchRef.current(nextGameId); }} />}
         {feedbackOpen && <FeedbackDialog initialGameId={gameId} sessionMode={sessionMode === 'practice' ? '연습 모드' : '실전형 연습'} nested onClose={() => setFeedbackOpen(false)} />}
@@ -1786,7 +1790,7 @@ function GamePreparation({ gameId, countdown, total, onClose }: { gameId: GameId
   );
 }
 
-function ResultView({ result, mode, storageNotice, onClose, onRestart, onOpenGuide, onReview }: { result: SessionResult; mode: SessionMode; storageNotice?: string; onClose: () => void; onRestart: () => void; onOpenGuide: () => void; onReview: () => void }) {
+function ResultView({ result, mode, storageNotice, onClose, onRestart, onOpenGuide, onReview }: { result: SessionResult; mode: SessionMode; storageNotice?: string; onClose: () => void; onRestart: () => void; onOpenGuide: () => void; onReview: (opener: HTMLButtonElement) => void }) {
   const game = getGame(result.gameId);
   const visibilityPauses = typeof result.detail?.visibilityPauses === 'number' ? result.detail.visibilityPauses : 0;
   const trialCount = typeof result.detail?.trialCount === 'number' ? result.detail.trialCount : 0;
@@ -1877,7 +1881,7 @@ function ResultView({ result, mode, storageNotice, onClose, onRestart, onOpenGui
       {visibilityPauses > 0 && <aside className="result-storage-notice result-comparison-notice" role="status"><b>탭 이탈 {visibilityPauses}회 · 참고용 기록</b><p>다른 탭에 있던 시간은 제외했으며, 공정한 비교를 위해 이 결과는 동일 설정 최고 기록 계산에 포함하지 않습니다.</p></aside>}
       {storageNotice && <aside className="result-storage-notice" role="status"><b>기록 저장 안내</b><p>{storageNotice}</p></aside>}
       {hasActionableReview && <aside className="result-review"><b>이번 세션 복습 포인트</b><p>{reviewAdvice[result.gameId]}</p></aside>}
-      <div className="result-actions"><button onClick={onRestart}>{mode === 'practice' ? '다시 연습' : '실전형으로 다시 하기'}</button>{hasReview && <button className="result-review-button" onClick={onReview}>문항별 복습</button>}<button className="result-guide" onClick={onOpenGuide}>공략 복습</button><button className="stage-start" onClick={onClose}>게임 목록 <span>→</span></button></div>
+      <div className="result-actions"><button onClick={onRestart}>{mode === 'practice' ? '다시 연습' : '실전형으로 다시 하기'}</button>{hasReview && <button className="result-review-button" onClick={(event) => onReview(event.currentTarget)}>문항별 복습</button>}<button className="result-guide" onClick={onOpenGuide}>공략 복습</button><button className="stage-start" onClick={onClose}>게임 목록 <span>→</span></button></div>
       <small>개인 연습 기록이며 실제 역량검사 점수나 채용 결과가 아닙니다.</small>
     </section>
   );

@@ -42,12 +42,12 @@ export default defineConfig({
     },
     {
       name: 'desktop-safari-focus',
-      testMatch: ['**/game-opener-focus.spec.ts', '**/checkbox-focus-scroll.spec.ts', '**/nback-guided-settings.spec.ts', '**/nback-group-layout.spec.ts', '**/path-repeat-input.spec.ts'],
+      testMatch: ['**/game-opener-focus.spec.ts', '**/checkbox-focus-scroll.spec.ts', '**/nback-guided-settings.spec.ts', '**/nback-group-layout.spec.ts', '**/path-repeat-input.spec.ts', '**/review-held-enter.spec.ts', '**/review-pointer-focus.spec.ts'],
       use: { ...devices['Desktop Safari'] },
     },
     {
       name: 'mobile-safari',
-      testMatch: '**/mobile-webkit.spec.ts',
+      testMatch: ['**/mobile-webkit.spec.ts', '**/review-pointer-focus.spec.ts'],
       use: {
         ...devices['iPhone 13'],
         viewport: { width: 390, height: 844 },

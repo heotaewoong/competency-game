@@ -364,6 +364,7 @@ export function ReviewDialog({ results, onClose, onPracticeGame, initialSessionI
     siblings.forEach((element) => { element.inert = true; element.setAttribute('aria-hidden', 'true'); });
     const focusFrame = window.requestAnimationFrame(() => closeRef.current?.focus());
     const onKey = (event: KeyboardEvent) => {
+      if (event.repeat && event.target === closeRef.current && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); return; }
       if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); onCloseRef.current(); return; }
       if (event.key !== 'Tab') return;
       const focusables = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), select:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])') ?? []).filter((item) => item.offsetParent !== null);

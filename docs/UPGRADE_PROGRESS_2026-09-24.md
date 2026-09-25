@@ -314,3 +314,85 @@ RED 증거: `C:\TEMP\cg-timer-boundary-red-20260924`, `C:\TEMP\cg-keyboard-red-2
 - CI36010543379 **성공(15분36초)**, 브라우저 **161/161 통과(13.7분)**·재시도/실패 없음을 완료 로그에서 확인했다. 이전 지정 alias 유지 재확인 뒤 같은 후보를 한 번 promote했다. 최종 `heobrain-competency-game.vercel.app` alias는 `dpl_3FK5RuLGrz48cWFveVKBbMhPsAXF`와 일치·HTTP200/redirect0이다. 별도 공개 Path 검사도 **8/8 통과(2.4분)**: Chromium 완료·오답 수정·반복 입력·반응형 초점6개와 Desktop WebKit 반복 입력2개. 증거 `C:\TEMP\cg-path-repeat-production-20260924` 및 형제 `-report`, `-console.log`. Windows WebKit 검사 소요45.1초/25.8초가 포함되며 이번 통과가 초기 지연의 원인 규명이나 속도 해결을 뜻하지 않는다.
 - 공개 사용자 IAB에 진행 중 게임/모달이 없음을 확인한 뒤 새로고침했다.383×778 화면에서 Path 설정→설명·연습→첫 문제 자체 초점→Enter/ArrowRight/Enter로 첫2칸 `/` 배치·조작2회→종료 확인→연습창 닫기를 직접 검증했다. 화면/키보드 초점 표시 확인·기존 기록5회 유지·설정 변경 없음·원래 Path 카드 초점 복귀·stage0/inert0·console error0. 사용자 탭에서 세션 완료/기록 추가·삭제 없음. 새 배포의 최근30분 Vercel error 로그는 없었으며 Drains는 미조회다.
 - 이번 최종 제품은 `34e3dde` / `dpl_3FK5RuLGrz48cWFveVKBbMhPsAXF`이며 지정 공개 주소에 반영 완료. 원본 제품/설정 수정2개(`game-stage.tsx`, `playwright.config.ts`)·신규 영구 회귀검사1개(`e2e/path-repeat-input.spec.ts`)·본 진행 문서1개이며, 임시 진단과 검사 산출물은 위 C:\TEMP에 보존했다. 소유 서버/테스트/배포 프로세스 모두 종료·임시 탭 정리 완료. 후속은 문서만 커밋/push하며 재배포하지 않는다. GitHub가 알린 Actions Node20 런타임 강제24 전환/10월 Ubuntu26 label 예정 경고는 현재 검사 실패가 아니며 이번 입력 수정에 CI 의존성 업그레이드를 섞지 않는다. 초기 WebKit 지연과 실제 iPhone 성능 검증은 여전히 미해결/미검증이다. 다음 heartbeat는 문서 CI/Git/alias를 확인하고,2026-09-25 00:00 KST 이후 새 변경/배포 없이 최종 정리·자동화22 PAUSED로 종료한다.
+
+## 23:31 후속 — 복습 창 진입 키의 반복 닫힘 재현
+
+- 23:31:58 KST 시작. 원본 `7fd2c6b` clean·origin 확인, 앞선 문서 CI36013257108은 타입/lint/단위 성공 후 브라우저 검사 진행 중. 공개 alias는 `dpl_3FK5RuLGrz48cWFveVKBbMhPsAXF` 유지·HTTP200/redirect0이며 소유4187 서버 없음. 끝 시각은 자정으로 유지한다.
+- 직전 미확정 후보인 복습 창의 Enter 반복 닫힘을 공개 Chromium에서 **RED2/2 재현**했다. 빈 홈 복습과 실제 도형 회전1문항 완료 결과에서 opener 초점→Enter down→창 표시/닫기 초점 확인→keyup 없는 두 번째 Enter down 뒤 창이 사라져 assertion이 실패했다. 증거 `C:\TEMP\cg-review-held-enter-red-20260924` 및 형제 `-report`, `-console.log`. 단순 로딩 지연과 구분된다.
+- 원인은 두 호출 경로가 공유하는 ReviewDialog의 첫 초점이 닫기 버튼으로 이동한 뒤에도 해당 버튼이 반복 활성화를 받는 것이다. `review-dialog.tsx` 기존 window capture key handler에 닫기 ref가 target인 반복 Enter/Space만 preventDefault하는1행을 추가했다. opener나 각 화면별 패치/새 helper/의존성 없이 공통 위치에서 막았다(Ponytail lite). Tab/Escape/방향키·새 키 누름·inert/scroll lock/이전 초점 복원·게임 규칙/타이머/저장 로직은 변경하지 않았다.
+- `e2e/review-held-enter.spec.ts`는 위 실제 UI 경로2개에서 반복 Enter 억제→새 Enter 정상 닫기→Space로 재열기→held Space 중 유지/keyup 닫기→원래 opener 초점 복귀/콘솔 오류를 검사한다. 기존 Desktop WebKit 프로젝트에도 등록해 Chromium/WebKit 총4개로 구성했다. 독립 읽기 검토에서 출시 차단 회귀를 발견하지 못했다. C:\TEMP 타입/변경 파일 lint/전체 단위/production build 및 새 입력·기존 복습 흐름 검사 중이며, 검증이 자정을 넘으면 새 배포나 promote를 하지 않고 기존 공개 제품을 유지한다.
+- 첫 로컬 타입/변경 파일 lint/단위203/203/production build 통과. 브라우저6개는 **3통과/1실패/2미실행**으로 중단했다. 기존 모바일 초점 회수·중첩 inert와 빈 복습 Enter/Space 검사는 통과했지만, 완료 결과 경로의 정상 닫기 뒤 초점이 원래 `문항별 복습` 대신 `다시 연습`으로 돌아가 실패했다. 반복 Enter 차단 assertion 자체는 두 경로에서 통과했으며 이 별도 초점 실패를 성공으로 덮지 않는다. 증거 `C:\TEMP\cg-review-held-enter-local-20260924` 및 형제 `-report`, `-console.log`; 스크린샷에서 첫 결과 버튼의 초점 테두리도 직접 확인했다.
+- 원래 ReviewDialog mount 때 부모가 결과 영역을 inert로 만든 뒤 previousFocus를 읽어, GameStage의 기존 fallback가 첫 결과 버튼을 선택할 수 있었다. `GameStage`의 결과 복습 단일 진입에서 실제 버튼 `event.currentTarget`을 ref에 보관하고, 기존 overlay 닫힘 rAF에서 result 상태·연결됨·inert 아님을 확인해 그 버튼으로 복귀하도록 보완했다. ref는 복귀 시 비우며 게임 재시작(play)에서는 기존 workspace 초점을 우선한다. 별도 effect/helper/timeout/새 의존성 없이 기존 복귀 경로를 재사용했다. 테스트의 opener 기대치를 완화하지 않고 동일6개 재검증을 진행한다. 이전 문서 CI36013257108은 성공으로 확인됐으며 이번 수정은 아직 미커밋/미배포다.
+
+## 2026-09-25 00:00 종료 — 검증 미완료 수정 보존·자동화 일시정지
+
+- 종료 시각 이후 새 제품 수정·검사·커밋/push·배포·승격을 시작하지 않았다. 직전 실행 결과와 미완료 항목만 정리한다. 최종 초점 보완 후 타입·변경 파일 lint·production build는 통과했다. 단위203/203은 그보다 앞선 반복 입력 방어 수정 시점의 결과이며 초점 보완 후 다시 실행한 결과로 표현하지 않는다.
+- 마지막 로컬 브라우저 재검사 결과는 **4통과/1실패/1미실행(51.2초)**이다. Chromium의 기존 모바일 초점·중첩 inert 및 새 빈 홈/완료 결과 복습2개가 통과했다. Desktop WebKit 빈 홈 검사는 첫 Enter down 이후 복습 dialog 표시5초 assertion에서 실패했으며, 반복 Enter 입력 전의 실패다. Desktop WebKit 완료 결과 검사는 미실행이다. 최초 열기 실패의 원인은 확정하지 않았고 timeout 확대·추가 반복 검사로 덮지 않았다. 증거: `C:\TEMP\cg-review-held-enter-local-final-20260924` 및 형제 `-report`, `-console.log`(실패 screenshot/trace/video 포함).
+- 이번 복습 수정은 **미커밋·미배포**로 보존한다. 수정한 원본 파일은 `app/components/game-stage.tsx`, `app/components/review-dialog.tsx`, `playwright.config.ts`, 본 문서이며 생성한 원본 파일은 `e2e/review-held-enter.spec.ts`다. 앱/설정/신규 검사4개는 자정 전 원본과 `C:\TEMP\competency-game-fix-20260915` 검증본 SHA256 일치를 확인했다. HEAD는 `7fd2c6baea3495fbfabe22372cd589abc65f98ed`이며 이번 구간에 GitHub/Vercel 변경은 없다. 이전 실패 기록도 삭제하지 않는다.
+- 공개 제품은 직전 검증본 `34e3dde` / `dpl_3FK5RuLGrz48cWFveVKBbMhPsAXF`를 유지한다. 자정 직후 완료된 alias/HTTP 확인에서도 `https://heobrain-competency-game.vercel.app/`가 같은 배포를 가리키고 HTTP200·redirect0이었다. 해당 공개 제품의 기존 전체 CI161/161·공개 Path8/8과 이번 미배포 수정의 검사 결과를 구분한다. 이번 새 복습 문제는 공개 사이트에 아직 남아 있다.
+- 임시 브라우저 탭은 닫았고 사용자 공개 탭/기록은 보존했다. 마지막 검사·빌드는 종료됐으며 소유한4187 로컬 서버도 종료했다. 00:03 KST 이후 앱 도구로 **자동화22를 PAUSED**로 변경하고 저장된 상태를 재확인했다. 이름·프롬프트·기존 스케줄·대상 작업은 보존했으며 새 자동화는 만들지 않았다.
+- 다음 사용자 재개 요청 시 우선순위: 보존된 WebKit 최초 열기 실패 trace를 검토하고 원인을 구분한 뒤, 동일 복습 입력/초점 회귀와 전체 CI를 다시 검증한다. 성공 확인 후에만 선택 파일 커밋→main push→기존 Vercel 공개 배포→지정 URL 실제 조작/콘솔 확인을 진행한다. 초기 WebKit 지연·실제 iPhone 성능은 여전히 미해결/미검증이며 무오류나 비공개 실전과 완전 동일함을 보장하지 않는다.
+
+## 2026-09-25 01:36 이후 — 사용자 승인으로 오전 7시까지 재개
+
+- 사용자가 종료 시각을 **2026-09-25 오전 07:00 KST(이번 밤에 이어서)**로 명시 확인했다. 이전 자정 종료 조건을 대체한다. 기존 자동화22를 같은 작업의 매시간 실행으로 ACTIVE 재개하고, 오전7시 이후 새 제품 작업/배포 없이 최종 정리·PAUSED 처리하도록 갱신했다. 중복 자동화는 만들지 않았다.
+- 원본 HEAD `7fd2c6b`와 미커밋 수정4개/신규 검사1개를 재확인했다. 복습 창의 WebKit 최초 열기 실패 증거 검토 및 회귀검증을 재개 첫 우선순위로 저장했다. 이번 일정 변경에서는 제품 코드 수정·검사 실행·커밋/push·Vercel 배포를 하지 않았으며, 앞선 실패/미실행 상태는 그대로다. 로컬 작업을 위해 PC와 앱이 실행 중이어야 한다.
+
+## 2026-09-25 02:00 후속 — 복습 진입 검사 준비상태 분리
+
+- 02:00:52 KST 시작. HEAD `7fd2c6b`와 보존된5파일 변경·origin 재확인, 공개 alias는 `dpl_3FK5RuLGrz48cWFveVKBbMhPsAXF` 유지·HTTP200/redirect0이다. 소유4187 서버/이전 실행은 종료돼 중복 작업이 없었고, 종료 시각은07:00 KST다.
+- 자정 WebKit 실패 trace를 독립 읽기 검토했다. `focus()`가65863.587ms에 **disabled 복습 버튼**을 찾았고, 첫 Enter 입력 snapshot66128.692ms와 이후66402.617ms도 disabled였다. 최초 enabled/기록 aria-busy=false 관측은66515.721ms로 입력 후다. Enter 이후 추가JS 요청·dialog·inert 기록이 없으며 반복 Enter는 미실행이다. 실제 activeElement/DOM keydown target·click은 계측되지 않아 단정하지 않는다. 복습창 자체의5초 로딩 실패로 취급하지 않고, 검사 준비상태 경쟁으로 분류한다.
+- 새 회귀검사의 입력 전제에 `toBeEnabled()`→`focus()`→`toBeFocused()`만 추가했다. 표시 제한5초·전체 제한·재시도 횟수는 늘리지 않았고 원래 opener 복귀 기대도 유지했다. 앱 수정은 보존된 공통 반복 키 방어/결과 opener ref를 그대로 검증한다. G:↔C:\TEMP 앱2파일·설정·신규 검사 일치 확인 후 전체 타입/lint/단위/build와 관련 브라우저 검증을 진행한다. 이전 실패는 이 기록과 원본 trace에 보존한다.
+- 전체 타입·전체 lint·전체 단위·production build는 exit0으로 통과했다. 검증 대상 tracked108개도 G:↔C:\TEMP SHA256 불일치0, 신규 검사는 별도 일치 확인했다. 로컬 IAB 홈9카드/기록0개 렌더→빈 복습 창 실제 클릭→닫기 초점→Esc→원래 복습 버튼 복귀를 직접 확인하고 화면 검수·console error0 확인 후 임시 탭을 닫았다. 사용자 공개 탭/기록은 조작하지 않았다.
+- 보완한6개 로컬 검사는 **4통과/1실패/1미실행(33.7초)**이다. Chromium 기존 모바일 초점·중첩 inert와 새2개는 통과했다. WebKit 실패는 `Cannot find parent object page@… to create disposable@…`이며, trace에서 newPage4.373초 뒤 addInitScript가 완료되지 않았고 **page.goto/네트워크/DOM/제품 assertion 전**이다. 설치된 Playwright1.62.1의 `coreBundle.js` 연결 객체 생성부에서 발생하는 메시지와 일치한다. 브라우저 crash·메모리 원인은 확정하지 않는다. 증거 `C:\TEMP\cg-review-held-enter-resume-20260925` 및 형제 `-report`, `-console.log`.
+- 같은 코드·제한으로 WebKit2개만 한 번 분리 실행한 결과도 **0통과/1실패/1미실행**이다. 이번에는 홈에 진입했지만 `toBeEnabled()`5초 동안 복습 버튼이 disabled였고 focus/Enter/복습창 검사 전 단계에서 중단됐다. 앞선 객체 연결 오류 및 자정 표시 실패와 구분한다. 증거 `C:\TEMP\cg-review-held-enter-webkit-resume-20260925` 및 형제 `-report`, `-console.log`. 추가 반복·timeout 확대·제품 커밋/push/배포는 하지 않았다.
+- 실행 중 Windows 여유 물리 메모리549144KB와407800KB/총16119016KB를 관측했으나 지연/프로토콜 오류의 단독 원인으로 단정하지 않는다. 사용자 프로그램 종료·전역/인증 설정 변경 없음. 검사/빌드 종료 및 소유4187 서버 정리를 마쳤다. 이번 제품 변경은 자정 수정 그대로 미커밋·미배포이며, 이번에 추가 수정한 원본은 회귀검사2행과 본 문서뿐이다. 자동화22는07:00까지 ACTIVE를 유지한다.
+- 다음 실행은 먼저 남은 trace와 현재 환경/프로세스 상태를 확인한다. 환경이나 코드의 새로운 근거가 없으면 같은 WebKit 검사를 무작정 반복하지 않는다. 초기 기록 준비 지연의 관측 경계와 실제 원인을 구분한 뒤 검증하며, WebKit 미실행 상태를 해소하기 전에는 이번 복습 수정의 공개 반영을 보류한다.
+- 마지막 trace 읽기 검토 완료: 초기 JS는 전부200이며 마지막 응답 종료5545.570ms, 홈 snapshot6307.044ms부터 마지막11646.321ms까지 `#records aria-busy=true`/복습 disabled가 유지됐다. 입력은 미실행이고 일부 접근성/캔버스/route announcer DOM 변화는 있으므로 JS 전체 미실행으로 단정하지 않는다. 이전22:01 임시 계측에서도 저장소 호출이 아니라 render→layout 사이의 간헐적 대기가 관측됐으나 CPU/React 양보/호스트 영향은 분리되지 않았다. 새 근거 없이 같은 계측·성능 검사를 다시 반복하지 않았고, 이 실패를 복습 키 방어 회귀로 단정하지 않는다. 02:15 자동화 ACTIVE 및4187 listener 없음 확인. 현재 공개 배포/HEAD는 변경하지 않았다.
+
+## 2026-09-25 03:01 후속 — 실행 환경 확인·홈 복습 포인터 검증 공백
+
+- 03:01:27 KST 확인. 원본과 origin/main은 `7fd2c6b`, 미커밋5파일 상태를 보존했다. 지정 공개 alias는 `dpl_3FK5RuLGrz48cWFveVKBbMhPsAXF` 유지·HTTP200/redirect0. 진행 중 프로젝트 Node/브라우저 검사·4187 서버 없음, 자동화22 ACTIVE·07:00 종료 조건 유지다.
+- 여유 물리 메모리는129420KB(약126MiB), 이후260828KB(약255MiB)/총16119016KB였다. 이전보다 메모리 압박이 커졌고 새 원인 근거도 없어 무거운 브라우저·빌드 및 동일 WebKit 검사를 재실행하지 않았다. 메모리만을 기존 지연/객체 연결 오류의 확정 원인으로 표현하지 않는다. 사용자의 프로그램·프로세스·전역 설정은 종료하거나 변경하지 않았다.
+- 기존 임시 성능 계측 문서2개를 다시 읽어 저장소 동기 호출·rAF·render→layout의 관측 경계와 한계를 확인했다. 새 계측이나 timeout 완화, 제품 수정은 하지 않았다. Ponytail lite에 따라 추측성 최적화 대신 현재 보류된 복습 경로의 읽기 검토만 수행했다.
+- **추가 정적 P2 후보(실행 미확정)**: Home의 복습 진입7곳(`app/page.tsx`812/940/941/948/953/962/976)은 클릭한 버튼을 전달/초점 처리하지 않고 `openReview`는 상태만 변경한다. ReviewDialog는 mount 당시 activeElement를 복귀 대상으로 기억하므로, 포인터 클릭이 초점을 주지 않는 환경에서는 실제 복습 버튼을 놓칠 수 있다. 기존 `openGame`의 실제 opener 초점 보완과 달리 홈 복습은 보완이 없으며, 자정에 수정한 GameStage 결과 복습 ref와는 별개다. 새 회귀라고 단정하지 않는다.
+- 기존 `game-opener-focus` 복습 handoff는 Enter 진입, `review-held-enter`는 사전 focus, 접근성 검사는 창 내부 Tab 회수여서 이 포인터 조건을 입증하지 않는다. 이후 최소 재현은 기록 준비 완료→opener가 미초점임을 확인→마우스 클릭(터치는 별도)→닫기→같은 opener 초점/inert 해제 확인이다. 사전 focus/press로 조건을 없애지 않는다. 실패가 실제 재현된 경우에만 기존 opener 처리 패턴 재사용을 검토하고, 복습→게임 handoff·키보드 경로 회귀도 함께 확인한다.
+- 이번 수정은 이 진행 문서1개뿐이다. 새 원본 파일·검사 산출물 생성, 타입/lint/단위/E2E/build 실행, Git 커밋/push, Vercel 배포/승격은 없다. 기존 미커밋 코드와 실패 증거는 그대로 보존하며, 환경 회복 또는 새로운 원인 근거가 생겼을 때 보류 검증을 이어간다.
+
+## 2026-09-25 04:00 후속 — 복습 포인터 진단 준비·실행 보류
+
+- 04:00:41 KST 확인. 원본 HEAD와 GitHub main은 `7fd2c6baea3495fbfabe22372cd589abc65f98ed`, origin은 기존 저장소로 일치한다. 미커밋5파일 상태를 보존했고 진행 중 프로젝트 검사/서버 및4187 listener는 없다. 공개 alias는 `dpl_3FK5RuLGrz48cWFveVKBbMhPsAXF` 유지·HTTP200/redirect0이며 자동화22 ACTIVE·07:00 종료 조건도 재확인했다.
+- 여유 물리 메모리는174376KB(약170MiB)/총16119016KB로 낮은 상태다. 기존 실패 원인을 메모리로 확정하지 않았으며 브라우저/빌드 재실행·사용자 프로그램 종료·제품 변경은 하지 않았다. 환경이나 원인에 새 근거가 없어 같은 WebKit 실패를 반복하지 않는다.
+- 앞서 확인한 홈 복습 포인터 초점 검증 공백에 대해 **미실행 준비용 진단2파일**만 C:\TEMP 검증본의 `diagnostics/review-pointer-20260925.spec.ts`, `diagnostics/review-pointer-20260925.config.ts`에 생성했다. 각 파일을 전부 읽어 검토했고 터치 가능 여부(`hasTouch`)로 click/tap을 구분한다. 원본 G:의 앱/검사/설정과 기존 e2e testDir는 변경하지 않았다. Ponytail lite에 따라 설치된 Playwright와 기존 assertion만 재사용하며 새 의존성·공통 추상화는 추가하지 않았다.
+- 계획된 범위는 Desktop Chromium/Desktop WebKit/iPhone13 에뮬레이션 × 닫기 버튼/Escape의6개다. 새 빈 context에서 홈 복습 버튼 enabled와 미초점을 확인한 뒤 실제 click/tap으로 열고, 닫기 버튼 초점→닫힘→원래 opener 복귀→inert 해제→콘솔/pageerror 없음까지 확인한다. 사전 focus/press·강제 클릭은 없고 기존 assertion5초/retry0/worker1을 유지한다. 자동 서버 실행은 없으며 실제 iPhone 하드웨어 검증도 아니다.
+- 두 진단은 **실행하지 않았으므로 통과/실패/제품 버그 재현으로 보고하지 않는다**. 이번 수정 파일은 이 문서1개, 생성 파일은 위 C:\TEMP 진단2개, 외부 시스템 변경은 없다. 타입/lint/단위/E2E/build·커밋/push·배포/승격은 시작하지 않았다. 보류된 제품 수정은 여전히 미커밋·미배포다.
+- 다음 실행은 환경 회복 여부를 확인하고 기존 held-Enter/WebKit 준비상태 검증을 우선한다. 별도 포인터 진단은 이후 독립 실행해 입력 전제 실패와 초점 복귀 실패를 구분한다. 준비용 진단을 제품 수정 검증 성공이나 전체165개 회귀검사 완료로 대체하지 않으며, 기존 실패 증거와 미실행 항목을 보존한다.
+
+## 2026-09-25 05:01 후속 — 준비상태 경로 정적 재검토
+
+- 05:01:10 KST 확인. HEAD/origin main `7fd2c6b`·미커밋5파일·공개 alias `dpl_3FK5RuLGrz48cWFveVKBbMhPsAXF`는 동일하며 HTTP200/redirect0이다. 프로젝트 Node 검사/서버·4187 listener 없음, 자동화22는 기존 상태를 유지한다. 여유 메모리491748KB→569556KB(약480→556MiB)/총16119016KB로 여전히 낮아 브라우저·빌드 재실행을 보류했다. 호스트 메모리를 실패 원인으로 확정하지 않는다.
+- 읽기 전용 독립 검토와 본 검토에서 `Home` 기록 초기화의 새 논리적 차단 조건을 찾지 못했다. 저장소 예외 뒤에도 rAF를 예약하며 callback 첫문장의 `setResultsLoaded(true)`가 세대/스냅샷 검사 return보다 앞에 있고 false 재설정은 없다. 새 held-Enter 검사에는 초기 설정3개 저장 외 clock/visibility/network 변경이 없으며 해당 키는 결과 기록 복원 분기와 별개다. 기존 `home-loading.spec.ts`에는 스크립트 지연·기록0/1개·저장소 차단 검사가 이미 있어 중복 검사를 만들지 않았다.
+- 계측 범위도 다시 구분했다. 빈 홈 초기화에도 저장소 쓰기/삭제가 있고 getItem wrapper는 이를 개별 측정하지 않는다. 다만22시 보존 계측의 A WebKit strict 샘플은 **복원 effect 본문 전체5623→5628ms(5ms)**여서 그 샘플의 긴4492ms 구간은 복원 전 render→layout이었다. 최신02시 실패에는 이 마커가 없으므로 과거 수치를 일반화하거나 쓰기/rAF/React를 새 원인으로 단정하지 않는다. 추측성 앱 수정·timeout 완화 없이 원인 미확정으로 유지한다.
+- 이번 수정은 본 문서1개뿐이며 생성 파일·제품 변경·타입/lint/단위/E2E/build 실행·커밋/push·배포/승격은 없다.04시 준비용 포인터6개도 미실행이다. 기존 실패 증거·미커밋 수정·공개 제품을 보존하며, 안정적인 재검증을 위한 호스트 여유 메모리 확보가 필요하다. 사용자 앱/설정은 임의 변경하지 않았다.
+
+## 2026-09-25 07:50 종료 정리 — 오전 7시 기한 종료·자동화 일시정지
+
+- 종료 heartbeat에서 현재 시각07:50:28 KST를 확인했다. 사용자 지정 종료07:00이 지났으므로 새 제품 변경·검사·커밋/push·배포/승격을 시작하지 않았다. 진행 기록·로컬 Git 상태·소유 프로세스·자동화 상태만 읽어 종료 정리에 사용했다. 진행 중 하위 에이전트나 이 프로젝트 Node 검사/서버는 없다.
+- 기존 자동화22를 앱 도구로 **PAUSED** 처리했고 응답 및 저장된 상태를 다시 읽어 확인했다. 이름·프롬프트·스케줄·대상 작업은 그대로 보존했다. 다음 실행이나 새 자동화는 만들지 않았으며 사용자 재개 지시 전까지 후속 개선을 시작하지 않는다.
+- 최종 로컬 HEAD는 `7fd2c6baea3495fbfabe22372cd589abc65f98ed`, remote는 `https://github.com/heotaewoong/competency-game.git`이다. 기존 미커밋 `app/components/game-stage.tsx`, `app/components/review-dialog.tsx`, `playwright.config.ts`, 본 문서 및 신규 `e2e/review-held-enter.spec.ts`를 그대로 보존했다. 재개 구간에 제품 커밋/push/배포는 없었다. 공개 제품의 마지막 확인은05시 `34e3dde` / `dpl_3FK5RuLGrz48cWFveVKBbMhPsAXF`·HTTP200/redirect0이며 종료 후 새 공개 검사를 실행한 결과로 표현하지 않는다.
+- 검증 경계:02시의 타입·전체 lint·단위·production build는 통과했다. 관련 브라우저는 **4통과/1실패/1미실행**, 분리 WebKit은 **0통과/1실패/1미실행**으로 끝났고 이후 재실행하지 않았다. 초기 비활성 버튼에 입력한 자정 테스트 전제는 보완했지만, 후속 WebKit 초기 연결 오류 및 준비 상태 지연 원인은 확정하지 못했다. 낮은 호스트 여유 메모리는 관측 사실이지 원인 확정이 아니다.
+- 남은 작업: WebKit 홈 준비/복습 최초 열기 및 완료 결과 경로, 준비한 포인터6개, 수정본 전체 회귀와 공개 반영 후 실제 조작 검증. 공개된 반복 Enter 복습 문제는 이번 미배포 수정으로 해결됐다고 보고하지 않는다. 실제 iPhone 하드웨어 및 비공개 JOBDA 현행 사양은 미검증이다. 재개 시 원인과 입력 전제를 구분하고 검증 성공 후에만 선택 커밋→push→기존 프로젝트 배포→지정 공개 URL 확인을 진행한다.
+- 종료 정리에서 수정한 파일은 본 문서1개, 생성한 파일은 없음이다. 외부 사이트/GitHub/Vercel 변경은 없고 Codex 자동화22의 상태만 PAUSED로 바뀌었다. 전역 지침·메모리·자격증명·사용자 앱/기록은 변경하지 않았다.
+
+## 2026-09-25 18:46 사용자 요청 재개 — 검증 환경 복구
+
+- 사용자가 다시 '계속 업데이트'를 요청해 이번 대화의 작업을 재개했다. 이전07:00 종료로 보존한 수정부터 검증하며 자동화22는 PAUSED를 유지한다. HEAD/origin main `7fd2c6b`·기존 미커밋5파일·공개 alias `dpl_3FK5RuLGrz48cWFveVKBbMhPsAXF`가 그대로임을 확인했다. 다른 프로젝트의 Playwright driver는 종료/변경하지 않았다.
+- 이전 검증본 `C:\TEMP\competency-game-fix-20260915`에는 package.json·일부 앱/자산·Next/Playwright 실행 파일이 현재 없었다. 남아 있는 .next를 현재 검증된 빌드로 간주하지 않는다. 누락 원인이나 이전 WebKit 실패와의 인과관계는 확인되지 않았다. 기존 폴더/증거는 삭제하지 않았다.
+- 새 검증본 `C:\TEMP\competency-game-resume-20260925-1849`를 만들고 G: tracked 파일과 신규 회귀검사123개를 복사해 SHA256 불일치0을 확인했다. 원본과 credentials/env/global 설정은 변경하지 않았다. 잠금 파일 기반 `npm ci --prefer-offline --no-audit --no-fund`는493개 설치·exit0으로 완료했다. 새 라이브러리/버전은 채택하지 않았으며 eslint9 지원종료 경고는 별도 유지보수 항목이다.
+- 읽기 전용 독립 코드 검토에서 반복키 guard/결과 opener ref의 신규 P1/P2 회귀는 찾지 못했다. 정적 검토를 실행 통과로 표현하지 않는다. 기존 Home 포인터 공백은 별개다. 타입 검사 통과 후 전체 lint·단위·build를 진행 중이며, 결과가 나온 뒤 WebKit 최초 열기/완료 경로를 제한시간 완화 없이 검증한다.
+- 새 검증본에서 타입·전체 lint·단위 **203/203**·production build가 모두 통과했다. 먼저 보류됐던 Desktop WebKit held-Enter2개를 실행해 **2/2 통과(27.1초)**했다. `C:\TEMP\cg-review-held-enter-fresh-20260925-1900` 및 형제 report/console.log. 이 성공이 이전 실패의 원인 확정이나 전반적 지연 해결을 의미하지는 않는다.
+- 별도 홈 포인터 진단은 **2통과/1실패/3미실행(32.0초)**으로 실제 기존 문제를 재현했다. Desktop Safari에서 실제 click→복습 열기→닫기까지 성공한 뒤 원래 footer 버튼 `toBeFocused()`가5초 동안 inactive였다. 초기 로딩/모달 표시 실패와 다르다. `C:\TEMP\cg-review-pointer-red-20260925-1904`의 screenshot/trace/video/console.log를 보존하고 화면도 확인했다.
+- `app/page.tsx`의 공통 `openReview`가 실제 opener 버튼을 필수 인자로 받아 state 변경 전에 `focus({ preventScroll: true })`하도록 기존 openGame 패턴을 재사용했다. 호출7곳 모두 currentTarget을 전달하고 세션/오류 인자는 유지한다. 새 effect/state/의존성·타이머·게임 규칙·점수 계산 변경 없음. 정식 `e2e/review-pointer-focus.spec.ts`의 pointer/Escape2개를 Chromium/Desktop WebKit/Mobile Safari에 등록했다. 별도 포인터 진단은 C:\TEMP에만 남기고 커밋하지 않는다.
+- 마지막 Home 보완 후 타입·전체 lint·production build 재통과, 앱/설정/신규 검사6개 G:↔C:\TEMP SHA256 불일치0, 독립 읽기 검토에서 누락 호출/신규 회귀 없음. 단위203/203은 동일 라이브러리 코드의 직전 실행이며 이후 Home 변경 뒤 별도 단위 재실행으로 표현하지 않는다.
+- 최종 로컬 관련 브라우저 **26/26 통과(3.0분)**: Chromium13·Desktop WebKit11·Mobile Safari2. held-Enter4개, 새 포인터6개, 기존 게임 진입/가이드·복습 handoff14개, 모바일 Tab 회수·중첩 inert2개다. 기본 assertion/action/navigation timeout과 retry0/worker1을 유지했고 runtime/console 검사를 통과했다. 증거 `C:\TEMP\cg-review-focus-local-20260925-1908` 및 형제 report/console.log. 실제 iPhone 하드웨어는 미검증이다.
+- 검증한 제품3파일·설정1파일·검사2파일·본 문서만 선택 커밋/push한다. 전체 CI 성공 전 지정 공개 alias를 승격하지 않으며, 새 공개 배포와 최종 라이브 검증은 아직 완료로 보고하지 않는다. 자동화22는 PAUSED 상태다.

@@ -632,8 +632,10 @@ export default function Home() {
     return message;
   }
 
-  function openReview(sessionId = '', errorCode?: string) {
+  function openReview(opener: HTMLButtonElement, sessionId = '', errorCode?: string) {
     if (!resultsLoaded) return;
+    // Preserve the actual trigger when Safari pointer clicks do not focus it.
+    opener.focus({ preventScroll: true });
     setReviewErrorCode(errorCode ?? null);
     setReviewSessionId(sessionId);
   }
@@ -809,7 +811,7 @@ export default function Home() {
           <span className="brand-glyph">N</span>
           <span>NINEFLOW <em>LAB</em></span>
         </a>
-        <nav aria-label="주요 메뉴"><button type="button" onClick={() => setReadinessOpen(true)}>준비센터</button><a href="#games">게임</a><button type="button" onClick={() => setGuideGameId(featuredGame.id)}>전략 가이드</button><button type="button" disabled={!resultsLoaded} onClick={() => openReview()}>복습</button><a href="#records">내 기록</a><button type="button" onClick={() => setFeedbackOpen(true)}>의견</button></nav>
+        <nav aria-label="주요 메뉴"><button type="button" onClick={() => setReadinessOpen(true)}>준비센터</button><a href="#games">게임</a><button type="button" onClick={() => setGuideGameId(featuredGame.id)}>전략 가이드</button><button type="button" disabled={!resultsLoaded} onClick={(event) => openReview(event.currentTarget)}>복습</button><a href="#records">내 기록</a><button type="button" onClick={() => setFeedbackOpen(true)}>의견</button></nav>
         <a className="header-status" href="#records" aria-label={resultsLoaded ? `완료한 연습 ${results.length}회, 기록으로 이동` : '연습 기록 확인 중, 기록으로 이동'}>
           <span>연습</span><b>{resultsLoaded ? results.length : '—'}</b>
         </a>
@@ -937,20 +939,20 @@ export default function Home() {
         <div className="records-heading"><div><span>나의 훈련 기록</span><h2 id="records-title">내 연습 기록</h2></div><p>최근 기록과 모드·분량·속도·집중·접근성 표시 설정이 같은 세션끼리만 최고 점수를 비교합니다.</p><button type="button" className="records-data-button" disabled={!resultsLoaded} onPointerEnter={preloadDataManagementDialog} onPointerDown={preloadDataManagementDialog} onFocus={preloadDataManagementDialog} onClick={() => setDataManagementOpen(true)}>백업·복원</button></div>
         {recentResults.length ? <>
           <section className="home-review-center" aria-labelledby="home-review-title">
-            <div className="home-review-heading"><div><span>틀린 이유 복습</span><h3 id="home-review-title">무엇을 반복해서 틀리는지 확인하세요.</h3><p>{scoredReviewResults.length ? `게임별 가장 최근 비교 문맥에서만 반복 횟수와 오류율을 계산합니다.${reviewableResults.length > scoredReviewResults.length ? ` 무응답 구간이 남은 세션 ${reviewableResults.length - scoredReviewResults.length}개도 문항별로 열 수 있습니다.` : scoredReviewResults.length < 5 ? ' 아직 표본이 적어 약점으로 단정하지 않습니다.' : ''}` : reviewableResults.length ? `${reviewableResults.length}개 세션의 무응답 구간이 복습에 남아 있습니다. 제출 전 놓친 문제부터 확인하세요.` : '이전 기록에는 문항별 데이터가 없습니다. 새 연습부터 자동으로 쌓입니다.'}</p></div><button type="button" onClick={() => openReview()}>복습 센터 열기 <span>→</span></button></div>
-            {recurringErrors.length > 0 ? <div className="home-review-ranking">{recurringErrors.slice(0, 3).map((summary, index) => { const game = games.find((item) => item.id === summary.gameId)!; return <button type="button" key={`${summary.gameId}-${summary.contextKey}-${summary.errorCode}`} onClick={() => openReview(summary.representativeSessionId, summary.errorCode)}><span>{index + 1}</span><div><small>{game.title} · {summary.contextLabel} · {summary.count}/{summary.attemptedCount}회 · {summary.sessionCount}개 세션</small><b>{summary.label}</b><p>{summary.tip}</p></div><em>{summary.rate}%</em></button>; })}</div> : <div className="home-review-empty"><b>반복 오류가 아직 없습니다.</b><span>게임을 완료하면 오답뿐 아니라 비효율 조작과 확률 판단도 분리해 기록합니다.</span></div>}
+            <div className="home-review-heading"><div><span>틀린 이유 복습</span><h3 id="home-review-title">무엇을 반복해서 틀리는지 확인하세요.</h3><p>{scoredReviewResults.length ? `게임별 가장 최근 비교 문맥에서만 반복 횟수와 오류율을 계산합니다.${reviewableResults.length > scoredReviewResults.length ? ` 무응답 구간이 남은 세션 ${reviewableResults.length - scoredReviewResults.length}개도 문항별로 열 수 있습니다.` : scoredReviewResults.length < 5 ? ' 아직 표본이 적어 약점으로 단정하지 않습니다.' : ''}` : reviewableResults.length ? `${reviewableResults.length}개 세션의 무응답 구간이 복습에 남아 있습니다. 제출 전 놓친 문제부터 확인하세요.` : '이전 기록에는 문항별 데이터가 없습니다. 새 연습부터 자동으로 쌓입니다.'}</p></div><button type="button" onClick={(event) => openReview(event.currentTarget)}>복습 센터 열기 <span>→</span></button></div>
+            {recurringErrors.length > 0 ? <div className="home-review-ranking">{recurringErrors.slice(0, 3).map((summary, index) => { const game = games.find((item) => item.id === summary.gameId)!; return <button type="button" key={`${summary.gameId}-${summary.contextKey}-${summary.errorCode}`} onClick={(event) => openReview(event.currentTarget, summary.representativeSessionId, summary.errorCode)}><span>{index + 1}</span><div><small>{game.title} · {summary.contextLabel} · {summary.count}/{summary.attemptedCount}회 · {summary.sessionCount}개 세션</small><b>{summary.label}</b><p>{summary.tip}</p></div><em>{summary.rate}%</em></button>; })}</div> : <div className="home-review-empty"><b>반복 오류가 아직 없습니다.</b><span>게임을 완료하면 오답뿐 아니라 비효율 조작과 확률 판단도 분리해 기록합니다.</span></div>}
           </section>
           <div className="record-summary"><article><span>저장된 최근 연습</span><b>{results.length}회</b></article><article><span>최근 기록 게임</span><b>{practicedGames.length}<small>/ 9종</small></b></article><article><span>{lastResultModeLabel} 마지막 {resultScoreLabel(lastResult)}</span><b>{formatResultScore(lastResult)}</b></article></div>
           <div className="game-record-grid" aria-label="게임별 기록">
             {practicedGames.map(({ game, latest, mode, comparisonAvailable, comparableSessions, best }) => <article key={game.id} className={`tone-${game.tone}`}>
               <div><span>{game.no}</span><div><small>{game.skill}</small><b>{game.title}</b></div></div>
               <dl aria-label={comparisonAvailable ? `${resultModeLabels[mode ?? 'unknown']}의 동일 설정 안에서 비교한 기록` : '비교할 설정 정보가 없는 이전 기록'}><div><dt>{resultModeLabels[mode ?? 'unknown']} 최근 {resultScoreLabel(latest)}</dt><dd>{formatResultScore(latest)}</dd></div><div><dt>동일 설정 최고</dt><dd>{comparisonAvailable ? `${best}%` : '—'}</dd></div><div><dt>동일 설정 횟수</dt><dd>{comparisonAvailable ? `${comparableSessions.length}회` : '설정 없음'}</dd></div></dl>
-              <div className="game-record-actions">{hasReviewData(latest.review) ? <button type="button" onClick={() => openReview(latest.id)} aria-label={`${game.title} 최근 세션 복습`}>{latest.review?.attempts.length ? '복습' : '통계'}</button> : <span>복습 기록 없음</span>}<button type="button" onPointerEnter={preloadGameStage} onPointerDown={preloadGameStage} onFocus={preloadGameStage} onClick={(event) => openGame(game.id, event.currentTarget)} aria-label={`${game.title} 다시 연습`}>다시 연습 <span aria-hidden="true">→</span></button></div>
+              <div className="game-record-actions">{hasReviewData(latest.review) ? <button type="button" onClick={(event) => openReview(event.currentTarget, latest.id)} aria-label={`${game.title} 최근 세션 복습`}>{latest.review?.attempts.length ? '복습' : '통계'}</button> : <span>복습 기록 없음</span>}<button type="button" onPointerEnter={preloadGameStage} onPointerDown={preloadGameStage} onFocus={preloadGameStage} onClick={(event) => openGame(game.id, event.currentTarget)} aria-label={`${game.title} 다시 연습`}>다시 연습 <span aria-hidden="true">→</span></button></div>
             </article>)}
           </div>
           <details className="history-panel">
             <summary>최근 세션 상세 보기 <span>{recentResults.length}개</span></summary>
-            <div className="record-list">{recentResults.map((result) => { const game = games.find((item) => item.id === result.gameId)!; const modeLabel = resultModeLabels[getResultMode(result)]; return <article key={result.id}><div><span>{game.no}</span><b>{game.title}</b><small>{formatCompletedAt(result.completedAt)} · {modeLabel}</small></div><dl><div><dt>{resultScoreLabel(result)}</dt><dd>{formatResultScore(result)}</dd></div><div><dt>{result.gameId === 'path' ? '경로 연결 중앙시간' : '중앙 반응'}</dt><dd>{result.medianRt ? `${result.medianRt}ms` : '—'}</dd></div><div><dt>{resultErrorLabel(result)}</dt><dd>{result.errors}</dd></div></dl>{hasReviewData(result.review) ? <button type="button" onClick={() => openReview(result.id)}>{result.review?.attempts.length ? '문항별 복습' : '오류 통계'}</button> : <small className="legacy-review-label">복습 데이터 없음</small>}</article>; })}</div>
+            <div className="record-list">{recentResults.map((result) => { const game = games.find((item) => item.id === result.gameId)!; const modeLabel = resultModeLabels[getResultMode(result)]; return <article key={result.id}><div><span>{game.no}</span><b>{game.title}</b><small>{formatCompletedAt(result.completedAt)} · {modeLabel}</small></div><dl><div><dt>{resultScoreLabel(result)}</dt><dd>{formatResultScore(result)}</dd></div><div><dt>{result.gameId === 'path' ? '경로 연결 중앙시간' : '중앙 반응'}</dt><dd>{result.medianRt ? `${result.medianRt}ms` : '—'}</dd></div><div><dt>{resultErrorLabel(result)}</dt><dd>{result.errors}</dd></div></dl>{hasReviewData(result.review) ? <button type="button" onClick={(event) => openReview(event.currentTarget, result.id)}>{result.review?.attempts.length ? '문항별 복습' : '오류 통계'}</button> : <small className="legacy-review-label">복습 데이터 없음</small>}</article>; })}</div>
           </details>
         </> : <div className="records-empty" role={resultsLoaded ? undefined : 'status'}><Image className="records-empty-coach" src="/assets/mori-coach-hero-v2-800.webp" alt="" width={800} height={700} sizes="(max-width: 620px) 66px, 86px" /><div><b>{resultsLoaded ? '첫 기록을 만들어 볼까요?' : '연습 기록을 불러오고 있어요.'}</b><span>{resultsLoaded ? '게임 하나를 끝내면 최근 점수와 자주 틀린 이유를 여기서 확인할 수 있어요.' : '이 브라우저에 저장된 점수와 복습 기록을 확인하는 중입니다.'}</span>{resultsLoaded && <button type="button" onPointerEnter={preloadGameStage} onPointerDown={preloadGameStage} onFocus={preloadGameStage} onClick={(event) => openGame(featuredGame.id, event.currentTarget)}>추천 게임 시작</button>}</div></div>}
       </section>
@@ -959,7 +961,7 @@ export default function Home() {
         <div><b>NINEFLOW LAB</b><span>내 속도로 익히고, 틀린 이유까지 돌아보는 전략게임 연습 도구</span></div>
         <div className="footer-links">
           <button type="button" onClick={() => setGuideGameId(featuredGame.id)}>9개 게임 전략 가이드</button>
-          <button type="button" disabled={!resultsLoaded} onClick={() => openReview()}>내 실수 복습</button>
+          <button type="button" disabled={!resultsLoaded} onClick={(event) => openReview(event.currentTarget)}>내 실수 복습</button>
           <button type="button" onClick={() => setReadinessOpen(true)}>응시 준비센터</button>
           <button type="button" disabled={!resultsLoaded} onPointerEnter={preloadDataManagementDialog} onPointerDown={preloadDataManagementDialog} onFocus={preloadDataManagementDialog} onClick={() => setDataManagementOpen(true)}>기록 백업·복원</button>
           <button type="button" onClick={() => setFeedbackOpen(true)}>의견 보내기</button>
@@ -973,7 +975,7 @@ export default function Home() {
         <a href="#games"><span aria-hidden="true">◇</span><b>게임</b></a>
         <button type="button" onClick={() => setReadinessOpen(true)}><span aria-hidden="true">◎</span><b>준비</b></button>
         <button type="button" onClick={() => setGuideGameId(featuredGame.id)}><span aria-hidden="true">?</span><b>가이드</b></button>
-        <button type="button" disabled={!resultsLoaded} onClick={() => openReview()}><span aria-hidden="true">↺</span><b>복습</b></button>
+        <button type="button" disabled={!resultsLoaded} onClick={(event) => openReview(event.currentTarget)}><span aria-hidden="true">↺</span><b>복습</b></button>
         <a href="#records"><span aria-hidden="true">▥</span><b>기록</b></a>
       </nav>
       {readinessOpen && <ReadinessCenter onClose={() => setReadinessOpen(false)} onChecked={handleReadinessChecked} />}
