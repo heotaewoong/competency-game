@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import { GameThumbnail } from './components/game-thumbnail';
@@ -26,9 +26,28 @@ import { resolveReadinessOverall } from './lib/readiness';
 import { chooseTrainingRecommendation, type RecommendationReason } from './lib/training-recommendation';
 import { AccessibilityBootstrap, ReadinessCenter, READINESS_STORAGE_KEY, captureCurrentReadinessAssessment, parseSavedReadinessSummary, type SavedReadinessSummary } from './components/readiness-center';
 import type { DataManagementActionResult } from './components/data-management-dialog';
+import { lockDocumentScroll } from './lib/scroll-lock';
 
-function StageLoading() {
-  return <div className="stage-backdrop"><div className="stage-loading" role="status" aria-live="polite"><i aria-hidden="true" /><b>게임을 준비하고 있습니다.</b></div></div>;
+function StageLoading({ onClose }: { onClose: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const releaseScrollLock = lockDocumentScroll();
+    dialog.showModal();
+    return () => {
+      if (dialog.open) dialog.close();
+      releaseScrollLock();
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+    };
+  }, []);
+  return <div className="stage-backdrop"><dialog ref={dialogRef} className="stage-loading" aria-labelledby="stage-loading-title" aria-describedby="stage-loading-description" onCancel={(event) => { event.preventDefault(); onClose(); }}>
+    <i aria-hidden="true" />
+    <h2 id="stage-loading-title">게임을 준비하고 있습니다.</h2>
+    <p id="stage-loading-description">아직 게임이 시작되지 않았어요.<br />연결이 느리면 취소하고 다시 시도할 수 있어요.</p>
+    <button type="button" onClick={onClose} onKeyDown={(event) => { if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault(); }}>취소하고 게임 목록으로</button>
+  </dialog></div>;
 }
 
 const loadGameStage = () => import('./components/game-stage');
@@ -40,10 +59,8 @@ const preloadDataManagementDialog = () => {
   if (typeof window !== 'undefined') void loadDataManagementDialog().catch(() => undefined);
 };
 
-const GameStage = dynamic(() => loadGameStage().then((module) => module.GameStage), {
-  ssr: false,
-  loading: StageLoading,
-});
+// The game is rendered only after a client action; keep its cancellable fallback local.
+const GameStage = lazy(() => loadGameStage().then((module) => ({ default: module.GameStage })));
 const StrategyGuideDialog = dynamic(() => import('./components/strategy-guide-dialog').then((module) => module.StrategyGuideDialog), { ssr: false });
 const ReviewDialog = dynamic(() => import('./components/review-dialog').then((module) => module.ReviewDialog), { ssr: false });
 const FeedbackDialog = dynamic(() => import('./components/feedback-dialog').then((module) => module.FeedbackDialog), { ssr: false });
@@ -984,7 +1001,9 @@ export default function Home() {
       {guideGameId && <StrategyGuideDialog initialGameId={guideGameId} onClose={() => setGuideGameId(null)} onStartGame={(gameId) => { setGuideGameId(null); openGame(gameId); }} />}
       {reviewSessionId !== null && <ReviewDialog results={results} initialSessionId={reviewSessionId || undefined} initialErrorCode={reviewErrorCode || undefined} onClose={closeReview} onPracticeGame={(gameId) => { closeReview(); openGame(gameId); }} />}
       {activeGame && (
-        <GameStage key={activeGame} gameId={activeGame} onClose={closeActiveGame} onSwitch={switchActiveGame} onSave={saveResult} onReadinessChecked={handleReadinessChecked} />
+        <Suspense fallback={<StageLoading onClose={closeActiveGame} />}>
+          <GameStage key={activeGame} gameId={activeGame} onClose={closeActiveGame} onSwitch={switchActiveGame} onSave={saveResult} onReadinessChecked={handleReadinessChecked} />
+        </Suspense>
       )}
     </main>
   );

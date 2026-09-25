@@ -335,9 +335,12 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 /* shared game shell */
 .site-shell.is-game-open > :not(.stage-backdrop) { opacity: 0; pointer-events: none; }
 .stage-backdrop { position: fixed; inset: 0; z-index: 1000; overflow: auto; overscroll-behavior: contain; padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); display: grid; place-items: center; background: rgba(8, 14, 27, .78); }
-.stage-loading { min-width: 240px; padding: 24px; display: grid; place-items: center; gap: 12px; border-radius: 16px; color: #31405a; background: #fff; box-shadow: 0 24px 70px rgba(0,0,0,.25); text-align: center; }
+.stage-loading { width: min(360px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); margin: auto; padding: 24px; overflow: auto; display: grid; place-items: center; gap: 12px; border: 0; border-radius: 16px; color: #31405a; background: #fff; box-shadow: 0 24px 70px rgba(0,0,0,.25); text-align: center; }
+.stage-loading::backdrop { background: transparent; }
 .stage-loading i { width: 30px; height: 30px; border: 3px solid #dfe3f6; border-top-color: var(--brand); border-radius: 50%; animation: stage-spin .8s linear infinite; }
-.stage-loading b { font-size: 13px; }
+.stage-loading h2 { margin: 0; font-size: 16px; }
+.stage-loading p { margin: 0; color: #526077; font-size: 12px; line-height: 1.6; }
+.stage-loading button { min-height: 44px; padding: 10px 16px; border: 1px solid var(--line); border-radius: 10px; color: #31405a; background: #fff; font-size: 13px; font-weight: 700; }
 @keyframes stage-spin { to { transform: rotate(360deg); } }
 .stage-panel { position: relative; width: min(1180px, 100%); min-height: min(740px, calc(100dvh - 24px)); max-height: calc(100dvh - 24px); overflow: auto; border-radius: 22px; background: #fff; box-shadow: 0 34px 100px rgba(0, 0, 0, .32); }
 .stage-close { position: absolute; z-index: 4; right: 24px; top: 24px; width: 42px; height: 42px; border: 1px solid var(--line); border-radius: 50%; color: #6f7a8d; background: #fff; font-size: 23px; }
