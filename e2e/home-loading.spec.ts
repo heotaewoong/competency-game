@@ -25,6 +25,7 @@ for (const savedCount of [0, 1]) {
       await expect(page.locator('.header-status')).toHaveAccessibleName('연습 기록 확인 중, 기록으로 이동');
       await expect(page.locator('.header-status b')).toHaveText('—');
       await expect(page.locator('.card-record[aria-busy="true"]')).toHaveCount(9);
+      await expect(page.locator('.game-grid .thumb-scene')).toHaveCount(9);
       await expect(page.locator('.card-record dd').filter({ hasText: /^0회$/ })).toHaveCount(0);
       await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'true');
       await expect(page.locator('#records')).toContainText('연습 기록을 불러오고 있어요.');
@@ -33,8 +34,8 @@ for (const savedCount of [0, 1]) {
       await expect(page.locator('.records-data-button')).toBeDisabled();
       await expect(page.locator('#coach-title')).toHaveText('연습 기록을 확인하고 있어요.');
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
-      await page.screenshot({ path: testInfo.outputPath('loading-home.png') });
-      await page.locator('.records-empty').screenshot({ path: testInfo.outputPath('loading-records.png') });
+      // WebKit's fonts.ready can wait for the scripts held here, so capture DOM now and pixels after release.
+      await testInfo.attach('loading-home.html', { body: await page.content(), contentType: 'text/html' });
     } finally {
       releaseScripts();
     }
@@ -42,6 +43,10 @@ for (const savedCount of [0, 1]) {
     await expect(page.locator('.header-status')).toHaveAccessibleName(`완료한 연습 ${savedCount}회, 기록으로 이동`);
     await expect(page.locator('.hero-primary')).toBeEnabled();
     await expect(page.locator('.records-data-button')).toBeEnabled();
+    // Selective hydration must preserve every server-rendered game preview.
+    const thumbnails = page.locator('.game-grid .thumb-scene');
+    await expect(thumbnails).toHaveCount(9);
+    for (const thumbnail of await thumbnails.all()) await expect(thumbnail).toBeVisible();
     if (savedCount) {
       await expect(page.locator('.record-summary')).toContainText('1회');
       await expect(page.locator('.game-record-grid')).toContainText('80%');
@@ -49,6 +54,8 @@ for (const savedCount of [0, 1]) {
     } else {
       await expect(page.getByText('첫 기록을 만들어 볼까요?', { exact: true })).toBeVisible();
     }
+    await page.screenshot({ path: testInfo.outputPath('ready-home.png') });
+    await page.locator('#records').screenshot({ path: testInfo.outputPath('ready-records.png') });
     await page.locator('.records-data-button').click();
     const backup = page.getByRole('dialog', { name: '내 기록 백업·복원' });
     await expect(backup).toBeVisible();

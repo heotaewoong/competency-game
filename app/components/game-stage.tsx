@@ -584,7 +584,7 @@ function SessionActionConfirmation({ action, onCancel, onConfirm }: { action: Pe
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopImmediatePropagation();
-        onCancelRef.current();
+        if (!event.repeat) onCancelRef.current();
         return;
       }
       if (event.key !== 'Tab') return;
@@ -600,7 +600,7 @@ function SessionActionConfirmation({ action, onCancel, onConfirm }: { action: Pe
 
   return (
     <div className="session-confirm-backdrop" role="presentation">
-      <section ref={dialogRef} className="session-confirm" role="alertdialog" aria-modal="true" aria-labelledby="session-confirm-title" aria-describedby="session-confirm-description">
+      <section ref={dialogRef} className="session-confirm" role="alertdialog" aria-modal="true" aria-labelledby="session-confirm-title" aria-describedby="session-confirm-description" onKeyDown={(event) => { if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault(); }}>
         <span aria-hidden="true">!</span>
         <h2 id="session-confirm-title">{copy.title}</h2>
         <p id="session-confirm-description">{copy.body}</p>
@@ -624,7 +624,7 @@ function VisibilityPauseDialog({ count, onResume }: { count: number; onResume: (
   }, []);
   return (
     <div className="session-confirm-backdrop visibility-pause-backdrop" role="presentation">
-      <section className="session-confirm visibility-pause-dialog" role="alertdialog" aria-modal="true" aria-labelledby="visibility-pause-title" aria-describedby="visibility-pause-description">
+      <section className="session-confirm visibility-pause-dialog" role="alertdialog" aria-modal="true" aria-labelledby="visibility-pause-title" aria-describedby="visibility-pause-description" onKeyDown={(event) => { if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault(); }}>
         <span aria-hidden="true">Ⅱ</span>
         <h2 id="visibility-pause-title">연습을 잠시 멈췄습니다</h2>
         <p id="visibility-pause-description">다른 탭에 있던 시간은 제한시간과 반응시간에서 제외했습니다. 화면과 조작 위치를 다시 확인한 뒤 이어가세요.</p>
@@ -786,7 +786,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
     const focusable = () => Array.from(panelRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex]:not([tabindex="-1"])') ?? []).filter((element) => element.offsetParent !== null && !element.closest('[inert]'));
     const onKey = (event: KeyboardEvent) => {
       if (overlayOpenRef.current) return;
-      if (event.key === 'Escape') { requestClose(); return; }
+      if (event.key === 'Escape') { if (!event.repeat) requestClose(); return; }
       if (event.key !== 'Tab') return;
       const items = focusable();
       if (!items.length) { event.preventDefault(); panelRef.current?.focus(); return; }

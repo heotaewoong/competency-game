@@ -872,7 +872,7 @@ export default function Home() {
           <article className="continue-card" aria-busy={!resultsLoaded} aria-label={resultsLoaded ? `${featuredGame.title} 추천 요약` : '연습 추천 준비 중'}>
             <div className="continue-head"><span>{recommendationLabel}</span><em>{featuredGame.no}</em></div>
             <div className="continue-body">
-              <div className="continue-visual"><GameThumbnail gameId={featuredGame.id} /></div>
+              <div className="continue-visual"><Suspense fallback={null}><GameThumbnail gameId={featuredGame.id} /></Suspense></div>
               <div>
                 <small>{featuredGame.skill} · 난이도 {featuredGame.difficulty}{featuredResult ? ` · ${featuredResultModeLabel}` : ''}</small>
                 <h2>{featuredGame.title}</h2>
@@ -929,7 +929,7 @@ export default function Home() {
                     <span>{game.no} · 전략게임</span>
                     <div className="card-badges"><span className="perceived-rank">후기 체감 {perceivedDifficultyRank.get(game.id)}위</span><em className={`difficulty-badge difficulty-${game.difficulty === '상' ? 'high' : game.difficulty === '중' ? 'mid' : 'low'}`}>2024 자료 {game.difficulty}</em></div>
                   </div>
-                  <GameThumbnail gameId={game.id} />
+                  <Suspense fallback={null}><GameThumbnail gameId={game.id} /></Suspense>
                   <div className="card-copy">
                     <span>{game.skill}</span>
                     <h3>{game.title}</h3>
