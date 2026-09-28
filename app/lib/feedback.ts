@@ -5,6 +5,19 @@ export const FEEDBACK_MESSAGE_MIN = 10;
 export const FEEDBACK_MESSAGE_MAX = 1000;
 export const FEEDBACK_ISSUE_URL_MAX_LENGTH = 6500;
 
+export type PublicFeedbackEntry = {
+  id: string;
+  title: string;
+  summary: string;
+  status: '검토 중' | '개선 중' | '반영 완료' | '보류';
+  updatedAt: string;
+  response: string;
+};
+
+// Only manually approved, de-identified summaries belong here. Never import raw issues.
+// Mark complete only after the change is verified at the public site.
+export const publicFeedbackEntries: readonly PublicFeedbackEntry[] = [];
+
 export type FeedbackCategory = 'bug' | 'rule' | 'difficulty' | 'feature' | 'other';
 
 export const feedbackCategories: ReadonlyArray<{ id: FeedbackCategory; label: string }> = [

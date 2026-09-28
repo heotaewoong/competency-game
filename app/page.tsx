@@ -27,6 +27,7 @@ import { chooseTrainingRecommendation, type RecommendationReason } from './lib/t
 import { AccessibilityBootstrap, ReadinessCenter, READINESS_STORAGE_KEY, captureCurrentReadinessAssessment, parseSavedReadinessSummary, type SavedReadinessSummary } from './components/readiness-center';
 import type { DataManagementActionResult } from './components/data-management-dialog';
 import { lockDocumentScroll } from './lib/scroll-lock';
+import { publicFeedbackEntries } from './lib/feedback';
 
 function StageLoading({ onClose }: { onClose: () => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -662,6 +663,11 @@ export default function Home() {
     setReviewErrorCode(null);
   }
 
+  function openFeedback(opener: HTMLButtonElement) {
+    opener.focus({ preventScroll: true });
+    setFeedbackOpen(true);
+  }
+
   const closeActiveGame = useCallback(() => setActiveGame(null), []);
   const openGame = useCallback((gameId: GameId, opener?: HTMLButtonElement) => {
     // Safari pointer clicks do not focus buttons; preserve the actual home trigger.
@@ -828,7 +834,7 @@ export default function Home() {
           <span className="brand-glyph">N</span>
           <span>NINEFLOW <em>LAB</em></span>
         </a>
-        <nav aria-label="주요 메뉴"><button type="button" onClick={() => setReadinessOpen(true)}>준비센터</button><a href="#games">게임</a><button type="button" onClick={() => setGuideGameId(featuredGame.id)}>전략 가이드</button><button type="button" disabled={!resultsLoaded} onClick={(event) => openReview(event.currentTarget)}>복습</button><a href="#records">내 기록</a><button type="button" onClick={() => setFeedbackOpen(true)}>의견</button></nav>
+        <nav aria-label="주요 메뉴"><button type="button" onClick={() => setReadinessOpen(true)}>준비센터</button><a href="#games">게임</a><button type="button" onClick={() => setGuideGameId(featuredGame.id)}>전략 가이드</button><button type="button" disabled={!resultsLoaded} onClick={(event) => openReview(event.currentTarget)}>복습</button><a href="#records">내 기록</a><a href="#feedback">개선 현황</a></nav>
         <a className="header-status" href="#records" aria-label={resultsLoaded ? `완료한 연습 ${results.length}회, 기록으로 이동` : '연습 기록 확인 중, 기록으로 이동'}>
           <span>연습</span><b>{resultsLoaded ? results.length : '—'}</b>
         </a>
@@ -974,6 +980,20 @@ export default function Home() {
         </> : <div className="records-empty" role={resultsLoaded ? undefined : 'status'}><Image className="records-empty-coach" src="/assets/mori-coach-hero-v2-800.webp" alt="" width={800} height={700} sizes="(max-width: 620px) 66px, 86px" /><div><b>{resultsLoaded ? '첫 기록을 만들어 볼까요?' : '연습 기록을 불러오고 있어요.'}</b><span>{resultsLoaded ? '게임 하나를 끝내면 최근 점수와 자주 틀린 이유를 여기서 확인할 수 있어요.' : '이 브라우저에 저장된 점수와 복습 기록을 확인하는 중입니다.'}</span>{resultsLoaded && <button type="button" onPointerEnter={preloadGameStage} onPointerDown={preloadGameStage} onFocus={preloadGameStage} onClick={(event) => openGame(featuredGame.id, event.currentTarget)}>추천 게임 시작</button>}</div></div>}
       </section>
 
+      <section className="public-feedback-section" id="feedback" aria-labelledby="public-feedback-title">
+        <div className="section-heading"><div><span>함께 개선해요</span><h2 id="public-feedback-title">개선 의견과 처리 현황</h2></div><p>공개할 의견만 선별해 개인정보를 제외한 요약과 처리 상태를 안내합니다.</p></div>
+        {publicFeedbackEntries.length > 0 ? <ul className="public-feedback-list">
+          {publicFeedbackEntries.map((entry) => <li key={entry.id}>
+            <article>
+              <div className="public-feedback-meta"><strong>{entry.status}</strong><span>최근 안내 <time dateTime={entry.updatedAt}>{entry.updatedAt}</time></span></div>
+              <h3>{entry.title}</h3><p>{entry.summary}</p>
+              <div className="public-feedback-response"><b>운영자 답변</b><p>{entry.response}</p></div>
+            </article>
+          </li>)}
+        </ul> : <div className="public-feedback-empty"><h3>아직 홈페이지에 공개한 개선 의견이 없습니다.</h3><p>게임을 하며 불편했던 점이나 바라는 개선을 알려주세요. 검토 후 공개할 내용을 이곳에 안내합니다.</p></div>}
+        <div className="public-feedback-actions"><button type="button" className="feedback-submit" onClick={(event) => openFeedback(event.currentTarget)}>개선 의견 보내기</button><p>제출은 GitHub에서 최종 확인합니다. 이 목록은 선별한 내용을 업데이트할 때 반영되며, 실시간 접수함은 아닙니다.</p></div>
+      </section>
+
       <footer>
         <div><b>NINEFLOW LAB</b><span>내 속도로 익히고, 틀린 이유까지 돌아보는 전략게임 연습 도구</span></div>
         <div className="footer-links">
@@ -981,13 +1001,14 @@ export default function Home() {
           <button type="button" disabled={!resultsLoaded} onClick={(event) => openReview(event.currentTarget)}>내 실수 복습</button>
           <button type="button" onClick={() => setReadinessOpen(true)}>응시 준비센터</button>
           <button type="button" disabled={!resultsLoaded} onPointerEnter={preloadDataManagementDialog} onPointerDown={preloadDataManagementDialog} onFocus={preloadDataManagementDialog} onClick={() => setDataManagementOpen(true)}>기록 백업·복원</button>
-          <button type="button" onClick={() => setFeedbackOpen(true)}>의견 보내기</button>
+          <a href="#feedback">개선 현황</a>
+          <button type="button" onClick={(event) => openFeedback(event.currentTarget)}>의견 보내기</button>
           <a href="https://www.jobda.im/acc/tutorial" target="_blank" rel="noreferrer">JOBDA 구 역량검사 연습 ↗</a>
           <a href="https://github.com/twitter/twemoji" target="_blank" rel="noreferrer">손동작 이미지: Twemoji · CC BY 4.0</a>
         </div>
       </footer>
 
-      <button type="button" className="feedback-fab" onClick={() => setFeedbackOpen(true)}><span aria-hidden="true">✦</span> 의견 보내기</button>
+      <button type="button" className="feedback-fab" onClick={(event) => openFeedback(event.currentTarget)}><span aria-hidden="true">✦</span> 의견 보내기</button>
       <nav className="mobile-dock" aria-label="빠른 메뉴">
         <a href="#games"><span aria-hidden="true">◇</span><b>게임</b></a>
         <button type="button" onClick={() => setReadinessOpen(true)}><span aria-hidden="true">◎</span><b>준비</b></button>
