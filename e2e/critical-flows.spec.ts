@@ -159,7 +159,8 @@ test('1,000자 한글 의견은 본문 없는 이슈 URL과 전체 복사 경로
   });
   await page.goto('/');
 
-  await page.locator('.topbar nav').getByRole('button', { name: '의견' }).click();
+  await page.locator('.topbar nav').getByRole('link', { name: '개선 현황' }).click();
+  await page.locator('#feedback').getByRole('button', { name: '개선 의견 보내기' }).click();
   const dialog = page.getByRole('dialog', { name: '의견 보내기' });
   await dialog.locator('textarea').fill('가'.repeat(1_000));
   await expect(dialog.getByText('1000 / 1000')).toBeVisible();

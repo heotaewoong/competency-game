@@ -42,6 +42,11 @@ export function FeedbackDialog({ onClose, initialGameId = 'site', sessionMode, n
     siblings.forEach((element) => { element.inert = true; element.setAttribute('aria-hidden', 'true'); });
     const focusFrame = window.requestAnimationFrame(() => noticeRef.current?.focus());
     const onKey = (event: KeyboardEvent) => {
+      const action = event.target instanceof Element ? event.target.closest('button, a[href]') : null;
+      if (event.repeat && event.key === 'Enter' && action && dialogRef.current?.contains(action)) {
+        event.preventDefault();
+        return;
+      }
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -86,7 +91,8 @@ export function FeedbackDialog({ onClose, initialGameId = 'site', sessionMode, n
     const delta = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1;
     const next = Math.min(5, Math.max(1, value + delta));
     setRating(next);
-    window.requestAnimationFrame(() => dialogRef.current?.querySelector<HTMLInputElement>(`input[name="feedback-rating"][value="${next}"]`)?.focus());
+    // All choices already exist; delayed focus can steal the user's next input.
+    dialogRef.current?.querySelector<HTMLInputElement>(`input[name="feedback-rating"][value="${next}"]`)?.focus();
   }
 
   async function copyFeedback() {
@@ -115,7 +121,7 @@ export function FeedbackDialog({ onClose, initialGameId = 'site', sessionMode, n
     const issueUrl = new URL(buildFeedbackIssueUrl(input));
     const copyText = `${issueUrl.searchParams.get('title')}\n\n${buildFeedbackIssueText(input)}`;
     void navigator.clipboard.writeText(copyText).then(() => {
-      setStatus('긴 의견 전체를 복사했습니다. 열린 GitHub 이슈 본문에 붙여넣어 주세요. 새 창이 보이지 않으면 공개 의견 모아보기를 이용하세요.');
+      setStatus('긴 의견 전체를 복사했습니다. 열린 GitHub 이슈 본문에 붙여넣어 주세요. 새 창이 보이지 않으면 GitHub 원문 목록을 이용하세요.');
     }).catch(() => {
       setStatus('GitHub 이슈 창은 열었지만 자동 복사가 차단됐습니다. 입력한 의견을 직접 복사해 본문에 붙여넣어 주세요.');
       messageRef.current?.select();
@@ -146,7 +152,7 @@ export function FeedbackDialog({ onClose, initialGameId = 'site', sessionMode, n
         <p className="feedback-status" aria-live="polite">{status || (isValid ? directIssueUrlSafe ? 'GitHub에서 내용을 한 번 더 확인한 뒤 최종 제출합니다.' : '긴 의견은 전체 내용을 복사한 뒤 안전한 빈 GitHub 이슈 창을 엽니다.' : `최소 ${FEEDBACK_MESSAGE_MIN}자 이상 입력해 주세요.`)}</p>
         <div className="feedback-actions">
           <button type="button" className="feedback-copy" onClick={copyFeedback}>내용 복사</button>
-          <a href={FEEDBACK_ISSUES_URL} target="_blank" rel="noreferrer">공개 의견 모아보기 ↗</a>
+          <a href={FEEDBACK_ISSUES_URL} target="_blank" rel="noreferrer">GitHub 원문 목록 ↗</a>
           <button type="button" className="feedback-submit" disabled={!isValid} onClick={openIssue}>{directIssueUrlSafe ? 'GitHub에서 검토 후 제출' : '복사 후 GitHub 열기'} <span>→</span></button>
         </div>
         <small className="feedback-footnote">GitHub 로그인이 필요합니다. 계정이 없거나 제출하지 않으려면 ‘내용 복사’를 이용하세요.</small>

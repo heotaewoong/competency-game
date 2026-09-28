@@ -1,6 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { publicFeedbackEntries } from './feedback.ts';
 import { buildFeedbackIssuePasteUrl, buildFeedbackIssueText, buildFeedbackIssueUrl, feedbackIssueUrlIsSafe, FEEDBACK_ISSUE_URL_MAX_LENGTH, FEEDBACK_MESSAGE_MAX } from './feedback.ts';
+
+test('선별 공개 의견은 중복 없이 공개 전용 필드와 처리 상태만 포함한다', () => {
+  assert.equal(new Set(publicFeedbackEntries.map((entry) => entry.id)).size, publicFeedbackEntries.length);
+  for (const entry of publicFeedbackEntries) {
+    assert.deepEqual(Object.keys(entry).sort(), ['id', 'response', 'status', 'summary', 'title', 'updatedAt']);
+    for (const text of Object.values(entry)) assert.ok(text.trim().length > 0);
+    assert.ok(['검토 중', '개선 중', '반영 완료', '보류'].includes(entry.status));
+    assert.match(entry.updatedAt, /^\d{4}-\d{2}-\d{2}$/);
+    assert.equal(new Date(entry.updatedAt).toISOString().slice(0, 10), entry.updatedAt);
+  }
+});
 
 test('공개 이슈 URL에 유형·게임·의견을 안전하게 인코딩한다', () => {
   const url = new URL(buildFeedbackIssueUrl({ category: 'rule', gameId: 'nback', message: '묶음 선택 규칙을 다시 확인해 주세요.' }));
