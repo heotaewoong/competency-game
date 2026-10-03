@@ -70,3 +70,41 @@ for (const entry of ['records', 'footer'] as const) {
     });
   }
 }
+
+test('예약된 창 첫 초점이 사용자가 옮긴 백업 버튼 초점을 뺏지 않는다', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('nineflow-practice-results-v2', JSON.stringify([{
+      id: 'delayed-dialog-focus', gameId: 'rps', completedAt: '2026-09-09T12:00:00.000Z',
+      accuracy: 80, medianRt: 720, stability: 74, errors: 2,
+    }]));
+  });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  await page.evaluate(() => {
+    const nativeRequest = window.requestAnimationFrame;
+    const nativeCancel = window.cancelAnimationFrame;
+    const pending = new Map<number, FrameRequestCallback>();
+    let nextHandle = -1;
+    // Hold only the opening frame, then release it after the user moves focus.
+    window.requestAnimationFrame = (callback) => { const id = nextHandle--; pending.set(id, callback); return id; };
+    window.cancelAnimationFrame = (id) => { if (!pending.delete(id)) nativeCancel.call(window, id); };
+    (window as Window & { __releaseModalFrame?: () => void }).__releaseModalFrame = () => {
+      window.requestAnimationFrame = nativeRequest;
+      window.cancelAnimationFrame = nativeCancel;
+      for (const callback of pending.values()) callback(performance.now());
+      pending.clear();
+    };
+  });
+  const opener = page.locator('.records-data-button');
+  await opener.press('Enter');
+  const dialog = page.getByRole('dialog', { name: '내 기록 백업·복원' });
+  await expect(dialog.getByRole('button', { name: '내 기록 백업·복원 닫기' })).toBeFocused();
+  const trigger = dialog.getByRole('button', { name: 'JSON 백업 받기', exact: true });
+  await trigger.focus();
+  await expect(trigger).toBeFocused();
+  await page.evaluate(() => (window as Window & { __releaseModalFrame?: () => void }).__releaseModalFrame!());
+  await expect(trigger).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+});

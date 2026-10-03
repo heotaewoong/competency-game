@@ -89,9 +89,9 @@ export function DataManagementDialog({
     if (!dialog) return;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (!dialog.open) dialog.showModal();
-    const focusFrame = window.requestAnimationFrame(() => closeRef.current?.focus());
+    // The close button already exists; delayed focus can steal the user's next input.
+    closeRef.current?.focus();
     return () => {
-      window.cancelAnimationFrame(focusFrame);
       if (dialog.open) dialog.close();
       if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
     };

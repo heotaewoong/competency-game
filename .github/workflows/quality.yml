@@ -41,7 +41,7 @@ jobs:
         run: npm test
 
       - name: Run browser regressions
-        run: npm run test:e2e
+        run: npm run test:e2e -- --fail-on-flaky-tests
 
       - name: Upload browser failure evidence
         if: failure()
