@@ -69,8 +69,8 @@ function readStoredAccessibilityPreferences() {
 
 function persistAccessibilityPreferences(preferences: AccessibilityPreferences) {
   applyAccessibilityPreferences(preferences);
-  try { window.localStorage.setItem(ACCESSIBILITY_STORAGE_KEY, serializeAccessibilityPreferences(preferences)); }
-  catch { /* 저장소가 막혀도 현재 탭에는 즉시 적용한다. */ }
+  try { window.localStorage.setItem(ACCESSIBILITY_STORAGE_KEY, serializeAccessibilityPreferences(preferences)); return true; }
+  catch { return false; }
 }
 
 export function currentAccessibilityProfile() {
@@ -146,6 +146,7 @@ export function ReadinessCenter({
   const [assessment, setAssessment] = useState<ReadinessAssessment>(() => captureCurrentReadinessAssessment());
   const [assetStatus, setAssetStatus] = useState<'checking' | 'ready' | 'review'>('checking');
   const [preferences, setPreferences] = useState<AccessibilityPreferences>(readStoredAccessibilityPreferences);
+  const [preferenceSaveFailed, setPreferenceSaveFailed] = useState(false);
   const [pointerConfirmed, setPointerConfirmed] = useState(false);
   const [keyboardConfirmed, setKeyboardConfirmed] = useState(false);
   const [waitingForKey, setWaitingForKey] = useState(false);
@@ -184,9 +185,8 @@ export function ReadinessCenter({
     if (!dialog) return;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (!dialog.open) dialog.showModal();
-    const focusFrame = window.requestAnimationFrame(() => closeRef.current?.focus());
+    closeRef.current?.focus({ preventScroll: true });
     return () => {
-      window.cancelAnimationFrame(focusFrame);
       runIdRef.current += 1;
       if (dialog.open) dialog.close();
       if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
@@ -219,7 +219,7 @@ export function ReadinessCenter({
   function updatePreference<Key extends keyof AccessibilityPreferences>(key: Key, value: AccessibilityPreferences[Key]) {
     const next = { ...preferences, [key]: value };
     setPreferences(next);
-    persistAccessibilityPreferences(next);
+    setPreferenceSaveFailed(!persistAccessibilityPreferences(next));
     if (key === 'motion') setAssessment(captureCurrentReadinessAssessment());
   }
 
@@ -245,9 +245,9 @@ export function ReadinessCenter({
       </header>
 
       <div className="readiness-scroll">
-        <section className={`readiness-summary is-${displayedOverall}`} aria-live="polite">
-          <span aria-hidden="true">{displayedOverall === 'ready' ? '✓' : displayedOverall === 'review' ? '!' : '×'}</span>
-          <div><small>자동 점검 결과</small><b>{assetStatus === 'checking' ? '환경을 확인하고 있습니다…' : readinessLabels[displayedOverall]}</b><p>{displayedOverall === 'ready' ? '필수 환경이 확인되었습니다. 아래 직접 입력 확인까지 마치면 더 안전합니다.' : displayedOverall === 'review' ? '진행할 수 있지만 아래 안내를 확인한 뒤 시작하세요.' : '차단 항목을 해결한 뒤 다시 점검해 주세요.'}</p></div>
+        <section className={`readiness-summary is-${assetStatus === 'checking' ? 'checking' : displayedOverall}`} aria-live="polite" aria-busy={assetStatus === 'checking'}>
+          <span aria-hidden="true">{assetStatus === 'checking' ? '…' : displayedOverall === 'ready' ? '✓' : displayedOverall === 'review' ? '!' : '×'}</span>
+          <div><small>자동 점검 결과</small><b>{assetStatus === 'checking' ? '환경을 확인하고 있습니다…' : readinessLabels[displayedOverall]}</b><p>{assetStatus === 'checking' ? '이미지와 브라우저 환경을 확인하는 중입니다. 점검이 끝나면 결과를 알려드립니다.' : displayedOverall === 'ready' ? '필수 환경이 확인되었습니다. 아래 직접 입력 확인까지 마치면 더 안전합니다.' : displayedOverall === 'review' ? '진행할 수 있지만 아래 안내를 확인한 뒤 시작하세요.' : '차단 항목을 해결한 뒤 다시 점검해 주세요.'}</p></div>
           <button type="button" onClick={() => void runCheck()} disabled={assetStatus === 'checking'}>{assetStatus === 'checking' ? '점검 중' : '다시 점검'}</button>
         </section>
 
@@ -269,15 +269,16 @@ export function ReadinessCenter({
         </section>
 
         <section className="readiness-accessibility" aria-labelledby="accessibility-title">
-          <div className="readiness-section-heading"><div><span>03</span><b id="accessibility-title">보기·움직임 설정</b></div><small>현재 브라우저에 저장됩니다</small></div>
+          <div className="readiness-section-heading"><div><span>03</span><b id="accessibility-title">보기·움직임 설정</b></div><small>{preferenceSaveFailed ? '저장하지 못했습니다' : '변경 시 이 브라우저에 자동 저장'}</small></div>
           <fieldset><legend>명암</legend><div><button type="button" aria-pressed={preferences.contrast === 'standard'} onClick={() => updatePreference('contrast', 'standard')}>기본 명암</button><button type="button" aria-pressed={preferences.contrast === 'high'} onClick={() => updatePreference('contrast', 'high')}>고대비</button></div></fieldset>
           <fieldset><legend>텍스트</legend><div><button type="button" aria-pressed={preferences.textScale === 'standard'} onClick={() => updatePreference('textScale', 'standard')}>기본 크기</button><button type="button" aria-pressed={preferences.textScale === 'large'} onClick={() => updatePreference('textScale', 'large')}>큰 글자</button></div></fieldset>
           <fieldset><legend>움직임</legend><div><button type="button" aria-pressed={preferences.motion === 'system'} onClick={() => updatePreference('motion', 'system')}>기기 설정</button><button type="button" aria-pressed={preferences.motion === 'reduce'} onClick={() => updatePreference('motion', 'reduce')}>움직임 줄이기</button></div></fieldset>
+          {preferenceSaveFailed && <p role="status">설정을 저장하지 못해 현재 화면에만 적용했습니다. 새로고침하면 이전 설정으로 돌아갑니다. 브라우저의 저장 공간·권한을 확인한 뒤 원하는 설정을 다시 눌러 주세요.</p>}
           <p>접근성 설정은 이 연습 도구의 표시 방식만 바꿉니다. 실제 평가의 편의지원이나 대체 절차는 응시 기관에 별도로 확인하세요.</p>
         </section>
       </div>
 
-      <footer><span>{assetStatus === 'checking' || !checkedAt ? '자동 점검을 마치는 중입니다.' : `${readinessLabels[displayedOverall]} · ${formatCheckedAt(checkedAt)}`}</span><button type="button" onClick={onClose}>설정 저장하고 닫기</button></footer>
+      <footer><span>{assetStatus === 'checking' || !checkedAt ? '자동 점검을 마치는 중입니다.' : `${readinessLabels[displayedOverall]} · ${formatCheckedAt(checkedAt)}`}</span><button type="button" onClick={onClose}>{preferenceSaveFailed ? '현재 설정으로 닫기' : '설정 저장하고 닫기'}</button></footer>
     </dialog>
   );
 }
