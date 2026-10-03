@@ -180,7 +180,11 @@ export function DataManagementDialog({
   }
 
   return (
-    <dialog ref={dialogRef} className="data-dialog" aria-labelledby="data-dialog-title" onCancel={(event) => { event.preventDefault(); onClose(); }}>
+    <dialog ref={dialogRef} className="data-dialog" aria-labelledby="data-dialog-title"
+      onKeyDown={(event) => {
+        if (event.repeat && event.key === 'Enter' && event.target instanceof Element && event.target.closest('button')) event.preventDefault();
+      }}
+      onCancel={(event) => { event.preventDefault(); onClose(); }}>
       <header><div><span>LOCAL DATA</span><h2 id="data-dialog-title">내 기록 백업·복원</h2><p>로그인 없이 브라우저에 저장된 연습 기록을 직접 관리합니다.</p></div><button ref={closeRef} type="button" aria-label="내 기록 백업·복원 닫기" onClick={onClose}>×</button></header>
       <div className="data-dialog-scroll">
         <aside className="data-privacy-note"><span aria-hidden="true">i</span><div><b>서버로 전송하지 않습니다.</b><p>내보내기와 가져오기는 이 기기 안에서 처리됩니다. 브라우저 데이터 삭제 전에는 JSON 백업을 받아두세요.</p></div></aside>
