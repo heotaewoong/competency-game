@@ -1,5 +1,19 @@
 import { expect, test } from '@playwright/test';
 
+test('첫 화면은 Tailwind 빌드 컴파일러를 내려받지 않는다', async ({ page }) => {
+  const scripts: import('@playwright/test').Response[] = [];
+  page.on('response', (response) => {
+    if (new URL(response.url()).pathname.startsWith('/_next/static/') && response.request().resourceType() === 'script') scripts.push(response);
+  });
+  await page.goto('/');
+  expect(scripts.length).toBeGreaterThan(0);
+  for (const script of scripts) {
+    const path = new URL(script.url()).pathname;
+    expect(script.ok(), path).toBe(true);
+    expect((await script.text()).includes('__unstable__loadDesignSystem'), path).toBe(false);
+  }
+});
+
 for (const savedCount of [0, 1]) {
   test(`기록 ${savedCount}개: 느린 첫 로딩에서는 빈 기록으로 단정하지 않고 복원 후 표시한다`, async ({ page }, testInfo) => {
     await page.setViewportSize(savedCount ? { width: 390, height: 844 } : { width: 1280, height: 800 });
