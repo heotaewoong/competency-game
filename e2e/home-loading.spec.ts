@@ -64,6 +64,27 @@ for (const savedCount of [0, 1]) {
   });
 }
 
+test('기본 스크롤로 이동한 백업 버튼이 고정 메뉴에 가려지지 않는다', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  const trigger = page.locator('.records-data-button');
+  await trigger.evaluate((button) => button.scrollIntoView({ block: 'start', behavior: 'instant' }));
+  const position = await trigger.evaluate((button) => {
+    const rect = button.getBoundingClientRect();
+    const header = document.querySelector('.topbar')!.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    return { top: rect.top, headerBottom: header.bottom, hitIsButton: hit === button || button.contains(hit) };
+  });
+  expect(position.top).toBeGreaterThanOrEqual(position.headerBottom);
+  expect(position.hitIsButton).toBe(true);
+  await trigger.click();
+  const dialog = page.getByRole('dialog', { name: '내 기록 백업·복원' });
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});
+
 test('저장소 접근이 차단돼도 기록 로딩이 끝나고 게임 설정을 열 수 있다', async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('Storage blocked', 'SecurityError'); } });
