@@ -668,6 +668,11 @@ export default function Home() {
     setFeedbackOpen(true);
   }
 
+  function openReadiness(opener: HTMLButtonElement) {
+    opener.focus({ preventScroll: true });
+    setReadinessOpen(true);
+  }
+
   const closeActiveGame = useCallback(() => setActiveGame(null), []);
   const openGame = useCallback((gameId: GameId, opener?: HTMLButtonElement) => {
     // Safari pointer clicks do not focus buttons; preserve the actual home trigger.
@@ -834,7 +839,7 @@ export default function Home() {
           <span className="brand-glyph">N</span>
           <span>NINEFLOW <em>LAB</em></span>
         </a>
-        <nav aria-label="주요 메뉴"><button type="button" onClick={() => setReadinessOpen(true)}>준비센터</button><a href="#games">게임</a><button type="button" onClick={() => setGuideGameId(featuredGame.id)}>전략 가이드</button><button type="button" disabled={!resultsLoaded} onClick={(event) => openReview(event.currentTarget)}>복습</button><a href="#records">내 기록</a><a href="#feedback">개선 현황</a></nav>
+        <nav aria-label="주요 메뉴"><button type="button" onClick={(event) => openReadiness(event.currentTarget)}>준비센터</button><a href="#games">게임</a><button type="button" onClick={() => setGuideGameId(featuredGame.id)}>전략 가이드</button><button type="button" disabled={!resultsLoaded} onClick={(event) => openReview(event.currentTarget)}>복습</button><a href="#records">내 기록</a><a href="#feedback">개선 현황</a></nav>
         <a className="header-status" href="#records" aria-label={resultsLoaded ? `완료한 연습 ${results.length}회, 기록으로 이동` : '연습 기록 확인 중, 기록으로 이동'}>
           <span>연습</span><b>{resultsLoaded ? results.length : '—'}</b>
         </a>
@@ -899,7 +904,7 @@ export default function Home() {
         <div className="readiness-banner-mark" aria-hidden="true">{readinessSummary?.overall === 'ready' ? '✓' : readinessSummary?.overall === 'blocked' ? '!' : '◎'}</div>
         <div className="readiness-banner-copy"><span>10초 응시 준비센터</span><h2 id="readiness-banner-title">화면·입력·기록 저장을 시작 전에 확인하세요.</h2><p>핵심 리소스를 미리 불러오고 클릭·키보드를 직접 시험한 뒤, 고대비·큰 글자·움직임 줄이기도 한곳에서 설정할 수 있습니다.</p></div>
         <dl aria-label="준비센터 점검 항목"><div><dt>자동 점검</dt><dd>화면·온라인 신호·저장</dd></div><div><dt>직접 확인</dt><dd>클릭·터치·키보드</dd></div><div><dt>보기 설정</dt><dd>명암·글자·모션</dd></div></dl>
-        <div className="readiness-banner-action"><small>{readinessSummary ? `${readinessSummary.overall === 'ready' ? '준비 완료' : readinessSummary.overall === 'review' ? '확인 필요' : '환경 조정 필요'} · ${formatCompletedAt(readinessSummary.checkedAt)}` : '아직 이 브라우저를 점검하지 않았습니다.'}</small><button type="button" onClick={() => setReadinessOpen(true)}>{readinessSummary ? '다시 점검' : '준비 점검 시작'} <span aria-hidden="true">→</span></button></div>
+        <div className="readiness-banner-action"><small>{readinessSummary ? `${readinessSummary.overall === 'ready' ? '준비 완료' : readinessSummary.overall === 'review' ? '확인 필요' : '환경 조정 필요'} · ${formatCompletedAt(readinessSummary.checkedAt)}` : '아직 이 브라우저를 점검하지 않았습니다.'}</small><button type="button" onClick={(event) => openReadiness(event.currentTarget)}>{readinessSummary ? '다시 점검' : '준비 점검 시작'} <span aria-hidden="true">→</span></button></div>
       </section>
 
       <section className="game-section" id="games" aria-labelledby="games-title">
@@ -999,7 +1004,7 @@ export default function Home() {
         <div className="footer-links">
           <button type="button" onClick={() => setGuideGameId(featuredGame.id)}>9개 게임 전략 가이드</button>
           <button type="button" disabled={!resultsLoaded} onClick={(event) => openReview(event.currentTarget)}>내 실수 복습</button>
-          <button type="button" onClick={() => setReadinessOpen(true)}>응시 준비센터</button>
+          <button type="button" onClick={(event) => openReadiness(event.currentTarget)}>응시 준비센터</button>
           <button type="button" disabled={!resultsLoaded} onPointerEnter={preloadDataManagementDialog} onPointerDown={preloadDataManagementDialog} onFocus={preloadDataManagementDialog} onClick={() => setDataManagementOpen(true)}>기록 백업·복원</button>
           <a href="#feedback">개선 현황</a>
           <button type="button" onClick={(event) => openFeedback(event.currentTarget)}>의견 보내기</button>
@@ -1011,7 +1016,7 @@ export default function Home() {
       <button type="button" className="feedback-fab" onClick={(event) => openFeedback(event.currentTarget)}><span aria-hidden="true">✦</span> 의견 보내기</button>
       <nav className="mobile-dock" aria-label="빠른 메뉴">
         <a href="#games"><span aria-hidden="true">◇</span><b>게임</b></a>
-        <button type="button" onClick={() => setReadinessOpen(true)}><span aria-hidden="true">◎</span><b>준비</b></button>
+        <button type="button" onClick={(event) => openReadiness(event.currentTarget)}><span aria-hidden="true">◎</span><b>준비</b></button>
         <button type="button" onClick={() => setGuideGameId(featuredGame.id)}><span aria-hidden="true">?</span><b>가이드</b></button>
         <button type="button" disabled={!resultsLoaded} onClick={(event) => openReview(event.currentTarget)}><span aria-hidden="true">↺</span><b>복습</b></button>
         <a href="#records"><span aria-hidden="true">▥</span><b>기록</b></a>

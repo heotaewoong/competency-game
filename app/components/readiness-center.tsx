@@ -69,8 +69,20 @@ function readStoredAccessibilityPreferences() {
 
 function persistAccessibilityPreferences(preferences: AccessibilityPreferences) {
   applyAccessibilityPreferences(preferences);
-  try { window.localStorage.setItem(ACCESSIBILITY_STORAGE_KEY, serializeAccessibilityPreferences(preferences)); return true; }
-  catch { return false; }
+  const serialized = serializeAccessibilityPreferences(preferences);
+  try {
+    window.localStorage.setItem(ACCESSIBILITY_STORAGE_KEY, serialized);
+    delete document.documentElement.dataset.unsavedAccessibility;
+    return true;
+  } catch {
+    // Survives dialog unmounts, but not a reload of this document.
+    document.documentElement.dataset.unsavedAccessibility = serialized;
+    return false;
+  }
+}
+
+function readUnsavedAccessibilityPreferences() {
+  return typeof document === 'undefined' ? undefined : document.documentElement.dataset.unsavedAccessibility;
 }
 
 export function currentAccessibilityProfile() {
@@ -145,8 +157,11 @@ export function ReadinessCenter({
   const onCheckedRef = useRef(onChecked);
   const [assessment, setAssessment] = useState<ReadinessAssessment>(() => captureCurrentReadinessAssessment());
   const [assetStatus, setAssetStatus] = useState<'checking' | 'ready' | 'review'>('checking');
-  const [preferences, setPreferences] = useState<AccessibilityPreferences>(readStoredAccessibilityPreferences);
-  const [preferenceSaveFailed, setPreferenceSaveFailed] = useState(false);
+  const [preferences, setPreferences] = useState<AccessibilityPreferences>(() => {
+    const unsaved = readUnsavedAccessibilityPreferences();
+    return unsaved === undefined ? readStoredAccessibilityPreferences() : parseAccessibilityPreferences(unsaved);
+  });
+  const [preferenceSaveFailed, setPreferenceSaveFailed] = useState(() => readUnsavedAccessibilityPreferences() !== undefined);
   const [pointerConfirmed, setPointerConfirmed] = useState(false);
   const [keyboardConfirmed, setKeyboardConfirmed] = useState(false);
   const [waitingForKey, setWaitingForKey] = useState(false);
