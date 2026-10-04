@@ -3014,7 +3014,10 @@ function PathGame({ onFinish, onClose, config }: GameProps & { config: PracticeC
   }
 
   function navigatePathCycleGrid(event: React.KeyboardEvent<HTMLButtonElement>, index: number, row: number, col: number) {
-    if (event.repeat && (event.key === 'Enter' || event.key === ' ' || event.key === '/' || event.code === 'Slash' || event.key === '\\' || event.code === 'Backslash')) { event.preventDefault(); return; }
+    if (event.defaultPrevented || event.nativeEvent.isComposing) return;
+    if (event.repeat && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); return; }
+    if (event.altKey || event.metaKey || event.shiftKey || (event.ctrlKey && event.key !== 'Home' && event.key !== 'End')) return;
+    if (event.repeat && (event.key === '/' || event.code === 'Slash' || event.key === '\\' || event.code === 'Backslash')) { event.preventDefault(); return; }
     if (event.key === '/' || event.code === 'Slash') {
       event.preventDefault();
       toggleCellFence(row, col, 'slash');
