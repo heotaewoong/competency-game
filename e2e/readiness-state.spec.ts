@@ -92,3 +92,84 @@ test('준비센터의 예약된 첫 초점이 사용자가 고른 설정 버튼�
   await expect(dialog).toHaveCount(0);
   await expect(opener).toBeFocused();
 });
+
+for (const entry of [
+  { region: '주요 메뉴', name: '준비센터', width: 1280 },
+  { region: 'banner', name: '준비 점검 시작', width: 1280 },
+  { region: 'footer', name: '응시 준비센터', width: 1280 },
+  { region: '빠른 메뉴', name: '준비', width: 390 },
+]) {
+  test(`준비센터 포인터 종료는 실제 ${entry.region} 버튼으로 초점을 돌린다`, async ({ page }) => {
+    await page.setViewportSize({ width: entry.width, height: 844 });
+    await page.goto('/');
+    await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+    const region = entry.region === 'banner' ? page.locator('.readiness-banner')
+      : entry.region === 'footer' ? page.locator('.footer-links')
+        : page.getByRole('navigation', { name: entry.region, exact: true });
+    const opener = entry.region === 'banner' ? region.getByRole('button') : region.getByRole('button', { name: entry.name });
+    await opener.click();
+    const dialog = page.getByRole('dialog', { name: '응시 준비센터' });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: '응시 준비센터 닫기', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(opener).toBeFocused();
+  });
+}
+
+for (const savedBefore of [false, true]) {
+  test(`저장 실패 설정은 준비센터 재개방 후에도 일치한다: 기존 저장 ${savedBefore}`, async ({ page }, testInfo) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+    await page.addInitScript((hasSaved) => {
+      const originalSet = Storage.prototype.setItem;
+      if (hasSaved && !localStorage.getItem('nineflow-accessibility-v1')) {
+        originalSet.call(localStorage, 'nineflow-accessibility-v1', JSON.stringify({ contrast: 'high', textScale: 'standard', motion: 'system' }));
+      }
+      Storage.prototype.setItem = function (key, value) {
+        if (key === 'nineflow-accessibility-v1') throw new DOMException('Storage full', 'QuotaExceededError');
+        return originalSet.call(this, key, value);
+      };
+      (window as Window & { allowPreferenceSave?: () => void }).allowPreferenceSave = () => { Storage.prototype.setItem = originalSet; };
+    }, savedBefore);
+    await page.goto('/');
+    await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+    const initialStored = await page.evaluate(() => localStorage.getItem('nineflow-accessibility-v1'));
+    const opener = page.locator('.readiness-banner button');
+    const dialog = page.getByRole('dialog', { name: '응시 준비센터' });
+    await opener.click();
+    for (const name of ['기본 명암', '큰 글자', '움직임 줄이기']) await dialog.getByRole('button', { name, exact: true }).click();
+    await expect(dialog.getByRole('status')).toContainText('현재 화면에만 적용');
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    await opener.click();
+    for (const name of ['기본 명암', '큰 글자', '움직임 줄이기']) await expect(dialog.getByRole('button', { name, exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('html')).toHaveAttribute('data-contrast', 'standard');
+    await expect(page.locator('html')).toHaveAttribute('data-text-scale', 'large');
+    await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduce');
+    await expect(dialog.getByRole('status')).toContainText('현재 화면에만 적용');
+    await expect(dialog.getByRole('button', { name: '현재 설정으로 닫기', exact: true })).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem('nineflow-accessibility-v1'))).toBe(initialStored);
+    await page.screenshot({ path: testInfo.outputPath('unsaved-reopened.png') });
+
+    // A later single-setting edit must not reset the other unsaved choices.
+    await dialog.getByRole('button', { name: '고대비', exact: true }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-text-scale', 'large');
+    await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduce');
+    await page.evaluate(() => (window as Window & { allowPreferenceSave?: () => void }).allowPreferenceSave!());
+    await dialog.getByRole('button', { name: '고대비', exact: true }).click();
+    await expect(dialog.getByRole('status')).toHaveCount(0);
+    expect(await page.locator('html').getAttribute('data-unsaved-accessibility')).toBeNull();
+    await page.keyboard.press('Escape');
+    await opener.click();
+    await expect(dialog.getByRole('status')).toHaveCount(0);
+    await expect(dialog.getByRole('button', { name: '설정 저장하고 닫기', exact: true })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('data-contrast', 'high');
+    await expect(page.locator('html')).toHaveAttribute('data-text-scale', 'large');
+    await expect(page.locator('html')).toHaveAttribute('data-motion', 'reduce');
+    expect(errors).toEqual([]);
+  });
+}
