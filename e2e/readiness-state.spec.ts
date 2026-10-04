@@ -1,5 +1,46 @@
 import { expect, test } from '@playwright/test';
 
+test('게임 내부 준비센터 포인터 종료는 실제 버튼에 초점을 복귀한다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  const homeGameOpener = page.locator('.game-card-hitarea[aria-describedby="rps-summary"]');
+  await homeGameOpener.click();
+  const stage = page.locator('section[data-game="rps"]');
+  await expect(stage).toHaveAttribute('role', 'dialog');
+  await expect(stage.getByRole('button', { name: '게임 바꾸기', exact: true })).toBeFocused();
+  const opener = stage.getByRole('button', { name: '응시 준비센터 열기', exact: true });
+  await expect(opener).not.toBeFocused();
+  await opener.click();
+  const dialog = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: '응시 준비센터 닫기', exact: true })).toBeFocused();
+  await expect(stage.locator('.stage-content')).toHaveAttribute('inert', '');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(stage).toHaveAttribute('role', 'dialog');
+  await expect(stage.locator('.stage-content')).not.toHaveAttribute('inert', '');
+  await testInfo.attach('after-nested-escape', { body: JSON.stringify(await page.evaluate(() => ({
+    active: document.activeElement?.outerHTML,
+    dialogs: document.querySelectorAll('dialog[open]').length,
+    stagePresent: Boolean(document.querySelector('section[data-game="rps"]')),
+  }))), contentType: 'application/json' });
+  await expect(opener).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: '응시 준비센터 닫기', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  await page.screenshot({ path: testInfo.outputPath('nested-focus-return.png') });
+  await page.keyboard.press('Escape');
+  await expect(stage).toHaveCount(0);
+  await expect(homeGameOpener).toBeFocused();
+  expect(errors).toEqual([]);
+});
+
+
 for (const outcome of ['ready', 'review'] as const) {
   test(`준비센터 점검 중 안내는 완료와 구분되고 ${outcome} 결과로 바뀐다`, async ({ page }, testInfo) => {
     let release!: () => void;
