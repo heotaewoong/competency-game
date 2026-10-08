@@ -117,7 +117,7 @@ for (const clipboardFailure of ['missing', 'sync-throw', 'rejected'] as const) {
     await expect(dialog.locator('.feedback-status')).toContainText('자동 복사가 차단됐습니다');
     await expect(message).toHaveValue('가'.repeat(1000));
     await expect(message).toBeFocused();
-    expect(await message.evaluate((input) => [input.selectionStart, input.selectionEnd])).toEqual([0, 1000]);
+    expect(await message.evaluate((input) => input instanceof HTMLTextAreaElement ? [input.selectionStart, input.selectionEnd] : null)).toEqual([0, 1000]);
     const opened = await page.evaluate(() => (window as Window & { __feedbackOpened?: string[] }).__feedbackOpened!);
     expect(opened).toHaveLength(1);
     expect(new URL(opened[0]).searchParams.has('body')).toBe(false);
