@@ -1765,7 +1765,7 @@ function GameFrame({ gameId, current, total, children, helper, simulationHelper,
   const progressContext = progressLabel ? `${progressLabel}. ` : '';
   const progressText = `${progressContext}${current === 0 ? `${total}${unit} 중 ${zeroLabel}` : `${total}${unit} 중 ${current}번째`}`;
   const liveMessage = `${progressText}${liveDetail ? `. ${liveDetail}` : ''}`;
-  const footerHelper = mode === 'practice' ? helper : simulationHelper ?? '고정 설정으로 진행 중 · 응답 결과는 상태등으로 표시';
+  const footerHelper = mode === 'practice' ? helper : simulationHelper ?? '고정 설정으로 진행 중';
   useLayoutEffect(() => {
     bodyRef.current?.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   }, [current, gameId]);

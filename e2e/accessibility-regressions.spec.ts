@@ -168,7 +168,9 @@ test('마법약 실전형은 선택 후 실제 제조색과 예측 성공·실�
   await expect(workspace.locator('.potion-layout')).toBeVisible({ timeout: 10_000 });
   await expect(workspace.locator('.workspace-foot > span').first()).toContainText('매 시행 성공·실패와 실제 제조색 공개');
   await expect(workspace.locator('.workspace-foot')).not.toContainText('피드백 없이 고정 설정으로 진행 중');
-  await expect(workspace.locator('.workspace-foot .sr-only')).not.toContainText(/이 조합의 이전 관찰은 파랑/);
+  const liveResult = workspace.locator(':scope > .sr-only[aria-live="polite"]');
+  await expect(liveResult).toBeVisible();
+  await expect(liveResult).not.toContainText(/이 조합의 이전 관찰은 파랑/);
 
   await workspace.locator('.potion-actions button.blue').click();
   const preview = workspace.locator('.potion-result-preview');
@@ -180,8 +182,8 @@ test('마법약 실전형은 선택 후 실제 제조색과 예측 성공·실�
   await expect(preview.locator('small')).not.toHaveAttribute('aria-live');
   await expect(workspace.locator('.workspace-foot > b')).toContainText(/예측 (성공|실패)/);
   await expect(workspace.locator('.workspace-foot > b')).toContainText(/실제 결과: (파란 약|빨간 약)/);
-  await expect(workspace.locator('.workspace-foot .sr-only')).toContainText(/예측 (성공|실패)/);
-  await expect(workspace.locator('.workspace-foot .sr-only')).toContainText(/실제 결과: (파란 약|빨간 약)/);
+  await expect(liveResult).toContainText(/예측 (성공|실패)/);
+  await expect(liveResult).toContainText(/실제 결과: (파란 약|빨간 약)/);
 });
 
 test('마법약 실전형의 시간 초과 실제색도 다음 동일 레시피 학습 근거에 누적한다', async ({ page }) => {
@@ -258,8 +260,10 @@ test('마법약 누적 근거는 연습 힌트를 켠 사용자에게만 동일�
   const workspace = page.locator('.game-workspace.game-potion');
   await expect(workspace.locator('.potion-layout')).toBeVisible({ timeout: 10_000 });
   await expect(workspace.locator('.potion-observation')).toHaveCount(0);
-  await expect(workspace.locator('.workspace-foot .sr-only')).not.toContainText(/이 조합의 이전 관찰은 파랑/);
-  await expect(workspace.locator('.workspace-foot .sr-only')).toContainText(/이번 재료는 .*결과 색을 예측하세요/);
+  const liveResult = workspace.locator(':scope > .sr-only[aria-live="polite"]');
+  await expect(liveResult).toBeVisible();
+  await expect(liveResult).not.toContainText(/이 조합의 이전 관찰은 파랑/);
+  await expect(liveResult).toContainText(/이번 재료는 .*결과 색을 예측하세요/);
 });
 
 test('단계 표시와 라운드 칩은 모바일에서도 읽을 수 있는 크기와 대비 토큰을 사용한다', async ({ page }) => {
