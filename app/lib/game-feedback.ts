@@ -8,7 +8,8 @@ export function gameFeedbackSignal(feedback: string): GameFeedbackSignal | null 
   if (/^경로/.test(feedback) && /감점|초과|미달|^경로는/.test(feedback)) return { tone: 'error', label: '조건 불일치' };
   if (/^(정답은|오답|모양|물음표|모든|순서)/.test(feedback)) return { tone: 'error', label: '오답' };
   if (/^(정답|성공|경로 성공)(?:$|\s|·)/.test(feedback)) return { tone: 'success', label: '정답' };
-  return { tone: 'neutral', label: '결과 확인' };
+  if (/^예측 (?:성공|실패)(?:$|\s|·)/.test(feedback)) return { tone: 'neutral', label: '결과 확인' };
+  return null;
 }
 
 // JOBDA 공식 시간이 아니라 이 앱에서 결과를 알아볼 수 있게 하는 훈련값.

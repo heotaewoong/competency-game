@@ -138,10 +138,50 @@ for (const mode of ['practice', 'simulation'] as const) {
     await expect(signal).toBeVisible();
     for (const action of await workspace.locator('.rps-actions button').all()) await expect(action).toBeDisabled();
     await page.screenshot({ path: testInfo.outputPath(`rps-${mode}-error-signal.png`) });
-    await page.clock.runFor(351);
+    await page.clock.runFor(320);
+    await expect(workspace.locator('.workspace-progress > span')).toContainText('1 /');
+    await expect(signal).toBeVisible();
+    for (const action of await workspace.locator('.rps-actions button').all()) await expect(action).toBeDisabled();
+    await page.clock.runFor(1);
+    await expect(workspace.locator('.workspace-progress > span')).toContainText('2 /');
+    await expect(signal).toHaveCount(0);
+    await page.clock.runFor(30);
     await expect(workspace.locator('.workspace-progress > span')).toContainText('2 /');
     await expect(signal).toHaveCount(0);
     for (const action of await workspace.locator('.rps-actions button').all()) await expect(action).toBeEnabled();
+    const total = mode === 'practice' ? 15 : 30;
+    await expect(workspace.locator('.workspace-progress > span')).toContainText(`2 / ${mode === 'practice' ? total : 10}`);
+    for (let index = 1; index < total; index += 1) {
+      const shown = await workspace.locator('.rps-board img').getAttribute('alt');
+      expect(shown).toMatch(/^(가위|바위|보)$/);
+      await workspace.locator('.rps-actions button').filter({ hasText: shown! }).click();
+      if (index === total - 1) {
+        // 마지막 문항에는 320ms 입력 정착이 없다. 실제 응답 시점의 1초를 독립 검증한다.
+        await page.clock.runFor(999);
+        await expect(signal).toHaveText('오답');
+        for (const action of await workspace.locator('.rps-actions button').all()) await expect(action).toBeDisabled();
+        await expect(page.locator('.stage-result')).toHaveCount(0);
+        await page.screenshot({ path: testInfo.outputPath(`rps-${mode}-final-feedback-999.png`) });
+        await page.clock.runFor(1);
+        await expect(page.locator('.stage-result')).toBeVisible();
+        await expect(workspace).toHaveCount(0);
+        await expect(page.locator('.result-metrics article').filter({ hasText: '오류' }).locator('b')).toHaveText(String(total));
+        await expect(page.locator('.result-metrics article').filter({ hasText: '정확도' }).locator('b')).toHaveText('0%');
+      } else {
+        await page.clock.runFor(1320);
+        if (mode === 'simulation' && (index === 9 || index === 19)) {
+          const transition = workspace.locator('.rps-round-transition');
+          for (const second of ['3', '2', '1']) {
+            await expect(transition.locator('.rps-transition-countdown > b')).toHaveText(second);
+            await page.clock.runFor(1050);
+          }
+          await expect(transition).toHaveCount(0);
+        }
+        await expect(workspace.locator('.rps-board')).toBeVisible();
+        await expect(signal).toHaveCount(0);
+        for (const action of await workspace.locator('.rps-actions button').all()) await expect(action).toBeEnabled();
+      }
+    }
     expect(errors).toEqual([]);
   });
 }
@@ -181,9 +221,58 @@ test('오답 신호 유지 중 종료 확인창은 남은 표시 시간을 보�
   await page.clock.runFor(699);
   await expect(workspace.locator('.workspace-progress > span')).toContainText('1 /');
   await expect(workspace.locator('.answer-signal')).toBeVisible();
-  await page.clock.runFor(351);
+  await page.clock.runFor(320);
+  await expect(workspace.locator('.workspace-progress > span')).toContainText('1 /');
+  await expect(workspace.locator('.answer-signal')).toBeVisible();
+  for (const action of await workspace.locator('.rps-actions button').all()) await expect(action).toBeDisabled();
+  await page.clock.runFor(1);
   await expect(workspace.locator('.workspace-progress > span')).toContainText('2 /');
   await expect(workspace.locator('.answer-signal')).toHaveCount(0);
+  await page.clock.runFor(30);
+  await expect(workspace.locator('.workspace-progress > span')).toContainText('2 /');
+  await expect(workspace.locator('.answer-signal')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('길 만들기 초기화는 결과 배지를 만들지 않고 안내와 누적 조작을 보존한다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  await page.addInitScript(() => { Math.random = () => 0; });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  await page.getByRole('button', { name: /길 만들기, 난이도 상, 설정 열기/ }).click();
+  const stage = page.locator('section[data-game="path"]');
+  await expect(stage).toBeVisible();
+  const origin = Date.UTC(2030, 0, 9);
+  await page.clock.install({ time: origin });
+  await page.clock.pauseAt(origin + 60_000);
+  await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
+  const workspace = page.locator('.game-workspace.game-path');
+  for (const second of ['3', '2', '1']) {
+    await expect(workspace.locator('.game-preparation > b')).toHaveText(second);
+    await page.clock.runFor(1050);
+  }
+  const firstCell = workspace.locator('.path-cell').first();
+  // 두 화면 크기 모두 실제 보이는 조작부를 사용한다.
+  const cycle = firstCell.locator('.path-fence-cycle');
+  if (await cycle.isVisible()) await cycle.click();
+  else await firstCell.locator('.path-fence-choice.is-slash').click();
+  await expect(firstCell).toHaveAttribute('data-fence', 'slash');
+  const actions = workspace.locator('.path-toolbar > span').first().locator('b');
+  await expect(actions).toHaveText('1');
+  await workspace.getByRole('button', { name: '전체 초기화', exact: true }).click();
+  await expect(workspace.locator('.path-cell[data-fence="empty"]')).toHaveCount(25);
+  await expect(actions).toHaveText('2');
+  await expect(workspace.locator('.workspace-progress > span')).toContainText('1 / 3');
+  await expect(workspace.locator('.answer-signal')).toHaveCount(0);
+  await expect(workspace.locator('.workspace-foot > b')).toHaveText('배치를 초기화했습니다. 누적 조작 기록은 유지됩니다.');
+  await expect(workspace.locator(':scope > .sr-only[aria-live="polite"]')).toContainText('배치를 초기화했습니다. 누적 조작 기록은 유지됩니다.');
+  await page.screenshot({ path: testInfo.outputPath('path-reset-status-without-result.png') });
+  await workspace.locator('.path-submit').click();
+  await expect(workspace.locator('.answer-signal')).toHaveText('오답');
+  await expect(workspace.locator('.answer-signal')).toHaveAttribute('data-feedback-tone', 'error');
+  await expect(workspace.locator('.workspace-progress > span')).toContainText('1 / 3');
   expect(errors).toEqual([]);
 });
 

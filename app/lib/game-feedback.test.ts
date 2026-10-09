@@ -27,9 +27,15 @@ test('시간 초과와 조작 소진은 각각 원인을 표시한다', () => {
   assert.deepEqual(gameFeedbackSignal('20회 조작을 모두 사용해 빈 답안이 되었습니다.'), { tone: 'error', label: '조작 소진' });
 });
 
-test('확률적인 물약 결과와 초기화 안내를 정오로 단정하지 않는다', () => {
-  for (const text of ['예측 성공 · 실제 제조색은 파랑입니다.', '예측 실패 · 실제 제조색은 빨강입니다.', '배치를 초기화했습니다.']) {
+test('확률적인 물약 결과를 정오로 단정하지 않는다', () => {
+  for (const text of ['예측 성공 · 실제 제조색은 파랑입니다.', '예측 실패 · 실제 제조색은 빨강입니다.', '예측 성공 · 실제 결과: 파란 약', '예측 실패 · 실제 결과: 빨간 약']) {
     assert.deepEqual(gameFeedbackSignal(text), { tone: 'neutral', label: '결과 확인' });
+  }
+});
+
+test('초기화와 일반 안내는 답안 결과 배지를 만들지 않는다', () => {
+  for (const text of ['배치를 초기화했습니다.', '배치를 초기화했습니다. 누적 조작 기록은 유지됩니다.', '응답 저장됨', '준비 중입니다.']) {
+    assert.equal(gameFeedbackSignal(text), null);
   }
   assert.equal(gameFeedbackSignal(''), null);
 });
