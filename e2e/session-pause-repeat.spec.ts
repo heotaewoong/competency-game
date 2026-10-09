@@ -253,6 +253,26 @@ test('길 만들기 초기화는 결과 배지를 만들지 않고 안내와 누
     await expect(workspace.locator('.game-preparation > b')).toHaveText(second);
     await page.clock.runFor(1050);
   }
+  const grid = workspace.locator('.path-grid');
+  await expect(grid).toBeVisible();
+  const geometry = await grid.evaluate(board => {
+    const rect = board.getBoundingClientRect();
+    const shell = board.parentElement!;
+    const left = shell.querySelector('.edge-column.left')!.getBoundingClientRect();
+    const right = shell.querySelector('.edge-column.right')!.getBoundingClientRect();
+    const cells = [...board.querySelectorAll('.path-cell')].map(cell => {
+      const cellRect = cell.getBoundingClientRect();
+      return { width: cellRect.width, height: cellRect.height };
+    });
+    return { width: rect.width, height: rect.height, available: shell.getBoundingClientRect().width - left.width - right.width, cells };
+  });
+  expect(Math.abs(geometry.width - geometry.available)).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry.width - geometry.height)).toBeLessThanOrEqual(1);
+  expect(geometry.cells).toHaveLength(25);
+  for (const cell of geometry.cells) {
+    expect(cell.width).toBeGreaterThanOrEqual(44);
+    expect(cell.height).toBeGreaterThanOrEqual(44);
+  }
   const firstCell = workspace.locator('.path-cell').first();
   // 두 화면 크기 모두 실제 보이는 조작부를 사용한다.
   const cycle = firstCell.locator('.path-fence-cycle');
