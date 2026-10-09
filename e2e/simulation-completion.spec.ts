@@ -120,8 +120,8 @@ test('가위바위보 실전형은 각 라운드의 실제 정답을 잠그고 3
     }
     if (index === 9 || index === 19) {
       await expect(deadline).toHaveAttribute('data-deadline-active', 'false');
-      // timeout 피드백 420ms와 입력 잠금 해제 320ms 뒤 전환 화면이 열린다.
-      await page.clock.runFor(650);
+      // 결과 표시 1000ms와 기존 입력 정착 320ms 뒤 전환 화면이 열린다.
+      await page.clock.runFor(1400);
       const nextPhase = phase + 1;
       const transition = workspace.locator('.rps-round-transition');
       await expect(transition.locator('> span')).toHaveText(`ROUND ${nextPhase} / 3`);
@@ -138,10 +138,10 @@ test('가위바위보 실전형은 각 라운드의 실제 정답을 잠그고 3
       await expect(workspace.locator('.workspace-progress > span')).toContainText('1 / 10');
     } else if (index < 29) {
       await expect(deadline).toHaveAttribute('data-deadline-active', 'false');
-      await page.clock.runFor(800);
+      await page.clock.runFor(1400);
       if (shouldAnswerCorrectly) await expect(workspace.locator('.workspace-progress > span')).toContainText('2 / 10');
     } else {
-      await page.clock.runFor(500);
+      await page.clock.runFor(1100);
     }
   }
 

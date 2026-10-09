@@ -26,7 +26,7 @@
     "test:path": "node --test --experimental-strip-types app/lib/path-game.test.ts",
     "test:potion": "node --test --experimental-strip-types app/lib/potion-game.test.ts",
     "test:number": "node --test --experimental-strip-types app/lib/number-game.test.ts",
-    "test:feedback": "node --test --experimental-strip-types app/lib/feedback.test.ts",
+    "test:feedback": "node --test --experimental-strip-types app/lib/feedback.test.ts app/lib/game-feedback.test.ts",
     "test:rotation": "node --test --experimental-strip-types app/lib/rotation-game.test.ts",
     "test:nback": "node --test --experimental-strip-types app/lib/nback-game.test.ts",
     "test:guides": "node --test --experimental-strip-types app/lib/strategy-guide.test.ts",

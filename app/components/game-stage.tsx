@@ -10,6 +10,7 @@ import { PotionFlask, PotionIngredientGlyph } from './potion-visuals';
 import { CatMarker, MouseMarker } from './mouse-visuals';
 import { NBackIntroDiagram, NBackLagRail, NBackSimulationDiagram } from './nback-visuals';
 import { RPS_ASSET_PATHS } from '../lib/essential-assets';
+import { gameFeedbackSignal, RPS_FEEDBACK_HOLD_MS } from '../lib/game-feedback';
 import { RuleCheck } from './rule-check';
 import { ReadinessCenter, currentAccessibilityProfile, type SavedReadinessSummary } from './readiness-center';
 import { games, getGame, type GameId, type SessionResult } from '../lib/game-data';
@@ -1758,26 +1759,26 @@ function GameFrame({ gameId, current, total, children, helper, simulationHelper,
   const bodyRef = useRef<HTMLDivElement>(null);
   const unit = progressUnit ?? progressUnitForGame(gameId, mode);
   const visibleFeedback = mode === 'practice' || showFeedbackInSimulation ? feedback ?? '' : '';
-  const feedbackTone = /^(정답|성공|경로 성공)/.test(visibleFeedback)
-    ? 'is-success'
-    : /^(오답|시간|20회|모양|물음표|정답은|모든|경로는|순서)/.test(visibleFeedback) ? 'is-error' : '';
-  const liveDetail = visibleFeedback || statusMessage;
+  const signal = gameFeedbackSignal(feedback ?? '');
+  const feedbackTone = signal ? `is-${signal.tone}` : '';
+  const liveDetail = visibleFeedback || signal?.label || statusMessage;
   const progressContext = progressLabel ? `${progressLabel}. ` : '';
   const progressText = `${progressContext}${current === 0 ? `${total}${unit} 중 ${zeroLabel}` : `${total}${unit} 중 ${current}번째`}`;
   const liveMessage = `${progressText}${liveDetail ? `. ${liveDetail}` : ''}`;
-  const footerHelper = mode === 'practice' ? helper : simulationHelper ?? '피드백 없이 고정 설정으로 진행 중';
+  const footerHelper = mode === 'practice' ? helper : simulationHelper ?? '고정 설정으로 진행 중 · 응답 결과는 상태등으로 표시';
   useLayoutEffect(() => {
     bodyRef.current?.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   }, [current, gameId]);
   return (
     <div className={`game-workspace game-${gameId}`} data-mode={mode} role="region" aria-labelledby={`${gameId}-workspace-title`} tabIndex={-1}>
       <header className="workspace-head">
-        <div><p>{game.no} · {game.skill} <span className="mode-chip">{mode === 'practice' ? '연습' : '실전형 연습'}</span></p><h2 id={`${gameId}-workspace-title`}>{game.title}</h2></div>
+        <div><p>{game.no} · {game.skill} <span className="mode-chip">{mode === 'practice' ? '연습' : '실전형 연습'}</span></p><div className="workspace-title-row"><h2 id={`${gameId}-workspace-title`}>{game.title}</h2>{signal && <span className={`answer-signal ${feedbackTone}`} data-feedback-tone={signal.tone} aria-label={`응답 결과: ${signal.label}`}><i aria-hidden="true" />{signal.label}</span>}</div></div>
         <div className="workspace-progress"><span>{progressLabel ? `${progressLabel} · ` : ''}{current} / {total} {unit}</span><i role="progressbar" aria-label={`${progressLabel ? `${progressLabel} ` : ''}${unit} 진행률`} aria-valuemin={current === 0 ? 0 : 1} aria-valuemax={total} aria-valuenow={current} aria-valuetext={progressText}><b style={{ width: `${Math.round((current / total) * 100)}%` }} /></i></div>
         <div className="workspace-actions"><button type="button" data-game-shortcut-ignore className="workspace-switch" aria-label="게임 바꾸기" onClick={openGameSwitcher}>게임 바꾸기</button><button type="button" data-game-shortcut-ignore className="workspace-report" aria-label="문제 신고" onClick={openFeedback}>문제 신고</button><button data-game-shortcut-ignore className="session-close" aria-label={`${mode === 'practice' ? '연습' : '실전형 연습'} 닫기`} onClick={onClose}>×</button></div>
       </header>
       <div ref={bodyRef} className="workspace-body" tabIndex={bodyFocusable ? 0 : undefined} aria-label={bodyFocusable ? `${game.title} 문제와 응답 영역` : undefined}>{children}</div>
-      <footer className="workspace-foot"><span>{footerHelper}</span><b className={feedbackTone}>{visibleFeedback}</b><span className="sr-only" aria-live="polite" aria-atomic="true">{liveMessage}</span></footer>
+      <footer className="workspace-foot"><span>{footerHelper}</span><b className={feedbackTone}>{visibleFeedback}</b></footer>
+      <span className="sr-only" aria-live="polite" aria-atomic="true">{liveMessage}</span>
     </div>
   );
 }
@@ -1956,7 +1957,7 @@ function RpsGame({ onFinish, onClose, config }: GameProps & { config: PracticeCo
           }
         }, ROUND_INPUT_SETTLE_MS);
       }
-    }, mode === 'practice' ? 1000 : 420);
+    }, RPS_FEEDBACK_HOLD_MS);
   }
 
   useLayoutEffect(() => {
