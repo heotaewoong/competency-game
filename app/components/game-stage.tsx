@@ -1424,8 +1424,8 @@ function SimulationPreset({ gameId }: { gameId: GameId }) {
         <div><dt>공개 진행 순서</dt><dd>{publicFlow}</dd></div>
         <div><dt>자료상 시간</dt><dd>{publicDuration}</dd></div>
         {gameId === 'count' && <div><dt>훈련용 응답 제한</dt><dd>{formatPace(Math.max(2500, config.paceMs * 3))}</dd></div>}
-        {gameId === 'mouse' && <><div><dt>훈련용 중간 제시</dt><dd>빈칸 0.5초 · 고양이 1.2초 · 색 0.9초</dd></div><div><dt>훈련용 응답 제한</dt><dd>색마다 {formatPace(Math.max(4000, config.paceMs * 4))}</dd></div></>}
-        <div><dt>도움 표시</dt><dd>{gameId === 'potion' ? '해설 숨김 · 학습에 필요한 제조 결과 표시' : '숨김'}</dd></div>
+        {gameId === 'mouse' && <><div><dt>색별 판단</dt><dd>{config.quantity * 2}회 · 라운드마다 빨강·파랑 각 1회</dd></div><div><dt>훈련용 중간 제시</dt><dd>빈칸 {MOUSE_BLANK_MS / 1000}초 · 고양이 {MOUSE_CATS_MS / 1000}초 · 색 {MOUSE_HIGHLIGHT_MS / 1000}초</dd></div><div><dt>훈련용 응답 제한</dt><dd>색마다 {formatPace(Math.max(4000, config.paceMs * 4))}</dd></div></>}
+        <div><dt>도움 표시</dt><dd>{gameId === 'potion' ? '해설 숨김 · 학습에 필요한 제조 결과 표시' : gameId === 'count' || gameId === 'mouse' ? '해설 숨김 · 정오 신호 표시' : '숨김'}</dd></div>
       </dl>
       {gameId === 'path' && <p>2023 개발사 영상은 경로가 맞더라도 목표보다 많은 울타리를 쓰면 감점된다고 설명합니다. 비공개 감점식은 흉내 내지 않고 경로 성공과 목표 울타리 일치를 별도 기록하며, 클릭 제한 대신 전체 조작 수를 남깁니다.</p>}
       <p>공개된 라운드·판정·조작 순서를 유지합니다. 공개 튜토리얼 화면에서 확인한 분량은 이 버전의 연습 프로필에만 적용하며 현행 기업 초대의 총문항을 보장하지 않습니다. 그 밖의 공개되지 않은 수량·시간·채점식은 독립 훈련값이며 JOBDA 공식 모의검사나 동일 문항을 뜻하지 않습니다.</p>
