@@ -120,8 +120,8 @@ test('가위바위보 실전형은 각 라운드의 실제 정답을 잠그고 3
     }
     if (index === 9 || index === 19) {
       await expect(deadline).toHaveAttribute('data-deadline-active', 'false');
-      // timeout 피드백 420ms와 입력 잠금 해제 320ms 뒤 전환 화면이 열린다.
-      await page.clock.runFor(650);
+      // 결과 표시 1000ms와 기존 입력 정착 320ms 뒤 전환 화면이 열린다.
+      await page.clock.runFor(1400);
       const nextPhase = phase + 1;
       const transition = workspace.locator('.rps-round-transition');
       await expect(transition.locator('> span')).toHaveText(`ROUND ${nextPhase} / 3`);
@@ -138,10 +138,10 @@ test('가위바위보 실전형은 각 라운드의 실제 정답을 잠그고 3
       await expect(workspace.locator('.workspace-progress > span')).toContainText('1 / 10');
     } else if (index < 29) {
       await expect(deadline).toHaveAttribute('data-deadline-active', 'false');
-      await page.clock.runFor(800);
+      await page.clock.runFor(1400);
       if (shouldAnswerCorrectly) await expect(workspace.locator('.workspace-progress > span')).toContainText('2 / 10');
     } else {
-      await page.clock.runFor(500);
+      await page.clock.runFor(1100);
     }
   }
 
@@ -230,6 +230,18 @@ test('도형 순서 기억하기 실전형은 각 라운드의 실제 정답을 
       await answer.click();
       await expect(answer).toHaveAttribute('aria-pressed', 'true');
       await expectAllButtonsDisabled(actions);
+      const signal = workspace.locator('.answer-signal');
+      await expect(signal).toBeVisible();
+      await expect(signal).toHaveText('정답');
+      await expect(signal).toHaveAttribute('aria-label', '응답 결과: 정답');
+      await expect(signal).toHaveAttribute('data-feedback-tone', 'success');
+      const liveResult = workspace.locator(':scope > .sr-only[aria-live="polite"]');
+      await expect(liveResult).toContainText('정답');
+      await expect(liveResult).toContainText(`현재 도형 ${glyph}`);
+      await expect(liveResult).toContainText('응답 저장됨');
+      await expect(liveResult).toContainText('고정 간격이 끝나면 다음 도형으로 이동합니다.');
+      await expect(liveResult).not.toContainText('정답은');
+      await expect(workspace.locator('.workspace-foot > b')).not.toContainText('정답은');
     }
     await runPastDeadline(page, nbackStage.locator('.nback-time'), 3_000);
     if (shouldAnswerCorrectly) await expect(progress).toHaveAttribute('aria-valuenow', String(currentProgress + 1));

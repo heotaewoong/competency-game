@@ -10,6 +10,7 @@ import { PotionFlask, PotionIngredientGlyph } from './potion-visuals';
 import { CatMarker, MouseMarker } from './mouse-visuals';
 import { NBackIntroDiagram, NBackLagRail, NBackSimulationDiagram } from './nback-visuals';
 import { RPS_ASSET_PATHS } from '../lib/essential-assets';
+import { gameFeedbackSignal, RPS_FEEDBACK_HOLD_MS } from '../lib/game-feedback';
 import { RuleCheck } from './rule-check';
 import { ReadinessCenter, currentAccessibilityProfile, type SavedReadinessSummary } from './readiness-center';
 import { games, getGame, type GameId, type SessionResult } from '../lib/game-data';
@@ -1379,7 +1380,8 @@ function SimulationPreset({ gameId }: { gameId: GameId }) {
           <div><dt>출제 도형</dt><dd>선택된 한 묶음의 3개 도형</dd></div>
           <div><dt>도형 간격</dt><dd>3초</dd></div>
           <div><dt>라운드</dt><dd>2-back {NBACK_SIMULATION_N2_PROBLEM_COUNT} → 2·3-back {NBACK_SIMULATION_N23_PROBLEM_COUNT}</dd></div>
-          <div><dt>도움 표시</dt><dd>이름표·정오 피드백 숨김</dd></div>
+          <div><dt>기억 준비</dt><dd>2개 → 3개 · 무채점</dd></div>
+          <div><dt>도움 표시</dt><dd>이름표·정답 해설 숨김 · 정오 신호 표시</dd></div>
         </dl>
         <p>공개 개발사 영상은 5개 묶음 중 한 묶음을 사용한다고만 안내합니다. 라운드별 재추첨 근거가 없어 보수적으로 같은 묶음을 유지하며, 문항 수와 시간은 독립 훈련값입니다.</p>
       </section>
@@ -1758,26 +1760,26 @@ function GameFrame({ gameId, current, total, children, helper, simulationHelper,
   const bodyRef = useRef<HTMLDivElement>(null);
   const unit = progressUnit ?? progressUnitForGame(gameId, mode);
   const visibleFeedback = mode === 'practice' || showFeedbackInSimulation ? feedback ?? '' : '';
-  const feedbackTone = /^(정답|성공|경로 성공)/.test(visibleFeedback)
-    ? 'is-success'
-    : /^(오답|시간|20회|모양|물음표|정답은|모든|경로는|순서)/.test(visibleFeedback) ? 'is-error' : '';
-  const liveDetail = visibleFeedback || statusMessage;
+  const signal = gameFeedbackSignal(feedback ?? '');
+  const feedbackTone = signal ? `is-${signal.tone}` : '';
+  const liveDetail = visibleFeedback || signal?.label || statusMessage;
   const progressContext = progressLabel ? `${progressLabel}. ` : '';
   const progressText = `${progressContext}${current === 0 ? `${total}${unit} 중 ${zeroLabel}` : `${total}${unit} 중 ${current}번째`}`;
   const liveMessage = `${progressText}${liveDetail ? `. ${liveDetail}` : ''}`;
-  const footerHelper = mode === 'practice' ? helper : simulationHelper ?? '피드백 없이 고정 설정으로 진행 중';
+  const footerHelper = mode === 'practice' ? helper : simulationHelper ?? '고정 설정으로 진행 중';
   useLayoutEffect(() => {
     bodyRef.current?.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   }, [current, gameId]);
   return (
     <div className={`game-workspace game-${gameId}`} data-mode={mode} role="region" aria-labelledby={`${gameId}-workspace-title`} tabIndex={-1}>
       <header className="workspace-head">
-        <div><p>{game.no} · {game.skill} <span className="mode-chip">{mode === 'practice' ? '연습' : '실전형 연습'}</span></p><h2 id={`${gameId}-workspace-title`}>{game.title}</h2></div>
+        <div><p>{game.no} · {game.skill} <span className="mode-chip">{mode === 'practice' ? '연습' : '실전형 연습'}</span></p><div className="workspace-title-row"><h2 id={`${gameId}-workspace-title`}>{game.title}</h2>{signal && <span className={`answer-signal ${feedbackTone}`} data-feedback-tone={signal.tone} aria-label={`응답 결과: ${signal.label}`}><i aria-hidden="true" />{signal.label}</span>}</div></div>
         <div className="workspace-progress"><span>{progressLabel ? `${progressLabel} · ` : ''}{current} / {total} {unit}</span><i role="progressbar" aria-label={`${progressLabel ? `${progressLabel} ` : ''}${unit} 진행률`} aria-valuemin={current === 0 ? 0 : 1} aria-valuemax={total} aria-valuenow={current} aria-valuetext={progressText}><b style={{ width: `${Math.round((current / total) * 100)}%` }} /></i></div>
         <div className="workspace-actions"><button type="button" data-game-shortcut-ignore className="workspace-switch" aria-label="게임 바꾸기" onClick={openGameSwitcher}>게임 바꾸기</button><button type="button" data-game-shortcut-ignore className="workspace-report" aria-label="문제 신고" onClick={openFeedback}>문제 신고</button><button data-game-shortcut-ignore className="session-close" aria-label={`${mode === 'practice' ? '연습' : '실전형 연습'} 닫기`} onClick={onClose}>×</button></div>
       </header>
       <div ref={bodyRef} className="workspace-body" tabIndex={bodyFocusable ? 0 : undefined} aria-label={bodyFocusable ? `${game.title} 문제와 응답 영역` : undefined}>{children}</div>
-      <footer className="workspace-foot"><span>{footerHelper}</span><b className={feedbackTone}>{visibleFeedback}</b><span className="sr-only" aria-live="polite" aria-atomic="true">{liveMessage}</span></footer>
+      <footer className="workspace-foot"><span>{footerHelper}</span><b className={feedbackTone}>{visibleFeedback}</b></footer>
+      <span className="sr-only" aria-live="polite" aria-atomic="true">{liveMessage}</span>
     </div>
   );
 }
@@ -1956,7 +1958,7 @@ function RpsGame({ onFinish, onClose, config }: GameProps & { config: PracticeCo
           }
         }, ROUND_INPUT_SETTLE_MS);
       }
-    }, mode === 'practice' ? 1000 : 420);
+    }, RPS_FEEDBACK_HOLD_MS);
   }
 
   useLayoutEffect(() => {
@@ -2949,7 +2951,7 @@ function PathGame({ onFinish, onClose, config }: GameProps & { config: PracticeC
     const routeSummary = routes.map(({ vehicle, exit }) => `${vehicle.id}→${exit ? `${edgeSideLabel[exit.side]} ${exit.index + 1}번` : '경로 반복·중단'}`).join(' · ');
     if (!routesOk) {
       const review = { errorCode: 'path-route', selected: `${routeSummary} · 울타리 ${count}개`, explanation: '한 개 이상의 차량이 지정된 목표와 다른 위치에 도착했습니다.' };
-      if (mode === 'simulation') { advanceRound(false, '', review); return; }
+      if (mode === 'simulation') { advanceRound(false, '오답 · 목표 도착 위치 불일치', review); return; }
       hadErrorRef.current = true;
       scoreRef.current.attemptErrors += 1;
       recordPathReview(false, review.errorCode, review.selected, review.explanation);
@@ -3470,6 +3472,7 @@ function NBackGame({ onFinish, onClose, glyphMnemonics, config, preferences }: G
     setSelected(answer);
     const score = scoreNBackResponse(trial, answer, responseRef.current);
     if (mode === 'practice') setFeedback(score.correct ? '정답 · 응답 저장됨' : `오답 · 정답은 ${nbackDecisionLabel(trial.answer, trial.task)}입니다.`);
+    else setFeedback(score.correct ? '정답' : '오답');
     if (!guidedPacing && progression === 'fast') {
       setEarlyAdvancePending(true);
     }
@@ -3499,6 +3502,7 @@ function NBackGame({ onFinish, onClose, glyphMnemonics, config, preferences }: G
   const countdownHeading = roundTransition ? `${trial.round}라운드 전환` : mode === 'simulation' ? `${trial.round}라운드 시작` : '연습 시작';
   const selectedStatus = guidedPacing ? '응답 저장됨. 다음 도형 버튼을 누르세요.' : progression === 'fast' ? '응답 저장됨. 곧 다음 도형으로 이동합니다.' : '응답 저장됨. 고정 간격이 끝나면 다음 도형으로 이동합니다.';
   const statusMessage = countdown !== null ? `${countdownHeading}. ${countdown}초 뒤 시작합니다.` : trial.warmup ? `현재 도형 ${spokenGlyph}. 입력 없이 기억하세요.${guidedPacing ? ' 기억한 뒤 다음 도형 버튼을 누르세요.' : ''}` : selected ? `현재 도형 ${spokenGlyph}. ${selectedStatus}` : `현재 도형 ${spokenGlyph}. 지금 분류하세요.`;
+  const frameFeedback = mode === 'simulation' && feedback ? `${feedback} · ${statusMessage}` : feedback;
   const answerClass = (decision: NBackDecision) => {
     const classes = selected === decision ? ['selected'] : [];
     if (mode === 'practice' && selected !== null) {
@@ -3509,7 +3513,7 @@ function NBackGame({ onFinish, onClose, glyphMnemonics, config, preferences }: G
   };
 
   return (
-    <GameFrame gameId="nback" current={countdown !== null ? completedScored : scoredProgress} total={scoredTotal} zeroLabel="기억 구간" helper={helper} feedback={feedback} statusMessage={statusMessage} onClose={onClose}>
+    <GameFrame gameId="nback" current={countdown !== null ? completedScored : scoredProgress} total={scoredTotal} zeroLabel="기억 구간" helper={helper} feedback={frameFeedback} showFeedbackInSimulation={mode === 'simulation'} statusMessage={statusMessage} onClose={onClose}>
       <div className="nback-stage" ref={stageRef}>
         {countdown !== null ? (
           <div className="nback-countdown" role="timer" aria-live="polite" aria-label={`${countdownHeading} · ${countdown}초 뒤 도형 순서 게임 시작`}><span>{roundLabel} · {taskLabel}</span><strong>{countdownHeading}</strong><b>{countdown}</b><small>{roundTransition ? `${taskLabel} 규칙으로 바뀝니다. ` : ''}{helper}</small></div>
