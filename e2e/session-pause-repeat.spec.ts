@@ -94,6 +94,154 @@ test('탭 이탈 일시정지도 유지된 Enter로 자동 재개되지 않는�
   expect(errors).toEqual([]);
 });
 
+test('약속 위치 질문으로 넘어간 유지 Enter는 답안을 자동 선택하지 않고 새 입력만 채점한다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  const readSnapshot = () => page.evaluate(() => {
+    const workspace = document.querySelector('.game-workspace.game-appointment');
+    const choices = Array.from(workspace?.querySelectorAll<HTMLButtonElement>('.location-choice-grid button') ?? []);
+    let generation: string | null = null;
+    let storageError: string | null = null;
+    let envelopeVersion: number | null = null;
+    let envelopeGeneration: string | null = null;
+    let saved: Array<{
+      id: string; gameId: string; accuracy: number; errors: number;
+      detail: { trialCount: number; responseCount: number; correctCount: number; completedRounds: number; quantity: number };
+      review: { summary: { attemptedCount: number; correctCount: number }; attempts: Array<{
+        id: string; index: number; kind: string; status: string; expected: string; selected: string; errorCodes: string[];
+      }> };
+    }> = [];
+    try {
+      generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+      if (!generation || !/^[A-Za-z0-9_-]{1,128}$/.test(generation)) throw new Error('활성 저장 세대가 올바르지 않습니다.');
+      const raw = localStorage.getItem(`nineflow-practice-results-v4:${generation}`);
+      if (raw !== null) {
+        const envelope = JSON.parse(raw) as { version: number; generation: string; results: typeof saved };
+        if (!envelope || envelope.version !== 4 || envelope.generation !== generation || !Array.isArray(envelope.results)) {
+          throw new Error('활성 저장 묶음이 올바르지 않습니다.');
+        }
+        envelopeVersion = envelope.version;
+        envelopeGeneration = envelope.generation;
+        saved = envelope.results;
+      }
+    } catch (error) {
+      storageError = String(error);
+    }
+    return {
+      questionCount: workspace?.querySelectorAll('.appointment-question').length ?? 0,
+      choiceCount: choices.length,
+      disabledCount: choices.filter(button => button.disabled).length,
+      focusedChoiceIndex: choices.findIndex(button => button === document.activeElement),
+      signalTexts: Array.from(workspace?.querySelectorAll('.answer-signal') ?? [], element => element.textContent),
+      footerFeedback: workspace?.querySelector('.workspace-foot > b')?.textContent ?? null,
+      resultCount: document.querySelectorAll('.stage-result').length,
+      overlayCount: document.querySelectorAll('.session-confirm').length,
+      workspaceInert: Boolean(workspace?.closest('[inert]')),
+      generation, envelopeVersion, envelopeGeneration, saved, storageError,
+    };
+  });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  const initial = await readSnapshot();
+  expect(initial.storageError).toBeNull();
+  expect(initial.generation).toMatch(/^[A-Za-z0-9_-]{1,128}$/);
+  expect(initial.saved).toEqual([]);
+  await page.getByRole('button', { name: /약속 정하기, 난이도 상, 설정 열기/ }).click();
+  const stage = page.locator('section[data-game="appointment"]');
+  await expect(stage).toBeVisible();
+  await stage.getByRole('button', { name: '2라운드 위치만 연습', exact: true }).click();
+  const quantity = stage.getByLabel('라운드당 문항 현재 값');
+  const configuredQuantity = Number(await quantity.textContent());
+  expect(Number.isInteger(configuredQuantity)).toBe(true);
+  expect(configuredQuantity).toBeGreaterThanOrEqual(1);
+  expect(configuredQuantity).toBeLessThanOrEqual(8);
+  for (let current = configuredQuantity; current > 1; current -= 1) {
+    await stage.getByRole('button', { name: '라운드당 문항 줄이기', exact: true }).click();
+    await expect(quantity).toHaveText(String(current - 1));
+  }
+  await expect(quantity).toHaveText('1');
+  await expect(stage.locator('.appointment-practice-options > p > em')).toHaveText('총 1문항');
+  await stage.getByRole('checkbox', { name: /시간 제한 없이 연습/ }).check();
+  await expect(stage.getByRole('checkbox', { name: /시간 제한 없이 연습/ })).toBeChecked();
+  await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
+  const workspace = page.locator('.game-workspace.game-appointment');
+  const beginRound = workspace.getByRole('button', { name: '이 라운드 시작' });
+  await expect(beginRound).toBeVisible();
+  await beginRound.click();
+  const people: string[][] = [];
+  const nextFriend = workspace.locator('.appointment-stimulus .single-action');
+  for (let person = 1; person <= 3; person += 1) {
+    await expect(workspace.locator('.appointment-stimulus .appointment-phase-meta b')).toHaveText(`${person} / 3`);
+    const coordinates = await workspace.locator('.location-memory > i.selected small').allTextContents();
+    expect(coordinates.length).toBeGreaterThan(0);
+    expect(new Set(coordinates).size).toBe(coordinates.length);
+    for (const coordinate of coordinates) expect(coordinate).toMatch(/^[1-4]-[1-4]$/);
+    people.push(coordinates);
+    await expect(nextFriend).toHaveAttribute('aria-disabled', 'false');
+    if (person < 3) await nextFriend.click();
+  }
+  const common = people[0].filter(coordinate => people[1].includes(coordinate) && people[2].includes(coordinate));
+  expect(common).toHaveLength(1);
+  await expect(nextFriend).toContainText('질문 보기');
+  await expect(nextFriend).toBeFocused();
+  const snapshots: Record<string, Awaited<ReturnType<typeof readSnapshot>>> = {};
+  await page.keyboard.down('Enter');
+  try {
+    await expect(workspace.locator('.appointment-question')).toBeVisible();
+    const firstChoice = workspace.locator('.location-choice-grid button').first();
+    await expect(firstChoice).toBeFocused();
+    snapshots.beforeRepeat = await readSnapshot();
+    await page.keyboard.down('Enter');
+    // 재시도 assertion 전에 읽어 잘못된 응답과 이후 결과 전환을 그대로 보존한다.
+    snapshots.afterRepeat = await readSnapshot();
+  } finally {
+    await page.keyboard.up('Enter');
+    snapshots.afterRelease = await readSnapshot();
+    await testInfo.attach('appointment-native-enter-snapshots', {
+      body: JSON.stringify({ people, common, snapshots, errors }, null, 2), contentType: 'application/json',
+    });
+  }
+  await page.screenshot({ path: testInfo.outputPath('appointment-held-enter-after-release.png') });
+  const unanswered = {
+    questionCount: 1, choiceCount: 16, disabledCount: 0, focusedChoiceIndex: 0,
+    signalTexts: [], footerFeedback: '', resultCount: 0, overlayCount: 0,
+    workspaceInert: false, generation: initial.generation, saved: [], storageError: null,
+  };
+  expect(snapshots.beforeRepeat).toMatchObject(unanswered);
+  expect(snapshots.afterRepeat).toMatchObject(unanswered);
+  expect(snapshots.afterRelease).toMatchObject(unanswered);
+  const [row, column] = common[0].split('-').map(Number);
+  const correctChoice = workspace.locator('.location-choice-grid').getByRole('button', { name: new RegExp(`${row}행 ${column}열$`) });
+  await expect(correctChoice).toHaveCount(1);
+  await expect(correctChoice.locator('small')).toHaveText(common[0]);
+  await correctChoice.focus();
+  await page.keyboard.down('Enter');
+  await page.keyboard.up('Enter');
+  await expect(page.getByRole('heading', { name: '약속 정하기 결과', exact: true })).toBeVisible();
+  const result = page.locator('.stage-result');
+  await expect(result.locator('.result-metrics article').filter({ hasText: '정확도' }).locator('b')).toHaveText('100%');
+  await expect(result.locator('.result-metrics article').filter({ hasText: '오류' }).locator('b')).toHaveText('0');
+  await expect.poll(async () => (await readSnapshot()).saved.length).toBe(1);
+  const completed = await readSnapshot();
+  expect(completed.storageError).toBeNull();
+  expect(completed.envelopeVersion).toBe(4);
+  expect(completed.generation).toBe(initial.generation);
+  expect(completed.envelopeGeneration).toBe(initial.generation);
+  const saved = completed.saved[0];
+  expect(saved.id).toMatch(/^appointment-.+/);
+  expect(saved).toMatchObject({ gameId: 'appointment', accuracy: 100, errors: 0,
+    detail: { trialCount: 1, responseCount: 1, correctCount: 1, completedRounds: 1, quantity: 1 },
+    review: { summary: { attemptedCount: 1, correctCount: 1 } },
+  });
+  const expectedCode = `${String.fromCharCode(64 + row)}${column}`;
+  expect(saved.review.attempts).toEqual([expect.objectContaining({
+    id: 'attempt-0', index: 0, kind: 'generic', status: 'correct', expected: expectedCode, selected: expectedCode, errorCodes: [],
+  })]);
+  await page.screenshot({ path: testInfo.outputPath('appointment-fresh-enter-correct-result.png') });
+  expect(errors).toEqual([]);
+});
+
 async function startFeedbackSession(page: Page, mode: 'practice' | 'simulation') {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
