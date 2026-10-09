@@ -88,6 +88,44 @@ for (const nested of [false, true]) {
   }
 }
 
+for (const clipboardFailure of ['missing', 'sync-throw', 'rejected'] as const) {
+  test(`긴 의견의 클립보드 ${clipboardFailure} 실패는 수동 복사로 복구한다`, async ({ page }, testInfo) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+    await page.addInitScript((failure) => {
+      const state = window as Window & { __feedbackOpened?: string[] };
+      state.__feedbackOpened = [];
+      window.open = ((url?: string | URL) => { state.__feedbackOpened!.push(String(url)); return null; }) as typeof window.open;
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: failure === 'missing' ? undefined : {
+          writeText: () => {
+            if (failure === 'sync-throw') throw new Error('Clipboard unavailable');
+            return Promise.reject(new Error('Clipboard permission denied'));
+          },
+        },
+      });
+    }, clipboardFailure);
+    await page.goto('/');
+    await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+    await page.locator('#feedback').getByRole('button', { name: '개선 의견 보내기' }).click();
+    const dialog = page.getByRole('dialog', { name: '의견 보내기', exact: true });
+    const message = dialog.locator('textarea');
+    await message.fill('가'.repeat(1000));
+    await dialog.getByRole('button', { name: /복사 후 GitHub 열기/ }).click();
+    await expect(dialog.locator('.feedback-status')).toContainText('자동 복사가 차단됐습니다');
+    await expect(message).toHaveValue('가'.repeat(1000));
+    await expect(message).toBeFocused();
+    expect(await message.evaluate((input) => input instanceof HTMLTextAreaElement ? [input.selectionStart, input.selectionEnd] : null)).toEqual([0, 1000]);
+    const opened = await page.evaluate(() => (window as Window & { __feedbackOpened?: string[] }).__feedbackOpened!);
+    expect(opened).toHaveLength(1);
+    expect(new URL(opened[0]).searchParams.has('body')).toBe(false);
+    expect(errors).toEqual([]);
+    await dialog.screenshot({ path: testInfo.outputPath('clipboard-fallback.png') });
+  });
+}
+
 for (const width of [320, 390, 621, 760, 900, 1280]) {
   test(`${width}px 선별 의견 현황에서 제출창을 열고 닫아도 초점과 화면이 유지된다`, async ({ page }, testInfo) => {
     const errors: string[] = [];

@@ -109,7 +109,7 @@ export function FeedbackDialog({ onClose, initialGameId = 'site', sessionMode, n
     }
   }
 
-  function openIssue() {
+  async function openIssue() {
     if (!isValid) { setStatus(`의견을 ${FEEDBACK_MESSAGE_MIN}자 이상 입력해 주세요.`); return; }
     const input = issueInput();
     if (feedbackIssueUrlIsSafe(input)) {
@@ -120,12 +120,13 @@ export function FeedbackDialog({ onClose, initialGameId = 'site', sessionMode, n
     window.open(buildFeedbackIssuePasteUrl(input), '_blank', 'noopener,noreferrer');
     const issueUrl = new URL(buildFeedbackIssueUrl(input));
     const copyText = `${issueUrl.searchParams.get('title')}\n\n${buildFeedbackIssueText(input)}`;
-    void navigator.clipboard.writeText(copyText).then(() => {
+    try {
+      await navigator.clipboard.writeText(copyText);
       setStatus('긴 의견 전체를 복사했습니다. 열린 GitHub 이슈 본문에 붙여넣어 주세요. 새 창이 보이지 않으면 GitHub 원문 목록을 이용하세요.');
-    }).catch(() => {
+    } catch {
       setStatus('GitHub 이슈 창은 열었지만 자동 복사가 차단됐습니다. 입력한 의견을 직접 복사해 본문에 붙여넣어 주세요.');
       messageRef.current?.select();
-    });
+    }
   }
 
   return (
