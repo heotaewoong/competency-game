@@ -1366,7 +1366,8 @@ function SimulationPreset({ gameId }: { gameId: GameId }) {
         <dl>
           <div><dt>1단계</dt><dd>알파벳 · 훈련용 3분</dd></div>
           <div><dt>2단계</dt><dd>4×4 격자 · 훈련용 3분</dd></div>
-          <div><dt>도움 표시</dt><dd>미리보기·정오 숨김</dd></div>
+          <div><dt>도움 표시</dt><dd>미리보기·정답 해설 숨김 · 정오 신호 표시</dd></div>
+          <div><dt>결과 확인</dt><dd>앱 훈련값 최대 1초 · 단계 종료 우선</dd></div>
         </dl>
         <p>2023 개발사 영상은 전체 약 6분, 2024 JAINWON 공개 기업자료는 4분으로 서로 다릅니다. 이 도구의 단계별 3분은 6분을 같은 길이로 나눈 독립 훈련값입니다. 문항마다 다시 주어지는 20회 조작 한도도 범위가 공개되지 않은 자체값이며, 실제 응시에서는 기업 초대 안내를 우선하세요.</p>
       </section>
@@ -2045,6 +2046,8 @@ type RotationAttempt = {
 type RotationReview = RotationAttempt & { timedOut?: boolean; budgetExhausted?: boolean };
 type RotationReplaySource = 'mine' | 'optimal';
 const ROTATION_PHASE_MS = 180_000;
+// 이 앱의 결과 확인 시간이며, 표시 중에도 실전형 단계 시간은 흐른다.
+const ROTATION_FEEDBACK_HOLD_MS = 1000;
 
 function RotationShape({ puzzle, matrix, label }: { puzzle: Pick<RotationPuzzle, 'kind' | 'letter' | 'pattern'>; matrix: RotationMatrix; label: string }) {
   return (
@@ -2181,6 +2184,8 @@ function RotationGame({ onFinish, onClose, config, preferences, onPreviewChange 
   const eventTraceRef = useRef<RotationReviewEvent[]>([]);
   const previewUsedRef = useRef(mode === 'practice' && preferences.showPreview);
   const nextRoundRef = useRef<HTMLButtonElement>(null);
+  const schedule = useManagedTimeout();
+  const cancelFeedbackRef = useRef<(() => void) | null>(null);
   const puzzle = puzzles[round % puzzles.length];
   const puzzleId = puzzle.id;
   const puzzleOptimalLength = puzzle.optimal.length;
@@ -2196,6 +2201,8 @@ function RotationGame({ onFinish, onClose, config, preferences, onPreviewChange 
   function resultFromAttempts() {
     if (finishedRef.current) return;
     finishedRef.current = true;
+    cancelFeedbackRef.current?.();
+    cancelFeedbackRef.current = null;
     const attempts = attemptsRef.current;
     const correctAttempts = attempts.filter((attempt) => attempt.correct);
     const letters = attempts.filter((attempt) => attempt.kind === 'letter');
@@ -2228,6 +2235,8 @@ function RotationGame({ onFinish, onClose, config, preferences, onPreviewChange 
   }
 
   function clearRoundState() {
+    cancelFeedbackRef.current?.();
+    cancelFeedbackRef.current = null;
     setSequence([]);
     sequenceRef.current = [];
     setPreviewStep(0);
@@ -2243,6 +2252,7 @@ function RotationGame({ onFinish, onClose, config, preferences, onPreviewChange 
   }
 
   function advanceRound() {
+    if (finishedRef.current) return;
     if (mode === 'practice' && round >= puzzles.length - 1) { resultFromAttempts(); return; }
     clearRoundState();
     setRound((value) => value + 1);
@@ -2358,8 +2368,15 @@ function RotationGame({ onFinish, onClose, config, preferences, onPreviewChange 
     const attempt = recordAttempt(ok, timedOut, options?.used, options?.edits);
     if (!attempt) return;
     setPreviewPlaying(false);
-    if (mode === 'simulation') { advanceRound(); return; }
     setLocked(true);
+    if (mode === 'simulation') {
+      setFeedback(options?.budgetExhausted ? '20회 조작을 모두 사용했습니다.' : ok ? '정답' : '오답');
+      cancelFeedbackRef.current = schedule(() => {
+        cancelFeedbackRef.current = null;
+        advanceRound();
+      }, ROTATION_FEEDBACK_HOLD_MS);
+      return;
+    }
     const message = options?.budgetExhausted
       ? '20회 조작을 모두 사용해 빈 답안이 되었습니다. 최소 조작 순서를 확인하세요.'
       : timedOut
@@ -2530,7 +2547,7 @@ function RotationGame({ onFinish, onClose, config, preferences, onPreviewChange 
   }
   const accessibleRotationStatus = announcement || `${mode === 'simulation' ? currentPhase : `${round + 1}번 문제`} 시작. ${puzzle.kind === 'letter' ? `알파벳 ${puzzle.letter}` : '4×4 격자 도형'}, 목표 방향은 ${rotationMatrixDescription(puzzle.target)}`;
   return (
-    <GameFrame gameId="rotation" current={mode === 'simulation' ? (simulationPhase === 'letters' ? 1 : 2) : round + 1} total={mode === 'simulation' ? 2 : puzzles.length} helper="1·2 회전 · 3·4 반전 · Backspace 지움 · Delete 초기화 · Enter 제출" feedback={feedback} statusMessage={accessibleRotationStatus} onClose={onClose}>
+    <GameFrame gameId="rotation" current={mode === 'simulation' ? (simulationPhase === 'letters' ? 1 : 2) : round + 1} total={mode === 'simulation' ? 2 : puzzles.length} helper="1·2 회전 · 3·4 반전 · Backspace 지움 · Delete 초기화 · Enter 제출" simulationHelper="정오 최대 1초 표시 · 단계 종료 우선 · 단계 시간은 계속 흐릅니다" feedback={feedback} showFeedbackInSimulation statusMessage={accessibleRotationStatus} onClose={onClose}>
       <div className="rotation-stage-layout">
         {mode === 'simulation' ? <div className="rotation-phase-banner"><span>실전형 단계 {simulationPhase === 'letters' ? '1' : '2'} / 2</span><b>{currentPhase}</b><small>훈련용 3분 구간 · 문항별 20회도 앱 자체 한도</small></div> : <div className="rotation-practice-banner"><b>{puzzle.kind === 'letter' ? '알파벳' : '4×4 격자 도형'}</b>{review ? <span className="rotation-review-preview-label">제출 후 최소 풀이 예시</span> : <button type="button" data-game-shortcut-ignore aria-pressed={preferences.showPreview} onClick={(event) => { toggleProcessPreview(); restoreGameShortcutFocus(event.currentTarget); }}><span>조작 과정 예시</span><b>{preferences.showPreview ? '켜짐' : '꺼짐'}</b></button>}<small>비대칭 특징 2곳 → 45° 눈금 → 거울상</small></div>}
       {!review && (guidedPacing ? <p className="guided-pacing-note" role="status">시간 제한 없이 연습 중 · 조작을 확인한 뒤 직접 제출하세요</p> : <DeadlineBar key={mode === 'simulation' ? simulationPhase : round} duration={mode === 'simulation' ? ROTATION_PHASE_MS : config.paceMs} label={mode === 'simulation' ? `${currentPhase} 단계 남은 시간` : '문제 제한시간'} />)}
