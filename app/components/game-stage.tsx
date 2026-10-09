@@ -3471,6 +3471,7 @@ function NBackGame({ onFinish, onClose, glyphMnemonics, config, preferences }: G
     setSelected(answer);
     const score = scoreNBackResponse(trial, answer, responseRef.current);
     if (mode === 'practice') setFeedback(score.correct ? '정답 · 응답 저장됨' : `오답 · 정답은 ${nbackDecisionLabel(trial.answer, trial.task)}입니다.`);
+    else setFeedback(score.correct ? '정답' : '오답');
     if (!guidedPacing && progression === 'fast') {
       setEarlyAdvancePending(true);
     }
@@ -3500,6 +3501,7 @@ function NBackGame({ onFinish, onClose, glyphMnemonics, config, preferences }: G
   const countdownHeading = roundTransition ? `${trial.round}라운드 전환` : mode === 'simulation' ? `${trial.round}라운드 시작` : '연습 시작';
   const selectedStatus = guidedPacing ? '응답 저장됨. 다음 도형 버튼을 누르세요.' : progression === 'fast' ? '응답 저장됨. 곧 다음 도형으로 이동합니다.' : '응답 저장됨. 고정 간격이 끝나면 다음 도형으로 이동합니다.';
   const statusMessage = countdown !== null ? `${countdownHeading}. ${countdown}초 뒤 시작합니다.` : trial.warmup ? `현재 도형 ${spokenGlyph}. 입력 없이 기억하세요.${guidedPacing ? ' 기억한 뒤 다음 도형 버튼을 누르세요.' : ''}` : selected ? `현재 도형 ${spokenGlyph}. ${selectedStatus}` : `현재 도형 ${spokenGlyph}. 지금 분류하세요.`;
+  const frameFeedback = mode === 'simulation' && feedback ? `${feedback} · ${statusMessage}` : feedback;
   const answerClass = (decision: NBackDecision) => {
     const classes = selected === decision ? ['selected'] : [];
     if (mode === 'practice' && selected !== null) {
@@ -3510,7 +3512,7 @@ function NBackGame({ onFinish, onClose, glyphMnemonics, config, preferences }: G
   };
 
   return (
-    <GameFrame gameId="nback" current={countdown !== null ? completedScored : scoredProgress} total={scoredTotal} zeroLabel="기억 구간" helper={helper} feedback={feedback} statusMessage={statusMessage} onClose={onClose}>
+    <GameFrame gameId="nback" current={countdown !== null ? completedScored : scoredProgress} total={scoredTotal} zeroLabel="기억 구간" helper={helper} feedback={frameFeedback} showFeedbackInSimulation={mode === 'simulation'} statusMessage={statusMessage} onClose={onClose}>
       <div className="nback-stage" ref={stageRef}>
         {countdown !== null ? (
           <div className="nback-countdown" role="timer" aria-live="polite" aria-label={`${countdownHeading} · ${countdown}초 뒤 도형 순서 게임 시작`}><span>{roundLabel} · {taskLabel}</span><strong>{countdownHeading}</strong><b>{countdown}</b><small>{roundTransition ? `${taskLabel} 규칙으로 바뀝니다. ` : ''}{helper}</small></div>
