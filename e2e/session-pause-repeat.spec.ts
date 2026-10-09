@@ -244,6 +244,13 @@ test('도형 순서 실전형 정오 표시는 고정 간격과 일시정지 잔
   await page.getByRole('button', { name: /도형 순서 기억하기, 난이도 상, 설정 열기/ }).click();
   const stage = page.locator('section[data-game="nback"]');
   await expect(stage).toBeVisible();
+  await stage.getByRole('radio', { name: /실전형 연습/ }).click();
+  const preset = stage.locator('.nback-simulation-preset');
+  await expect(preset).toBeVisible();
+  await expect(preset.locator('em')).toHaveText('훈련용 47문항');
+  await expect(preset).toContainText('2개 → 3개 · 무채점');
+  await expect(preset).toContainText('이름표·정답 해설 숨김 · 정오 신호 표시');
+  await expect(preset).not.toContainText('정오 피드백 숨김');
   const origin = Date.UTC(2030, 0, 9);
   await page.clock.install({ time: origin });
   await page.clock.pauseAt(origin + 60_000);

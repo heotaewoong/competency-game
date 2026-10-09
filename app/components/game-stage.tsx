@@ -1380,7 +1380,8 @@ function SimulationPreset({ gameId }: { gameId: GameId }) {
           <div><dt>출제 도형</dt><dd>선택된 한 묶음의 3개 도형</dd></div>
           <div><dt>도형 간격</dt><dd>3초</dd></div>
           <div><dt>라운드</dt><dd>2-back {NBACK_SIMULATION_N2_PROBLEM_COUNT} → 2·3-back {NBACK_SIMULATION_N23_PROBLEM_COUNT}</dd></div>
-          <div><dt>도움 표시</dt><dd>이름표·정오 피드백 숨김</dd></div>
+          <div><dt>기억 준비</dt><dd>2개 → 3개 · 무채점</dd></div>
+          <div><dt>도움 표시</dt><dd>이름표·정답 해설 숨김 · 정오 신호 표시</dd></div>
         </dl>
         <p>공개 개발사 영상은 5개 묶음 중 한 묶음을 사용한다고만 안내합니다. 라운드별 재추첨 근거가 없어 보수적으로 같은 묶음을 유지하며, 문항 수와 시간은 독립 훈련값입니다.</p>
       </section>
