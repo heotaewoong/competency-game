@@ -818,3 +818,199 @@ test('도형 회전 실전형 단계 마감은 표시 예약보다 우선하고 
   await expect(page.locator('.record-summary')).toHaveCount(1);
   expect(errors).toEqual([]);
 });
+
+test('개수 비교 실전형 정오·무응답 신호는 제시 경계와 표시 중 정지 잔여를 보존한다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  await expect(page.locator('.record-summary')).toHaveCount(0);
+  await page.getByRole('button', { name: /개수 비교하기, 난이도 하, 설정 열기/ }).click();
+  const stage = page.locator('section[data-game="count"]');
+  await expect(stage).toBeVisible();
+  await stage.getByRole('radio', { name: /실전형 연습/ }).click();
+  const preset = stage.locator('.simulation-preset');
+  await expect(preset).toBeVisible();
+  await expect(preset.getByText('문제 수', { exact: true }).locator('..').locator('dd')).toHaveText('46 · 독립 훈련값');
+  await expect(preset.getByText('단어 제시', { exact: true }).locator('..').locator('dd')).toHaveText('1초');
+  await expect(preset.getByText('훈련용 응답 제한', { exact: true }).locator('..').locator('dd')).toHaveText('3초');
+  const origin = Date.UTC(2030, 0, 12);
+  await page.clock.install({ time: origin });
+  await page.clock.pauseAt(origin + 60_000);
+  const clockStart = await page.evaluate(() => ({ wall: Date.now(), ticks: performance.now() }));
+  let advancedMs = 0;
+  const expectClock = async () => {
+    expect(await page.evaluate(() => ({ wall: Date.now(), ticks: performance.now() }))).toEqual({
+      wall: clockStart.wall + advancedMs,
+      ticks: clockStart.ticks + advancedMs,
+    });
+  };
+  const advanceClock = async (ms: number) => {
+    await expectClock();
+    await page.clock.runFor(ms);
+    advancedMs += ms;
+    await expectClock();
+  };
+  await stage.getByRole('button', { name: /^실전형 연습 시작/ }).click();
+  await expectClock();
+  const workspace = page.locator('.game-workspace.game-count');
+  for (const second of ['3', '2', '1']) {
+    await expect(workspace.locator('.game-preparation > b')).toHaveText(second);
+    // 1050ms의 초과분이 첫 준비 350ms에 섞이지 않게 시작 시각을 맞춘다.
+    await advanceClock(1000);
+  }
+  await expect(workspace.locator('.mode-chip')).toHaveText('실전형 연습');
+  const fixation = workspace.locator('.count-fixation[aria-label="다음 문제 준비"]');
+  const stimulus = workspace.locator('.count-wrap.phase-show');
+  const answer = workspace.locator('.count-wrap.phase-answer');
+  const buttons = workspace.locator('.count-board > button');
+  const signal = workspace.locator('.answer-signal');
+  const live = workspace.locator(':scope > .sr-only[aria-live="polite"]');
+  const confirmation = page.locator('.session-confirm[role="alertdialog"]');
+  const expectLocked = async () => {
+    await expect(buttons).toHaveCount(2);
+    for (const button of await buttons.all()) await expect(button).toBeDisabled();
+    await expect(answer.locator('.time-strip')).toHaveAttribute('data-deadline-active', 'false');
+  };
+  const expectSignal = async (label: '오답' | '정답' | '시간 초과', position: number) => {
+    const tone = label === '정답' ? 'success' : 'error';
+    const color = tone === 'success' ? 'rgb(25, 112, 103)' : 'rgb(163, 63, 73)';
+    await expect(signal).toBeVisible();
+    await expect(signal).toHaveText(label);
+    await expect(signal).toHaveAttribute('aria-label', `응답 결과: ${label}`);
+    await expect(signal).toHaveAttribute('data-feedback-tone', tone);
+    await expect(signal).toHaveCSS('color', color);
+    await expect(signal.locator('i')).toHaveCSS('background-color', color);
+    await expect(workspace.locator('.workspace-foot > b')).toHaveText('');
+    await expect(live).toHaveText(`46문항 중 ${position}번째. ${label}`);
+    await expect(live).not.toContainText('정답은');
+    await expectLocked();
+    await expectClock();
+  };
+  const beginQuestion = async (position: number) => {
+    await expect(workspace.locator('.workspace-progress > span')).toContainText(`${position} / 46`);
+    await expect(fixation).toBeVisible();
+    await expect(signal).toHaveCount(0);
+    await advanceClock(349);
+    await expect(fixation).toBeVisible();
+    await expect(stimulus).toHaveCount(0);
+    await advanceClock(1);
+    await expect(fixation).toHaveCount(0);
+    await expect(stimulus).toBeVisible();
+    await expect(stimulus.locator('.time-strip')).toHaveAttribute('aria-valuemax', '1000');
+    await expect(stimulus.locator('.time-strip')).toHaveAttribute('data-deadline-active', 'true');
+    await expect(buttons).toHaveCount(2);
+    const words = await Promise.all([0, 1].map(index => buttons.nth(index).locator('.word-cloud > span').allTextContents()));
+    expect(words[0].length).toBeGreaterThan(0);
+    expect(words[1].length).toBeGreaterThan(0);
+    expect(words[0].length).not.toBe(words[1].length);
+    await expect(buttons.nth(0)).toHaveAttribute('aria-label', `왼쪽 자극: ${words[0].join(' ')}`);
+    await expect(buttons.nth(1)).toHaveAttribute('aria-label', `오른쪽 자극: ${words[1].join(' ')}`);
+    for (const button of await buttons.all()) await expect(button).toBeDisabled();
+    await expectClock();
+    await advanceClock(999);
+    await expect(stimulus).toBeVisible();
+    await expect(answer).toHaveCount(0);
+    if (position === 1) {
+      await workspace.focus();
+      await page.keyboard.down('ArrowLeft');
+      await expectClock();
+    }
+    await advanceClock(1);
+    await expect(stimulus).toHaveCount(0);
+    await expect(answer).toBeVisible();
+    await expect(answer.locator('.time-strip')).toHaveAttribute('aria-valuemax', '3000');
+    await expect(answer.locator('.time-strip')).toHaveAttribute('data-deadline-active', 'true');
+    await expect(workspace.getByRole('button', { name: '왼쪽 선택', exact: true })).toBeEnabled();
+    await expect(workspace.getByRole('button', { name: '오른쪽 선택', exact: true })).toBeEnabled();
+    await expect(workspace.locator('.count-hidden')).toHaveText(['?', '?']);
+    await expect(signal).toHaveCount(0);
+    if (position === 1) {
+      // 제시 중부터 누른 키의 반복 입력은 응답 구간을 시작해도 채점하지 않는다.
+      await page.keyboard.down('ArrowLeft');
+      await page.keyboard.up('ArrowLeft');
+      for (const button of await buttons.all()) await expect(button).toBeEnabled();
+      await expect(signal).toHaveCount(0);
+    }
+    await expectClock();
+    return words[0].length > words[1].length ? '왼쪽 선택' : '오른쪽 선택';
+  };
+
+  const firstCorrect = await beginQuestion(1);
+  await workspace.getByRole('button', { name: firstCorrect === '왼쪽 선택' ? '오른쪽 선택' : '왼쪽 선택', exact: true }).click();
+  await expectClock();
+  await expectSignal('오답', 1);
+  await workspace.focus();
+  await page.keyboard.down('ArrowRight');
+  await page.keyboard.down('ArrowRight');
+  await page.keyboard.up('ArrowRight');
+  await expectClock();
+  await advanceClock(149);
+  await expectSignal('오답', 1);
+  await expect(workspace.locator('.workspace-progress > span')).toContainText('1 / 46');
+  await expect(fixation).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('count-simulation-error-149.png') });
+  await advanceClock(1);
+  await expect(signal).toHaveCount(0);
+
+  const secondCorrect = await beginQuestion(2);
+  await workspace.getByRole('button', { name: secondCorrect, exact: true }).click();
+  await expectClock();
+  await expectSignal('정답', 2);
+  await advanceClock(50);
+  await workspace.getByRole('button', { name: '실전형 연습 닫기', exact: true }).click();
+  await expectClock();
+  await expect(confirmation).toBeVisible();
+  await expect(stage.locator('.stage-content')).toHaveAttribute('inert', '');
+  await expect(stage.locator('.stage-content')).toHaveAttribute('aria-hidden', 'true');
+  await expect(workspace.getByRole('button', { name: secondCorrect, exact: true })).toHaveCount(0);
+  await advanceClock(5000);
+  await expect(workspace.locator('.workspace-progress > span')).toContainText('2 / 46');
+  await expect(answer).toBeVisible();
+  await expect(signal).toHaveText('정답');
+  await expectLocked();
+  await page.screenshot({ path: testInfo.outputPath('count-simulation-correct-paused.png') });
+  await confirmation.getByRole('button', { name: '계속 연습', exact: true }).click();
+  await expectClock();
+  await expect(confirmation).toHaveCount(0);
+  await expect(stage.locator('.stage-content')).not.toHaveAttribute('inert', '');
+  await expect(stage.locator('.stage-content')).not.toHaveAttribute('aria-hidden', 'true');
+  await expect(workspace.getByRole('button', { name: secondCorrect, exact: true })).toHaveCount(1);
+  // 정지 5000ms는 150ms 표시 중 활성 50ms를 제외한 잔여 100ms를 소비하지 않는다.
+  await advanceClock(99);
+  await expectSignal('정답', 2);
+  await expect(workspace.locator('.workspace-progress > span')).toContainText('2 / 46');
+  await expect(fixation).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('count-simulation-correct-resume-149.png') });
+  await advanceClock(1);
+  await expect(signal).toHaveCount(0);
+
+  await beginQuestion(3);
+  await advanceClock(2999);
+  await expect(answer).toBeVisible();
+  await expect(signal).toHaveCount(0);
+  for (const button of await buttons.all()) await expect(button).toBeEnabled();
+  await advanceClock(1);
+  await expectSignal('시간 초과', 3);
+  await page.screenshot({ path: testInfo.outputPath('count-simulation-timeout-3000.png') });
+  await advanceClock(149);
+  await expectSignal('시간 초과', 3);
+  await expect(workspace.locator('.workspace-progress > span')).toContainText('3 / 46');
+  await expect(fixation).toHaveCount(0);
+  await advanceClock(1);
+  await expect(workspace.locator('.workspace-progress > span')).toContainText('4 / 46');
+  await expect(fixation).toBeVisible();
+  await expect(signal).toHaveCount(0);
+  await expect(page.locator('.stage-result')).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('count-simulation-next-after-timeout.png') });
+  await expectClock();
+  await workspace.getByRole('button', { name: '실전형 연습 닫기', exact: true }).click();
+  await expectClock();
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole('button', { name: '연습창 닫기', exact: true }).click();
+  await expectClock();
+  await expect(page.locator('.stage-panel')).toHaveCount(0);
+  await expect(page.locator('.record-summary')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
