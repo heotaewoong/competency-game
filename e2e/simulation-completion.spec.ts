@@ -360,6 +360,24 @@ test('개수 비교하기 실전형은 준비·1초 제시·3초 응답 46문항
       await expect(signal).toHaveText('시간 초과');
       await expectAllButtonsDisabled(answer.locator('.count-board button'));
       await expect(page.locator('.stage-result')).toHaveCount(0);
+      // 완료 예약 전에 실제 v4 쓰기 시도만 관찰한다. 원래 저장 호출은 보존한다.
+      await page.evaluate(() => {
+        const generation = window.localStorage.getItem('nineflow-practice-results-generation-v1');
+        if (!generation) throw new Error('Count 완료 전 저장 세대가 준비되지 않았습니다.');
+        const activeKey = `nineflow-practice-results-v4:${generation}`;
+        const observation = { writes: [] as string[], failed: false };
+        (window as Window & { countCompletionWrites?: typeof observation }).countCompletionWrites = observation;
+        const originalSetItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function setItem(key, value) {
+          try {
+            if (this === window.localStorage && key === activeKey) observation.writes.push(value);
+          } catch {
+            observation.failed = true;
+          }
+          return originalSetItem.call(this, key, value);
+        };
+      });
+      await expectClock();
       await advanceClock(1);
     } else {
       await advanceClock(150);
@@ -387,12 +405,20 @@ test('개수 비교하기 실전형은 준비·1초 제시·3초 응답 46문항
   expect(saved.errors).toBe(46);
   expect(saved.detail).toMatchObject({ trialCount: 46, responseCount: 0 });
   expect(saved.review.summary).toMatchObject({ attemptedCount: 46, correctCount: 0, errorCounts: { timeout: 46 } });
+  const readWrites = () => page.evaluate(() => (window as Window & {
+    countCompletionWrites?: { writes: string[]; failed: boolean };
+  }).countCompletionWrites ?? { writes: [], failed: true });
+  const writes = await readWrites();
+  expect(writes.failed).toBe(false);
+  expect(writes.writes).toHaveLength(1);
+  expect((JSON.parse(writes.writes[0]) as { results: Array<{ id: string }> }).results.map(item => item.id)).toEqual([saved.id]);
   await expectClock();
   await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
   await expectClock();
   await advanceClock(1_500);
   await expect(page.locator('.stage-result')).toBeVisible();
   expect((await readResults()).map(item => item.id)).toEqual([saved.id]);
+  expect(await readWrites()).toEqual(writes);
   await expectClock();
   expect(pageErrors).toEqual([]);
   expect(consoleErrors).toEqual([]);
