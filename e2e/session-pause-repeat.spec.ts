@@ -186,3 +186,58 @@ test('오답 신호 유지 중 종료 확인창은 남은 표시 시간을 보�
   await expect(workspace.locator('.answer-signal')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
+
+test('길 만들기 실전형 경로 오답은 빨간 신호를 표시하고 한 번만 이동한다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  await page.addInitScript(() => { Math.random = () => 0; });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  await page.getByRole('button', { name: /길 만들기, 난이도 상, 설정 열기/ }).click();
+  const stage = page.locator('section[data-game="path"]');
+  await expect(stage).toBeVisible();
+  const origin = Date.UTC(2030, 0, 9);
+  await page.clock.install({ time: origin });
+  await page.clock.pauseAt(origin + 60_000);
+  await stage.getByRole('button', { name: /^실전형 연습 시작/ }).click();
+  const workspace = page.locator('.game-workspace.game-path');
+  for (const second of ['3', '2', '1']) {
+    await expect(workspace.locator('.game-preparation > b')).toHaveText(second);
+    await page.clock.runFor(1050);
+  }
+  await expect(workspace.locator('.path-grid')).toBeVisible();
+  await expect(workspace.locator('.path-cell[data-fence="empty"]')).toHaveCount(25);
+  await expect(workspace.locator('.workspace-progress > span')).toContainText('1 / 4');
+  await workspace.locator('.path-submit').click();
+  const signal = workspace.locator('.answer-signal');
+  await expect(signal).toBeVisible();
+  await expect(signal).toHaveText('오답');
+  await expect(signal).toHaveAttribute('aria-label', '응답 결과: 오답');
+  await expect(signal).toHaveAttribute('data-feedback-tone', 'error');
+  await expect(signal).toHaveCSS('color', 'rgb(163, 63, 73)');
+  await expect(signal.locator('i')).toHaveCSS('background-color', 'rgb(163, 63, 73)');
+  await expect(workspace.locator(':scope > .sr-only[aria-live="polite"]')).toContainText('오답');
+  await expect(workspace.locator('.workspace-foot > b')).toHaveText('');
+  await expect(workspace.locator('.path-submit')).toBeDisabled();
+  await expect(workspace.locator('.path-toolbar button')).toBeDisabled();
+  await expect(workspace.locator('.path-grid button:enabled')).toHaveCount(0);
+  await page.keyboard.press('Slash');
+  await page.keyboard.press('Enter');
+  await expect(workspace.locator('.path-cell[data-fence="empty"]')).toHaveCount(25);
+  await page.clock.runFor(549);
+  await expect(workspace.locator('.workspace-progress > span')).toContainText('1 / 4');
+  await expect(signal).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('path-simulation-error-signal.png') });
+  await page.clock.runFor(1);
+  await expect(workspace.locator('.workspace-progress > span')).toContainText('2 / 4');
+  await expect(signal).toHaveCount(0);
+  await expect(workspace.locator('.path-submit')).toBeEnabled();
+  await expect(workspace.locator('.path-toolbar button')).toBeEnabled();
+  await expect(workspace.locator('.path-grid button:disabled')).toHaveCount(0);
+  await expect(workspace.locator('.path-cell[data-fence="empty"]')).toHaveCount(25);
+  await page.clock.runFor(550);
+  await expect(workspace.locator('.workspace-progress > span')).toContainText('2 / 4');
+  await page.screenshot({ path: testInfo.outputPath('path-simulation-next-once.png') });
+  expect(errors).toEqual([]);
+});

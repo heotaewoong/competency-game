@@ -2950,7 +2950,7 @@ function PathGame({ onFinish, onClose, config }: GameProps & { config: PracticeC
     const routeSummary = routes.map(({ vehicle, exit }) => `${vehicle.id}→${exit ? `${edgeSideLabel[exit.side]} ${exit.index + 1}번` : '경로 반복·중단'}`).join(' · ');
     if (!routesOk) {
       const review = { errorCode: 'path-route', selected: `${routeSummary} · 울타리 ${count}개`, explanation: '한 개 이상의 차량이 지정된 목표와 다른 위치에 도착했습니다.' };
-      if (mode === 'simulation') { advanceRound(false, '', review); return; }
+      if (mode === 'simulation') { advanceRound(false, '오답 · 목표 도착 위치 불일치', review); return; }
       hadErrorRef.current = true;
       scoreRef.current.attemptErrors += 1;
       recordPathReview(false, review.errorCode, review.selected, review.explanation);
