@@ -19,6 +19,7 @@ const games = {
 type StartedSimulation = {
   workspace: Locator;
   pageErrors: string[];
+  clockStart?: { wall: number; performance: number };
 };
 
 async function startSimulation(page: Page, game: SimulationGame, clockDay: number): Promise<StartedSimulation> {
@@ -41,6 +42,9 @@ async function startSimulation(page: Page, game: SimulationGame, clockDay: numbe
   const clockOrigin = Date.UTC(2035, 0, clockDay);
   await page.clock.install({ time: clockOrigin });
   await page.clock.pauseAt(clockOrigin + 60_000);
+  const clockStart = game.id === 'count'
+    ? await page.evaluate(() => ({ wall: Date.now(), performance: performance.now() }))
+    : undefined;
   await stage.getByRole('button', { name: /^실전형 연습 시작/ }).click();
 
   // N-back은 자체 라운드 카운트다운이 곧바로 시작되고, 나머지 게임은
@@ -49,14 +53,15 @@ async function startSimulation(page: Page, game: SimulationGame, clockDay: numbe
     const preparation = page.locator('.game-preparation');
     for (const second of ['3', '2', '1']) {
       await expect(preparation.locator('> b')).toHaveText(second);
-      await page.clock.runFor(1_050);
+      // Count의 첫 350ms 준비를 소비하지 않도록 이 게임만 정확히 정렬한다.
+      await page.clock.runFor(game.id === 'count' ? 1_000 : 1_050);
     }
   }
 
   const workspace = page.locator(`.game-workspace.game-${game.id}`);
   await expect(workspace).toBeVisible();
   await expect(workspace.locator('.mode-chip')).toHaveText('실전형 연습');
-  return { workspace, pageErrors };
+  return { workspace, pageErrors, clockStart };
 }
 
 async function runPastDeadline(page: Page, deadline: Locator, expectedDuration: number) {
@@ -295,26 +300,102 @@ test('개수 비교하기 실전형은 준비·1초 제시·3초 응답 46문항
   // 제품 제한시간보다 테스트 러너 상한이 먼저 끝나지 않게 여유를 둔다.
   test.setTimeout(420_000);
   const game = games.count;
-  const { workspace, pageErrors } = await startSimulation(page, game, 6);
+  const consoleErrors: string[] = [];
+  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
+  const { workspace, pageErrors, clockStart } = await startSimulation(page, game, 6);
+  expect(clockStart).toBeDefined();
+  let elapsedMs = 3_000;
+  const expectClock = async () => {
+    expect(await page.evaluate(() => ({ wall: Date.now(), performance: performance.now() }))).toEqual({
+      wall: clockStart!.wall + elapsedMs,
+      performance: clockStart!.performance + elapsedMs,
+    });
+  };
+  const advanceClock = async (milliseconds: number) => {
+    await expectClock();
+    await page.clock.runFor(milliseconds);
+    elapsedMs += milliseconds;
+    await expectClock();
+  };
+  const expectDeadline = async (deadline: Locator, expectedDuration: number) => {
+    await expect(deadline).toHaveAttribute('data-deadline-active', 'true');
+    const duration = Number(await deadline.getAttribute('aria-valuemax'));
+    const remaining = Number(await deadline.getAttribute('aria-valuenow'));
+    expect(duration).toBe(expectedDuration);
+    expect(remaining).toBeGreaterThan(0);
+    expect(remaining).toBeLessThanOrEqual(duration);
+  };
+  const signal = workspace.locator('.answer-signal');
+  const liveResult = workspace.locator(':scope > .sr-only[aria-live="polite"]');
+  await expectClock();
 
   for (let index = 0; index < 46; index += 1) {
     await expect(workspace.locator('.workspace-progress > span')).toContainText(`${index + 1} / 46`);
     await expect(workspace.locator('.count-fixation')).toBeVisible();
-    await page.clock.runFor(400);
+    await expect(signal).toHaveCount(0);
+    await advanceClock(350);
 
     const stimulus = workspace.locator('.count-wrap.phase-show');
     await expect(stimulus).toBeVisible();
     await expect(workspace.locator('.stage-sequence')).toHaveAttribute('aria-label', /현재 1초 동안/);
-    await runPastDeadline(page, stimulus.locator('.time-strip'), 1_000);
+    await expectDeadline(stimulus.locator('.time-strip'), 1_000);
+    await advanceClock(1_000);
 
     const answer = workspace.locator('.count-wrap.phase-answer');
     await expect(answer).toBeVisible();
     await expect(answer.locator('.count-board button')).toHaveCount(2);
-    await runPastDeadline(page, answer.locator('.time-strip'), 3_000);
-    await page.clock.runFor(250);
+    await expectDeadline(answer.locator('.time-strip'), 3_000);
+    await advanceClock(3_000);
+    await expect(signal).toBeVisible();
+    await expect(signal).toHaveText('시간 초과');
+    await expect(signal).toHaveAttribute('data-feedback-tone', 'error');
+    await expect(answer.locator('.time-strip')).toHaveAttribute('data-deadline-active', 'false');
+    await expectAllButtonsDisabled(answer.locator('.count-board button'));
+    await expect(liveResult).toContainText('시간 초과');
+    await expect(liveResult).not.toContainText('정답은');
+    await expect(workspace.locator('.workspace-foot > b')).toBeEmpty();
+    if (index === 45) {
+      await advanceClock(149);
+      await expect(workspace.locator('.workspace-progress > span')).toContainText('46 / 46');
+      await expect(signal).toHaveText('시간 초과');
+      await expectAllButtonsDisabled(answer.locator('.count-board button'));
+      await expect(page.locator('.stage-result')).toHaveCount(0);
+      await advanceClock(1);
+    } else {
+      await advanceClock(150);
+    }
   }
 
   await expectSimulationResult(page, game, '오류', 46, pageErrors);
+  await expect(workspace).toHaveCount(0);
+  await expectClock();
+  const readResults = () => page.evaluate(() => {
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    const raw = generation ? localStorage.getItem(`nineflow-practice-results-v4:${generation}`) : null;
+    return raw ? (JSON.parse(raw) as { results: Array<{
+      id: string; gameId: string; errors: number;
+      detail: { trialCount: number; responseCount: number };
+      review: { summary: { attemptedCount: number; correctCount: number; errorCounts: Record<string, number> } };
+    }> }).results : [];
+  });
+  // 저장의 두 RAF/500ms fallback은 마지막 표시 완료와 별도로 진행한다.
+  await advanceClock(500);
+  await expect.poll(async () => (await readResults()).length).toBe(1);
+  const saved = (await readResults())[0];
+  expect(saved.id).toBeTruthy();
+  expect(saved.gameId).toBe('count');
+  expect(saved.errors).toBe(46);
+  expect(saved.detail).toMatchObject({ trialCount: 46, responseCount: 0 });
+  expect(saved.review.summary).toMatchObject({ attemptedCount: 46, correctCount: 0, errorCounts: { timeout: 46 } });
+  await expectClock();
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  await expectClock();
+  await advanceClock(1_500);
+  await expect(page.locator('.stage-result')).toBeVisible();
+  expect((await readResults()).map(item => item.id)).toEqual([saved.id]);
+  await expectClock();
+  expect(pageErrors).toEqual([]);
+  expect(consoleErrors).toEqual([]);
 });
 
 test('고양이 술래잡기 실전형은 위치 제시 네 단계와 색상 판단 20라운드를 완주한다', async ({ page }) => {
