@@ -327,6 +327,9 @@ test('도형 순서 실전형 정오 표시는 고정 간격과 일시정지 잔
   const confirmation = page.locator('.session-confirm[role="alertdialog"]');
   await expect(confirmation).toBeVisible();
   await expect(deadline.locator('.time-track > i')).toHaveCSS('animation-play-state', 'paused');
+  await expect(stage.locator('.stage-content')).toHaveAttribute('inert', '');
+  await expect(stage.locator('.stage-content')).toHaveAttribute('aria-hidden', 'true');
+  await expect(stimulus).toHaveCount(0);
   // 첫 채점 시작 9000ms부터 응답 전 초점 20ms와 정지 전 300ms를 소비했다.
   const pausedRemainingMs = 3000 - (advancedMs - 9000);
   expect(pausedRemainingMs).toBe(2680);
@@ -335,7 +338,8 @@ test('도형 순서 실전형 정오 표시는 고정 간격과 일시정지 잔
   await expect(confirmation.getByRole('button', { name: '계속 연습' })).toBeFocused();
   await advanceClock(5000);
   await expect(progress).toHaveAttribute('aria-valuenow', '1');
-  await expect(stimulus).toHaveAttribute('aria-label', firstGlyph!);
+  // 확인창에 의해 접근성 탐색에서 숨겨진 도형의 DOM 상태만 확인한다.
+  await expect(workspace.locator('.nback-stimulus').getByRole('img', { includeHidden: true })).toHaveAttribute('aria-label', firstGlyph!);
   await expect(wrongAnswer).toHaveAttribute('aria-pressed', 'true');
   for (const action of await actions.all()) await expect(action).toBeDisabled();
   await expect(signal).toHaveText('오답');
@@ -346,6 +350,9 @@ test('도형 순서 실전형 정오 표시는 고정 간격과 일시정지 잔
   await expectClock();
   await expect(confirmation).toHaveCount(0);
   await expect(deadline.locator('.time-track > i')).toHaveCSS('animation-play-state', 'running');
+  await expect(stage.locator('.stage-content')).not.toHaveAttribute('inert', '');
+  await expect(stage.locator('.stage-content')).not.toHaveAttribute('aria-hidden', 'true');
+  await expect(stimulus).toHaveCount(1);
   await advanceClock(20);
   // 정지 중 초점 20ms는 보존됐지만, 재개 후 초점 20ms는 활성 시간을 소비한다.
   await advanceClock(pausedRemainingMs - 20 - 1);
