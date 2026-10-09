@@ -162,7 +162,7 @@ test('약속 위치 질문으로 넘어간 유지 Enter는 답안을 자동 선�
   }
   await expect(quantity).toHaveText('1');
   await expect(stage.locator('.appointment-practice-options > p > em')).toHaveText('총 1문항');
-  await stage.getByRole('checkbox', { name: /시간 제한 없이 연습/ }).check();
+  if (!(await stage.getByRole('checkbox', { name: /시간 제한 없이 연습/ }).isChecked())) await stage.getByText('시간 제한 없이 연습', { exact: true }).click();
   await expect(stage.getByRole('checkbox', { name: /시간 제한 없이 연습/ })).toBeChecked();
   await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
   const workspace = page.locator('.game-workspace.game-appointment');
