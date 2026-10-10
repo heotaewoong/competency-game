@@ -242,6 +242,187 @@ test('약속 위치 질문으로 넘어간 유지 Enter는 답안을 자동 선�
   expect(errors).toEqual([]);
 });
 
+test('약속 연습 결과 표시 900ms는 정지 잔여와 마지막 문항의 별도 저장을 보존한다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  const origin = Date.UTC(2030, 0, 15);
+  // 제품이 Date/타이머/RAF를 사용하기 전 설치하고 설정 화면은 자연스럽게 로드한다.
+  await page.clock.install({ time: origin });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  await page.getByRole('button', { name: /약속 정하기, 난이도 상, 설정 열기/ }).click();
+  const stage = page.locator('section[data-game="appointment"]');
+  await expect(stage).toBeVisible();
+  await stage.getByRole('button', { name: '2라운드 위치만 연습', exact: true }).click();
+  const quantity = stage.getByLabel('라운드당 문항 현재 값');
+  const configuredQuantity = Number(await quantity.textContent());
+  expect(Number.isInteger(configuredQuantity)).toBe(true);
+  expect(configuredQuantity).toBeGreaterThanOrEqual(1);
+  expect(configuredQuantity).toBeLessThanOrEqual(8);
+  for (let current = configuredQuantity; current !== 2; current += current > 2 ? -1 : 1) {
+    const decreasing = current > 2;
+    await stage.getByRole('button', { name: decreasing ? '라운드당 문항 줄이기' : '라운드당 문항 늘리기', exact: true }).click();
+    await expect(quantity).toHaveText(String(current + (decreasing ? -1 : 1)));
+  }
+  await expect(stage.locator('.appointment-practice-options > p > em')).toHaveText('총 2문항');
+  if (!(await stage.getByRole('checkbox', { name: /시간 제한 없이 연습/ }).isChecked())) await stage.getByText('시간 제한 없이 연습', { exact: true }).click();
+  await expect(stage.getByRole('checkbox', { name: /시간 제한 없이 연습/ })).toBeChecked();
+  await page.clock.pauseAt(origin + 60_000);
+  const clockStart = await page.evaluate(() => ({ wall: Date.now(), ticks: performance.now() }));
+  let advancedMs = 0;
+  const expectClock = async () => {
+    expect(await page.evaluate(() => ({ wall: Date.now(), ticks: performance.now() }))).toEqual({
+      wall: clockStart.wall + advancedMs, ticks: clockStart.ticks + advancedMs,
+    });
+  };
+  const advanceClock = async (ms: number) => {
+    await page.clock.runFor(ms);
+    advancedMs += ms;
+    await expectClock();
+  };
+  const readState = () => page.evaluate(() => {
+    const workspace = document.querySelector('.game-workspace.game-appointment');
+    const choices = Array.from(workspace?.querySelectorAll<HTMLButtonElement>('.location-choice-grid button') ?? []);
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    if (!generation || !/^[A-Za-z0-9_-]{1,128}$/.test(generation)) throw new Error('활성 저장 세대가 올바르지 않습니다.');
+    const raw = localStorage.getItem(`nineflow-practice-results-v4:${generation}`);
+    const envelope = raw === null ? null : JSON.parse(raw) as { version: number; generation: string; results: Array<{
+      id: string; gameId: string; accuracy: number; errors: number;
+      detail: { trialCount: number; responseCount: number; correctCount: number; completedRounds: number; quantity: number };
+      review: { summary: { attemptedCount: number; correctCount: number }; attempts: Array<{ id: string; status: string; expected: string; selected: string }> };
+    }> };
+    if (raw !== null && (!envelope || envelope.version !== 4 || envelope.generation !== generation || !Array.isArray(envelope.results))) throw new Error('활성 저장 묶음이 올바르지 않습니다.');
+    return {
+      wall: Date.now(), ticks: performance.now(), generation, saved: envelope?.results ?? [],
+      progress: workspace?.querySelector('.workspace-progress span')?.textContent,
+      questionCount: workspace?.querySelectorAll('.appointment-question').length ?? 0,
+      choiceCount: choices.length, disabledCount: choices.filter(button => button.disabled).length,
+      signal: workspace?.querySelector('.answer-signal')?.textContent,
+      tone: workspace?.querySelector('.answer-signal')?.getAttribute('data-feedback-tone'),
+      footer: workspace?.querySelector('.workspace-foot > b')?.textContent,
+      live: workspace?.querySelector(':scope > [aria-live="polite"]')?.textContent,
+      inert: Boolean(workspace?.closest('[inert]')),
+      resultCount: document.querySelectorAll('.stage-result').length,
+    };
+  });
+  const snapshots: Record<string, Awaited<ReturnType<typeof readState>>> = {};
+  const checkpoint = async (name: string) => {
+    snapshots[name] = await readState();
+    await expectClock();
+    return snapshots[name];
+  };
+  const initial = await checkpoint('initial');
+  expect(initial.saved).toEqual([]);
+  const answers: Array<{ expected: string; selected: string }> = [];
+  try {
+    await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
+    await expectClock();
+    const workspace = page.locator('.game-workspace.game-appointment');
+    for (const second of ['3', '2', '1']) {
+      await expect(workspace.locator('.game-preparation > b')).toHaveText(second);
+      await advanceClock(1000);
+    }
+    await workspace.getByRole('button', { name: '이 라운드 시작', exact: false }).click();
+    await expectClock();
+    for (let trial = 0; trial < 2; trial += 1) {
+      const people: string[][] = [];
+      const next = workspace.locator('.appointment-stimulus .single-action');
+      for (let person = 1; person <= 3; person += 1) {
+        await expect(workspace.locator('.appointment-stimulus .appointment-phase-meta b')).toHaveText(`${person} / 3`);
+        await expect(workspace.locator('.appointment-stimulus .appointment-phase-meta small')).toHaveText(`${trial + 1} / 2문항`);
+        const coordinates = await workspace.locator('.location-memory > i.selected small').allTextContents();
+        expect(coordinates.length).toBeGreaterThan(0);
+        expect(new Set(coordinates).size).toBe(coordinates.length);
+        for (const coordinate of coordinates) expect(coordinate).toMatch(/^[1-4]-[1-4]$/);
+        people.push(coordinates);
+        await expect(next).toHaveAttribute('aria-disabled', 'false');
+        await next.click();
+        await expectClock();
+        if (person < 3) await advanceClock(320);
+      }
+      const common = people[0].filter(coordinate => people[1].includes(coordinate) && people[2].includes(coordinate));
+      expect(common).toHaveLength(1);
+      await expect(workspace.locator('.appointment-question')).toBeVisible();
+      const choices = workspace.locator('.location-choice-grid button');
+      await expect(choices).toHaveCount(16);
+      expect(await choices.evaluateAll(buttons => buttons.filter(button => (button as HTMLButtonElement).disabled).length)).toBe(0);
+      const actualChoices = await choices.locator('small').allTextContents();
+      const selected = trial === 0 ? actualChoices.find(coordinate => coordinate !== common[0])! : common[0];
+      expect(actualChoices).toContain(selected);
+      const [row, column] = selected.split('-').map(Number);
+      await workspace.locator('.location-choice-grid').getByRole('button', { name: new RegExp(`${row}행 ${column}열$`) }).click();
+      await expectClock();
+      answers.push({ expected: common[0], selected });
+      const locked = { questionCount: 1, choiceCount: 16, disabledCount: 16,
+        progress: expect.stringMatching(new RegExp(`^${trial + 1} / 2 `)),
+        signal: trial === 0 ? '오답' : '정답', tone: trial === 0 ? 'error' : 'success',
+        resultCount: 0, generation: initial.generation, saved: [], inert: false,
+      };
+      expect(await checkpoint(`answered-${trial}`)).toMatchObject(locked);
+      await expect(workspace.locator('.answer-signal')).toBeVisible();
+      await expect(workspace.locator('.workspace-foot > b')).toHaveText(trial === 0 ? /^정답은 / : '정답');
+      await expect(workspace.locator(':scope > [aria-live="polite"]')).toContainText(trial === 0 ? '정답은 ' : '정답');
+      if (trial === 0) {
+        await advanceClock(300);
+        await workspace.getByRole('button', { name: '연습 닫기', exact: true }).click();
+        await expectClock();
+        const confirmation = page.locator('.session-confirm[role="alertdialog"]');
+        await expect(confirmation).toBeVisible();
+        await expect(stage.locator('.stage-content')).toHaveAttribute('inert', '');
+        await advanceClock(5000);
+        expect(await checkpoint('paused')).toMatchObject({ ...locked, inert: true });
+        await page.screenshot({ path: testInfo.outputPath('appointment-feedback-paused.png') });
+        await confirmation.getByRole('button', { name: '계속 연습', exact: true }).click();
+        await expectClock();
+        await expect(confirmation).toHaveCount(0);
+        await advanceClock(599);
+        expect(await checkpoint('resumed-899')).toMatchObject(locked);
+        await page.screenshot({ path: testInfo.outputPath('appointment-feedback-resumed-899.png') });
+        await advanceClock(1);
+        await expect(workspace.locator('.appointment-stimulus .appointment-phase-meta small')).toHaveText('2 / 2문항');
+        expect(await checkpoint('next-900')).toMatchObject({ questionCount: 0, choiceCount: 0, resultCount: 0, saved: [] });
+        await expect(workspace.locator('.answer-signal')).toHaveCount(0);
+      } else {
+        await advanceClock(899);
+        expect(await checkpoint('last-899')).toMatchObject(locked);
+        await page.screenshot({ path: testInfo.outputPath('appointment-final-feedback-899.png') });
+        await advanceClock(1);
+        await expect(page.getByRole('heading', { name: '약속 정하기 결과', exact: true })).toBeVisible();
+        const finished = await checkpoint('last-900');
+        expect(finished).toMatchObject({ resultCount: 1, questionCount: 0, generation: initial.generation });
+        // 두 RAF가 먼저 저장할 수도 있다. 500ms는 최소 보류 시간이 아닌 fallback이다.
+        expect(finished.saved.length).toBeLessThanOrEqual(1);
+      }
+      await expectClock();
+    }
+    await advanceClock(500);
+    const completed = await checkpoint('saved');
+    expect(completed.saved).toHaveLength(1);
+    const saved = completed.saved[0];
+    expect(saved.id).toMatch(/^appointment-.+/);
+    expect(saved).toMatchObject({ gameId: 'appointment', accuracy: 50, errors: 1,
+      detail: { trialCount: 2, responseCount: 2, correctCount: 1, completedRounds: 1, quantity: 2 },
+      review: { summary: { attemptedCount: 2, correctCount: 1 } },
+    });
+    const code = (coordinate: string) => { const [row, column] = coordinate.split('-').map(Number); return `${String.fromCharCode(64 + row)}${column}`; };
+    expect(saved.review.attempts).toEqual(answers.map((answer, index) => expect.objectContaining({
+      id: `attempt-${index}`, status: index === 0 ? 'error' : 'correct', expected: code(answer.expected), selected: code(answer.selected),
+    })));
+    await advanceClock(1500);
+    expect((await checkpoint('saved-stable')).saved.map(item => item.id)).toEqual([saved.id]);
+    await expect(page.locator('.stage-result .result-metrics article').filter({ hasText: '정확도' }).locator('b')).toHaveText('50%');
+    await expect(page.locator('.stage-result .result-metrics article').filter({ hasText: '오류' }).locator('b')).toHaveText('1');
+    await page.screenshot({ path: testInfo.outputPath('appointment-final-result-saved.png') });
+    await expectClock();
+    expect(errors).toEqual([]);
+  } finally {
+    await testInfo.attach('appointment-feedback-boundary-snapshots', {
+      body: JSON.stringify({ clockStart, advancedMs, answers, snapshots, errors }, null, 2), contentType: 'application/json',
+    });
+  }
+});
+
 async function startFeedbackSession(page: Page, mode: 'practice' | 'simulation') {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
