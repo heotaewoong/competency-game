@@ -528,7 +528,7 @@ test('약속 실전형 결과 표시 300ms는 정지 잔여와 다음 문항 입
       const locked = { questionCount: 1, choiceCount: 7, disabledCount: 7,
         progress: expect.stringMatching(new RegExp(`^${trial + 1} / 40 `)),
         signal: trial === 0 ? '오답' : '정답', tone: trial === 0 ? 'error' : 'success',
-        footer: '', live: expect.stringContaining(trial === 0 ? '오답' : '정답'),
+        footer: '', live: `40문항 중 ${trial + 1}번째. ${trial === 0 ? '오답' : '정답'}`,
         resultCount: 0, generation: initial.generation, saved: [], inert: false,
       };
       expect(await checkpoint(`answered-${trial}`)).toMatchObject(locked);
