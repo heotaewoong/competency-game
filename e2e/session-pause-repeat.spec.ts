@@ -1035,7 +1035,8 @@ test('오답 신호 유지 중 종료 확인창은 남은 표시 시간을 보�
   expect(errors).toEqual([]);
 });
 
-test('도형 순서 실전형 마감 직전 정답은 수락되고 고정 간격에서 초기화된다', async ({ page }, testInfo) => {
+for (const outcome of ['정답', '오답'] as const)
+test(`도형 순서 실전형 마감 직전 ${outcome}은 수락되고 고정 간격에서 초기화된다`, async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
@@ -1121,8 +1122,10 @@ test('도형 순서 실전형 마감 직전 정답은 수락되고 고정 간격
   const firstGlyph = await stimulus.getAttribute('aria-label');
   expect(firstGlyph).toBeTruthy();
   const correctDecision = firstGlyph === history[0] ? '2번째 전과 같음' : '2번째 전과 다름';
-  const correctAnswer = actions.filter({ hasText: correctDecision });
-  await expect(correctAnswer).toHaveCount(1);
+  const selectedDecision = outcome === '정답' ? correctDecision
+    : correctDecision === '2번째 전과 같음' ? '2번째 전과 다름' : '2번째 전과 같음';
+  const answer = actions.filter({ hasText: selectedDecision });
+  await expect(answer).toHaveCount(1);
   await expectClock();
   expect(advancedMs).toBe(9000);
   await advanceClock(2999);
@@ -1133,25 +1136,25 @@ test('도형 순서 실전형 마감 직전 정답은 수락되고 고정 간격
   expect(before.live).toBe(`47문항 중 1번째. 현재 도형 ${firstGlyph}. 지금 분류하세요.`);
   await page.screenshot({ path: testInfo.outputPath('nback-late-before-response.png') });
   await expectClock();
-  await correctAnswer.click();
+  await answer.click();
   // 입력 직후 DOM과 두 시계를 함께 읽어 다음 자극의 결과로 오인하지 않는다.
   const accepted = await readSnapshot();
   await testInfo.attach('nback-late-response-accepted', { body: JSON.stringify(accepted), contentType: 'application/json' });
-  expect(accepted).toMatchObject({ progress: '1', glyph: firstGlyph, enabled: 0, selected: [correctDecision],
-    signals: [{ label: '정답', tone: 'success', aria: '응답 결과: 정답' }],
+  expect(accepted).toMatchObject({ progress: '1', glyph: firstGlyph, enabled: 0, selected: [selectedDecision],
+    signals: [{ label: outcome, tone: outcome === '정답' ? 'success' : 'error', aria: `응답 결과: ${outcome}` }],
     generation: initial.generation, savedCount: 0, storageError: null, resultCount: 0 });
   expect(accepted.wall).toBe(clockStart.wall + 11999);
   expect(accepted.ticks).toBe(clockStart.ticks + 11999);
-  expect(accepted.live).toBe(`47문항 중 1번째. 정답 · 현재 도형 ${firstGlyph}. 응답 저장됨. 고정 간격이 끝나면 다음 도형으로 이동합니다.`);
-  expect(accepted.footer).toBe(`정답 · 현재 도형 ${firstGlyph}. 응답 저장됨. 고정 간격이 끝나면 다음 도형으로 이동합니다.`);
+  expect(accepted.live).toBe(`47문항 중 1번째. ${outcome} · 현재 도형 ${firstGlyph}. 응답 저장됨. 고정 간격이 끝나면 다음 도형으로 이동합니다.`);
+  expect(accepted.footer).toBe(`${outcome} · 현재 도형 ${firstGlyph}. 응답 저장됨. 고정 간격이 끝나면 다음 도형으로 이동합니다.`);
   await expect(signal).toBeVisible();
-  await expect(signal).toHaveCSS('color', 'rgb(25, 112, 103)');
+  await expect(signal).toHaveCSS('color', outcome === '정답' ? 'rgb(25, 112, 103)' : 'rgb(163, 63, 73)');
   await page.screenshot({ path: testInfo.outputPath('nback-late-response-accepted.png') });
   await expectClock();
   await advanceClock(1);
   const next = await readSnapshot();
   await testInfo.attach('nback-late-next-stimulus', { body: JSON.stringify(next), contentType: 'application/json' });
-  console.log('NBACK_LATE_RESPONSE_BOUNDARY', JSON.stringify({ before, accepted, next }));
+  console.log(outcome === '정답' ? 'NBACK_LATE_RESPONSE_BOUNDARY' : 'NBACK_LATE_WRONG_BOUNDARY', JSON.stringify({ before, accepted, next }));
   expect(next).toMatchObject({ progress: '2', enabled: 2, selected: [], signals: [],
     generation: initial.generation, savedCount: 0, storageError: null, resultCount: 0 });
   expect(next.glyph).toBeTruthy();
