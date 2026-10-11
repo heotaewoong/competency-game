@@ -214,7 +214,7 @@ test('도형 순서 기억하기 실전형은 각 라운드의 실제 정답을 
     const warmupCount = secondRound ? 3 : 2;
     const actionCount = position < warmupCount ? 0 : secondRound ? 3 : 2;
     if (position === 0) glyphHistory = [];
-    await expect(nbackStage.locator('.nback-status span')).toContainText(`ROUND ${round}`);
+    await expect(nbackStage.locator('.nback-status > div > span')).toContainText(`ROUND ${round}`);
     const actions = nbackStage.locator('.nback-actions button');
     await expect(actions).toHaveCount(actionCount);
     await expect(nbackStage.locator('.nback-stimulus')).toBeVisible();
