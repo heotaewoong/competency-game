@@ -1396,7 +1396,7 @@ function SimulationPreset({ gameId }: { gameId: GameId }) {
           {APPOINTMENT_ROUNDS.map((round) => <div key={round.kind}><dt>{round.number}라운드</dt><dd>{round.shortLabel} · {APPOINTMENT_SIMULATION_QUESTIONS_PER_ROUND}문항</dd></div>)}
           <div><dt>메뉴 답안</dt><dd>이미지 6개 · 공개 예시 기반 자체 구성</dd></div>
           <div><dt>버스 답안</dt><dd>숫자 5개 · 친구별 2·1·2개는 공개 예시 반복값</dd></div>
-          <div><dt>진행</dt><dd>자동 제시 · 정오 피드백 숨김</dd></div>
+          <div><dt>진행</dt><dd>자동 제시 · 정답 해설 숨김 · 정오 신호 표시</dd></div>
         </dl>
         <p>공식 영상에서 확인되는 네 라운드와 라운드별 10문항을 적용합니다. 1~3라운드의 ‘후반 4개’는 절반 이후로 운용하며, 정확한 전환 문항·노출시간·응답시간은 비공개라 약 4분에 맞춘 독립 훈련값입니다. 2024 공개자료의 버스 6선지 변형과 섞지 않았습니다.</p>
       </section>
