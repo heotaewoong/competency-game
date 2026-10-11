@@ -3417,6 +3417,7 @@ function NBackGame({ onFinish, onClose, glyphMnemonics, config, preferences }: G
     if (index <= lastCompletedIndexRef.current) return;
     lastCompletedIndexRef.current = index;
     setEarlyAdvancePending(false);
+    const omitted = mode === 'simulation' && !trial.warmup && answerRef.current === null;
     const score = scoreTrial(trial);
     if (index === trials.length - 1) {
       const nameLabelUsage = nameLabelUsageRef.current;
@@ -3449,7 +3450,7 @@ function NBackGame({ onFinish, onClose, glyphMnemonics, config, preferences }: G
     if (trials[index + 1]?.round !== trial.round) setCountdown(3);
     setIndex((value) => value + 1);
     setSelected(null);
-    setFeedback('');
+    setFeedback(omitted && trials[index + 1]?.round === trial.round ? '이전 문항: 시간 초과' : '');
   }, [glyphMnemonics, groups, guidedPacing, index, mode, onFinish, scoreTrial, scoredTotal, trial, trials]);
 
   function toggleNameLabels() {
@@ -3519,6 +3520,7 @@ function NBackGame({ onFinish, onClose, glyphMnemonics, config, preferences }: G
   const countdownHeading = roundTransition ? `${trial.round}라운드 전환` : mode === 'simulation' ? `${trial.round}라운드 시작` : '연습 시작';
   const selectedStatus = guidedPacing ? '응답 저장됨. 다음 도형 버튼을 누르세요.' : progression === 'fast' ? '응답 저장됨. 곧 다음 도형으로 이동합니다.' : '응답 저장됨. 고정 간격이 끝나면 다음 도형으로 이동합니다.';
   const statusMessage = countdown !== null ? `${countdownHeading}. ${countdown}초 뒤 시작합니다.` : trial.warmup ? `현재 도형 ${spokenGlyph}. 입력 없이 기억하세요.${guidedPacing ? ' 기억한 뒤 다음 도형 버튼을 누르세요.' : ''}` : selected ? `현재 도형 ${spokenGlyph}. ${selectedStatus}` : `현재 도형 ${spokenGlyph}. 지금 분류하세요.`;
+  const previousOmission = mode === 'simulation' && feedback === '이전 문항: 시간 초과';
   const frameFeedback = mode === 'simulation' && feedback ? `${feedback} · ${statusMessage}` : feedback;
   const answerClass = (decision: NBackDecision) => {
     const classes = selected === decision ? ['selected'] : [];
@@ -3536,7 +3538,7 @@ function NBackGame({ onFinish, onClose, glyphMnemonics, config, preferences }: G
           <div className="nback-countdown" role="timer" aria-live="polite" aria-label={`${countdownHeading} · ${countdown}초 뒤 도형 순서 게임 시작`}><span>{roundLabel} · {taskLabel}</span><strong>{countdownHeading}</strong><b>{countdown}</b><small>{roundTransition ? `${taskLabel} 규칙으로 바뀝니다. ` : ''}{helper}</small></div>
         ) : (
           <>
-            <div className="nback-status"><div><span>{roundLabel} · 묶음 {trial.group + 1}</span><b>{taskLabel}{trial.warmup ? ' · 기억 준비' : ' · 비교 판단'}</b></div>{mode === 'practice' && <button type="button" onClick={(event) => { toggleNameLabels(); restoreGameShortcutFocus(event.currentTarget); }}>이름표 {showName ? '숨기기' : '보기'}</button>}</div>
+            <div className="nback-status"><div><span>{roundLabel} · 묶음 {trial.group + 1}</span><b>{taskLabel}{trial.warmup ? ' · 기억 준비' : ' · 비교 판단'}</b></div>{previousOmission && <span className="answer-signal is-error" data-feedback-tone="error" aria-label="이전 문항 결과: 시간 초과"><i aria-hidden="true" />이전 문항: 시간 초과</span>}{mode === 'practice' && <button type="button" onClick={(event) => { toggleNameLabels(); restoreGameShortcutFocus(event.currentTarget); }}>이름표 {showName ? '숨기기' : '보기'}</button>}</div>
             {guidedPacing ? <p className="guided-pacing-note" role="status">시간 제한 없이 연습 중 · 기억·응답 후 직접 다음 도형으로 이동하세요</p> : <DeadlineBar key={`deadline-${trial.id}`} duration={paceMs} label="도형 제시시간" className="nback-time" active={!inputSettling} />}
             <NBackLagRail task={trial.task} warmup={trial.warmup} position={trial.position} />
             <div className="nback-stimulus" key={`stimulus-${trial.id}`}><span className="nback-now-chip">NOW · N</span><CognitiveGlyph variant={trial.variant} size={240} color="#237b76" label={glyphShapeNames[trial.variant]} /></div>
