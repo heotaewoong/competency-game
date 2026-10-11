@@ -423,6 +423,166 @@ test('약속 연습 결과 표시 900ms는 정지 잔여와 마지막 문항의 
   }
 });
 
+test('약속 마지막 결과의 실제 새로고침은 pagehide 우선 저장과 단일 기록을 보존한다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  const dialogs: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  page.on('dialog', async dialog => {
+    dialogs.push(dialog.type());
+    // 종료된 세션에 이탈 확인창이 남아 있으면 실제 reload를 허용하지 않고 실패로 남긴다.
+    await dialog.dismiss();
+  });
+  const origin = Date.UTC(2030, 0, 17);
+  await page.clock.install({ time: origin });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  await page.getByRole('button', { name: /약속 정하기, 난이도 상, 설정 열기/ }).click();
+  const stage = page.locator('section[data-game="appointment"]');
+  await expect(stage).toBeVisible();
+  await stage.getByRole('button', { name: '2라운드 위치만 연습', exact: true }).click();
+  const quantity = stage.getByLabel('라운드당 문항 현재 값');
+  const configuredQuantity = Number(await quantity.textContent());
+  expect(Number.isInteger(configuredQuantity)).toBe(true);
+  expect(configuredQuantity).toBeGreaterThanOrEqual(1);
+  expect(configuredQuantity).toBeLessThanOrEqual(8);
+  for (let current = configuredQuantity; current > 1; current -= 1) {
+    await stage.getByRole('button', { name: '라운드당 문항 줄이기', exact: true }).click();
+    await expect(quantity).toHaveText(String(current - 1));
+  }
+  await expect(stage.locator('.appointment-practice-options > p > em')).toHaveText('총 1문항');
+  if (!(await stage.getByRole('checkbox', { name: /시간 제한 없이 연습/ }).isChecked())) await stage.getByText('시간 제한 없이 연습', { exact: true }).click();
+  await expect(stage.getByRole('checkbox', { name: /시간 제한 없이 연습/ })).toBeChecked();
+  await page.clock.pauseAt(origin + 60_000);
+  const clockStart = await page.evaluate(() => ({ wall: Date.now(), ticks: performance.now() }));
+  let advancedMs = 0;
+  const expectClock = async () => {
+    expect(await page.evaluate(() => ({ wall: Date.now(), ticks: performance.now() }))).toEqual({
+      wall: clockStart.wall + advancedMs, ticks: clockStart.ticks + advancedMs,
+    });
+  };
+  const advanceClock = async (ms: number) => {
+    await page.clock.runFor(ms);
+    advancedMs += ms;
+    await expectClock();
+  };
+  const readState = () => page.evaluate(() => {
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    if (!generation || !/^[A-Za-z0-9_-]{1,128}$/.test(generation)) throw new Error('활성 저장 세대가 올바르지 않습니다.');
+    const raw = localStorage.getItem(`nineflow-practice-results-v4:${generation}`);
+    const envelope = raw === null ? null : JSON.parse(raw) as { version: number; generation: string; results: Array<{
+      id: string; gameId: string; accuracy: number; errors: number;
+      detail: { trialCount: number; responseCount: number; correctCount: number; completedRounds: number; quantity: number };
+      review: { summary: { attemptedCount: number; correctCount: number }; attempts: Array<{ id: string; status: string; expected: string; selected: string }> };
+    }> };
+    if (raw !== null && (!envelope || envelope.version !== 4 || envelope.generation !== generation || !Array.isArray(envelope.results))) throw new Error('활성 저장 묶음이 올바르지 않습니다.');
+    return { wall: Date.now(), ticks: performance.now(), generation, saved: envelope?.results ?? [],
+      resultCount: document.querySelectorAll('.stage-result').length,
+      pagehide: sessionStorage.getItem('test-appointment-reload-pagehide'),
+    };
+  });
+  const snapshots: Record<string, Awaited<ReturnType<typeof readState>>> = {};
+  const people: string[][] = [];
+  let expectedCode = '';
+  try {
+    snapshots.initial = await readState();
+    expect(snapshots.initial.saved).toEqual([]);
+    await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
+    await expectClock();
+    const workspace = page.locator('.game-workspace.game-appointment');
+    for (const second of ['3', '2', '1']) {
+      await expect(workspace.locator('.game-preparation > b')).toHaveText(second);
+      await advanceClock(1000);
+    }
+    await workspace.getByRole('button', { name: '이 라운드 시작', exact: false }).click();
+    await expectClock();
+    const next = workspace.locator('.appointment-stimulus .single-action');
+    for (let person = 1; person <= 3; person += 1) {
+      await expect(workspace.locator('.appointment-stimulus .appointment-phase-meta b')).toHaveText(`${person} / 3`);
+      const coordinates = await workspace.locator('.location-memory > i.selected small').allTextContents();
+      expect(coordinates.length).toBeGreaterThan(0);
+      expect(new Set(coordinates).size).toBe(coordinates.length);
+      for (const coordinate of coordinates) expect(coordinate).toMatch(/^[1-4]-[1-4]$/);
+      people.push(coordinates);
+      await expect(next).toHaveAttribute('aria-disabled', 'false');
+      await next.click();
+      await expectClock();
+      if (person < 3) await advanceClock(320);
+    }
+    const common = people[0].filter(coordinate => people[1].includes(coordinate) && people[2].includes(coordinate));
+    expect(common).toHaveLength(1);
+    await expect(workspace.locator('.appointment-question')).toBeVisible();
+    const [row, column] = common[0].split('-').map(Number);
+    expectedCode = `${String.fromCharCode(64 + row)}${column}`;
+    const correct = workspace.locator('.location-choice-grid').getByRole('button', { name: new RegExp(`${row}행 ${column}열$`) });
+    await expect(correct.locator('small')).toHaveText(common[0]);
+    await correct.click();
+    await expectClock();
+    await expect(workspace.locator('.answer-signal')).toHaveText('정답');
+    await advanceClock(899);
+    await expect(page.locator('.stage-result')).toHaveCount(0);
+    await advanceClock(1);
+    await expect(page.getByRole('heading', { name: '약속 정하기 결과', exact: true })).toBeVisible();
+    await expect(page.locator('.stage-result .result-metrics article').filter({ hasText: '정확도' }).locator('b')).toHaveText('100%');
+    await expect(page.locator('.stage-result .result-metrics article').filter({ hasText: '오류' }).locator('b')).toHaveText('0');
+    snapshots.beforeReload = await readState();
+    await expectClock();
+    expect(snapshots.beforeReload).toMatchObject({ generation: snapshots.initial.generation, saved: [], resultCount: 1, pagehide: null });
+    await page.screenshot({ path: testInfo.outputPath('appointment-result-before-reload-unsaved.png') });
+    await expectClock();
+    // finish의 실제 저장 listener 뒤에서 관측한다. 이벤트·저장·타이머를 대체하지 않는다.
+    await page.evaluate(() => window.addEventListener('pagehide', event => {
+      const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+      sessionStorage.setItem('test-appointment-reload-pagehide', JSON.stringify({
+        wall: Date.now(), ticks: performance.now(), persisted: event.persisted, generation,
+        raw: localStorage.getItem(`nineflow-practice-results-v4:${generation}`),
+      }));
+    }, { once: true }));
+    await expectClock();
+    await page.reload();
+    snapshots.afterReloadFrozen = await readState();
+    expect(dialogs).toEqual([]);
+    expect(snapshots.afterReloadFrozen.generation).toBe(snapshots.initial.generation);
+    expect(snapshots.afterReloadFrozen.wall).toBe(clockStart.wall + advancedMs);
+    expect(snapshots.afterReloadFrozen.pagehide).not.toBeNull();
+    const hidden = JSON.parse(snapshots.afterReloadFrozen.pagehide!) as {
+      wall: number; ticks: number; persisted: boolean; generation: string; raw: string;
+    };
+    expect(hidden).toMatchObject({ wall: clockStart.wall + advancedMs, ticks: clockStart.ticks + advancedMs,
+      persisted: false, generation: snapshots.initial.generation,
+    });
+    const hiddenEnvelope = JSON.parse(hidden.raw) as { version: number; generation: string; results: typeof snapshots.afterReloadFrozen.saved };
+    expect(hiddenEnvelope).toMatchObject({ version: 4, generation: snapshots.initial.generation });
+    expect(hiddenEnvelope.results).toHaveLength(1);
+    const saved = hiddenEnvelope.results[0];
+    expect(saved.id).toMatch(/^appointment-.+/);
+    expect(saved).toMatchObject({ gameId: 'appointment', accuracy: 100, errors: 0,
+      completedAt: new Date(snapshots.beforeReload.wall).toISOString(),
+      detail: { trialCount: 1, responseCount: 1, correctCount: 1, completedRounds: 1, quantity: 1 },
+      review: { summary: { attemptedCount: 1, correctCount: 1 } },
+    });
+    expect(saved.review.attempts).toEqual([expect.objectContaining({ id: 'attempt-0', status: 'correct', expected: expectedCode, selected: expectedCode })]);
+    expect(snapshots.afterReloadFrozen.saved).toEqual([saved]);
+    // 새 문서의 performance 기준은 재생되는 clock 로그에 따라 달라질 수 있다.
+    const reloadedClock = await page.evaluate(() => ({ wall: Date.now(), ticks: performance.now() }));
+    expect(reloadedClock).toEqual({ wall: snapshots.afterReloadFrozen.wall, ticks: snapshots.afterReloadFrozen.ticks });
+    await page.clock.resume();
+    await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+    await expect(page.locator('.record-summary article').filter({ hasText: '저장된 최근 연습' }).locator('b')).toHaveText('1회');
+    await expect(page.getByRole('button', { name: '약속 정하기 최근 세션 복습', exact: true })).toBeVisible();
+    snapshots.restored = await readState();
+    expect(snapshots.restored.generation).toBe(snapshots.initial.generation);
+    expect(snapshots.restored.saved).toEqual([saved]);
+    await page.screenshot({ path: testInfo.outputPath('appointment-result-restored-after-reload.png') });
+    expect(dialogs).toEqual([]);
+    expect(errors).toEqual([]);
+  } finally {
+    await testInfo.attach('appointment-real-reload-save-snapshots', {
+      body: JSON.stringify({ clockStart, advancedMs, people, expectedCode, snapshots, dialogs, errors }, null, 2), contentType: 'application/json',
+    });
+  }
+});
+
 test('약속 실전형 결과 표시 300ms는 정지 잔여와 다음 문항 입력을 보존한다', async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
