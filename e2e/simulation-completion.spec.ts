@@ -26,9 +26,11 @@ async function startSimulation(page: Page, game: SimulationGame, clockDay: numbe
   const pageErrors: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
   await page.addInitScript(() => {
-    // 문제 배열은 고정하되 게임의 공개 UI와 타이머를 그대로 통과한다.
+    // 난수만 고정하고 정답은 실제 도형 이력으로 판단한다.
     Math.random = () => 0;
   });
+  const clockOrigin = Date.UTC(2035, 0, clockDay);
+  if (game.id === 'nback') await page.clock.install({ time: clockOrigin });
   await page.goto('/');
   await page.getByRole('button', {
     name: new RegExp(`${game.title}, 난이도 ${game.difficulty}, 설정 열기`),
@@ -37,12 +39,11 @@ async function startSimulation(page: Page, game: SimulationGame, clockDay: numbe
   const stage = page.locator(`section[data-game="${game.id}"]`);
   await expect(stage).toBeVisible();
 
-  // 지연 로딩은 실제 시간으로 끝낸 뒤 게임 세션을 만들기 직전에만 시계를
-  // 정지한다. 이 순서가 번들 로딩까지 멈춰 게임이 시작되지 않는 회귀를 막는다.
-  const clockOrigin = Date.UTC(2035, 0, clockDay);
-  await page.clock.install({ time: clockOrigin });
+  // 번들은 자연스럽게 로드하고 세션 직전에 정지한다. N-back의 정확 경계는
+  // 탐색 전 설치하고, 다른 완주는 기존 설치 순서를 유지한다.
+  if (game.id !== 'nback') await page.clock.install({ time: clockOrigin });
   await page.clock.pauseAt(clockOrigin + 60_000);
-  const clockStart = game.id === 'count'
+  const clockStart = game.id === 'count' || game.id === 'nback'
     ? await page.evaluate(() => ({ wall: Date.now(), performance: performance.now() }))
     : undefined;
   await stage.getByRole('button', { name: /^실전형 연습 시작/ }).click();
@@ -193,7 +194,36 @@ test('길 만들기 실전형은 5×5 네 문제와 문제별 제한시간을 �
 test('도형 순서 기억하기 실전형은 각 라운드의 실제 정답을 잠그고 47개 문항을 채점한다', async ({ page }) => {
   test.setTimeout(240_000);
   const game = games.nback;
-  const { workspace, pageErrors } = await startSimulation(page, game, 4);
+  const consoleErrors: string[] = [];
+  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
+  const { workspace, pageErrors, clockStart } = await startSimulation(page, game, 4);
+  expect(clockStart).toBeDefined();
+  let elapsedMs = 0;
+  const expectClock = async () => {
+    expect(await page.evaluate(() => ({ wall: Date.now(), performance: performance.now() }))).toEqual({
+      wall: clockStart!.wall + elapsedMs,
+      performance: clockStart!.performance + elapsedMs,
+    });
+  };
+  const advanceClock = async (milliseconds: number) => {
+    await expectClock();
+    await page.clock.runFor(milliseconds);
+    elapsedMs += milliseconds;
+    await expectClock();
+  };
+  const readResults = () => page.evaluate(() => {
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    const raw = generation ? localStorage.getItem(`nineflow-practice-results-v4:${generation}`) : null;
+    return { generation, results: raw ? (JSON.parse(raw) as { results: Array<{
+      id: string; gameId: string; accuracy: number; errors: number;
+      detail: { trialCount: number; responseCount: number; correctCount: number };
+      review: { summary: { attemptedCount: number; correctCount: number; errorCounts: Record<string, number> } };
+    }> }).results : [] };
+  });
+  const generation = (await readResults()).generation;
+  expect(generation).toBeTruthy();
+  expect((await readResults()).results).toEqual([]);
+  await expectClock();
   const nbackStage = workspace.locator('.nback-stage');
 
   const runNBackCountdown = async (round: number) => {
@@ -201,7 +231,7 @@ test('도형 순서 기억하기 실전형은 각 라운드의 실제 정답을 
     for (const second of ['3', '2', '1']) {
       await expect(countdown.locator('> b')).toHaveText(second);
       await expect(countdown.locator('> span')).toContainText(`ROUND ${round}`);
-      await page.clock.runFor(1_050);
+      await advanceClock(1_000);
     }
   };
 
@@ -247,8 +277,69 @@ test('도형 순서 기억하기 실전형은 각 라운드의 실제 정답을 
       await expect(liveResult).toContainText('고정 간격이 끝나면 다음 도형으로 이동합니다.');
       await expect(liveResult).not.toContainText('정답은');
       await expect(workspace.locator('.workspace-foot > b')).not.toContainText('정답은');
+      await expectClock();
     }
-    await runPastDeadline(page, nbackStage.locator('.nback-time'), 3_000);
+    const deadline = nbackStage.locator('.nback-time');
+    await expect(deadline).toHaveAttribute('data-deadline-active', 'true');
+    expect(Number(await deadline.getAttribute('aria-valuemax'))).toBe(3_000);
+    const remaining = Number(await deadline.getAttribute('aria-valuenow'));
+    expect(remaining).toBeGreaterThan(0);
+    expect(remaining).toBeLessThanOrEqual(3_000);
+    if (index === 51) {
+      expect(elapsedMs).toBe(159_000);
+      await advanceClock(2_999);
+      const before = await page.evaluate(() => {
+        const stage = document.querySelector('.game-workspace.game-nback');
+        const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+        const raw = generation ? localStorage.getItem(`nineflow-practice-results-v4:${generation}`) : null;
+        return {
+          wall: Date.now(), ticks: performance.now(), generation,
+          savedCount: raw ? (JSON.parse(raw) as { results: unknown[] }).results.length : 0,
+          progress: stage?.querySelector('.workspace-progress i')?.getAttribute('aria-valuenow'),
+          glyph: stage?.querySelector('.nback-stimulus [role="img"]')?.getAttribute('aria-label'),
+          enabled: Array.from(stage?.querySelectorAll<HTMLButtonElement>('.nback-actions button') ?? []).filter(button => !button.disabled).length,
+          selected: stage?.querySelectorAll('.nback-actions button[aria-pressed="true"]').length,
+          signals: Array.from(stage?.querySelectorAll('.answer-signal') ?? []).map(signal => ({
+            label: signal.textContent, ariaLabel: signal.getAttribute('aria-label'), tone: signal.getAttribute('data-feedback-tone'),
+          })),
+          resultCount: document.querySelectorAll('.stage-result').length,
+        };
+      });
+      await test.info().attach('nback-final-before-deadline', { body: JSON.stringify(before), contentType: 'application/json' });
+      expect(before).toMatchObject({
+        wall: clockStart!.wall + 161_999, ticks: clockStart!.performance + 161_999,
+        generation, savedCount: 0, progress: '47', glyph, enabled: 3, selected: 0, resultCount: 0,
+        signals: [{ label: '이전 문항: 시간 초과', ariaLabel: '이전 문항 결과: 시간 초과', tone: 'error' }],
+      });
+      await expectClock();
+      // 마지막 채점 전에 현재 세대 v4 쓰기 시도만 관찰하고 원래 호출을 보존한다.
+      await page.evaluate(() => {
+        const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+        if (!generation) throw new Error('N-back 완료 전 저장 세대가 준비되지 않았습니다.');
+        const activeKey = `nineflow-practice-results-v4:${generation}`;
+        const observation = { writes: [] as string[], failed: false };
+        (window as Window & { nbackCompletionWrites?: typeof observation }).nbackCompletionWrites = observation;
+        const originalSetItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function setItem(key, value) {
+          try {
+            if (this === window.localStorage && key === activeKey) observation.writes.push(value);
+          } catch {
+            observation.failed = true;
+          }
+          return originalSetItem.call(this, key, value);
+        };
+      });
+      await expectClock();
+      await advanceClock(1);
+      const after = { ...(await page.evaluate(() => ({ wall: Date.now(), ticks: performance.now(), resultCount: document.querySelectorAll('.stage-result').length }))), ...(await readResults()) };
+      await test.info().attach('nback-final-at-deadline', { body: JSON.stringify(after), contentType: 'application/json' });
+      console.log('NBACK_FINAL_BOUNDARY', JSON.stringify({ before, after }));
+      expect(elapsedMs).toBe(162_000);
+      expect(after).toMatchObject({ wall: clockStart!.wall + 162_000, ticks: clockStart!.performance + 162_000, resultCount: 1, generation, results: [] });
+      await expectClock();
+    } else {
+      await advanceClock(3_000);
+    }
     if (shouldAnswerCorrectly) await expect(progress).toHaveAttribute('aria-valuenow', String(currentProgress + 1));
 
     if (index === 24) await runNBackCountdown(2);
@@ -259,6 +350,34 @@ test('도형 순서 기억하기 실전형은 각 라운드의 실제 정답을 
   await expect(page.locator('.nback-result-detail')).toContainText('시간 초과45');
   await expect(page.locator('.nback-result-detail')).toContainText('2-back 정확도4%');
   await expect(page.locator('.nback-result-detail')).toContainText('2·3-back 정확도4%');
+  await expect(workspace).toHaveCount(0);
+  await expectClock();
+  await advanceClock(500);
+  const stored = await readResults();
+  expect(stored.generation).toBe(generation);
+  expect(stored.results).toHaveLength(1);
+  const saved = stored.results[0];
+  expect(saved.id).toBeTruthy();
+  expect(saved).toMatchObject({ gameId: 'nback', accuracy: 4, errors: 45, detail: { trialCount: 47, responseCount: 2, correctCount: 2 } });
+  expect(saved.review.summary).toMatchObject({ attemptedCount: 47, correctCount: 2, errorCounts: { timeout: 45 } });
+  const readWrites = () => page.evaluate(() => (window as Window & {
+    nbackCompletionWrites?: { writes: string[]; failed: boolean };
+  }).nbackCompletionWrites ?? { writes: [], failed: true });
+  const writes = await readWrites();
+  expect(writes.failed).toBe(false);
+  expect(writes.writes).toHaveLength(1);
+  expect((JSON.parse(writes.writes[0]) as { results: Array<{ id: string }> }).results.map(item => item.id)).toEqual([saved.id]);
+  await expectClock();
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  await expectClock();
+  await advanceClock(1_500);
+  await expect(page.locator('.stage-result')).toBeVisible();
+  expect((await readResults()).results.map(item => item.id)).toEqual([saved.id]);
+  expect(await readWrites()).toEqual(writes);
+  console.log('NBACK_FINAL_STORAGE', JSON.stringify({ elapsedMs, generation, id: saved.id, writes: writes.writes.length, summary: saved.review.summary, detail: saved.detail }));
+  await expectClock();
+  expect(pageErrors).toEqual([]);
+  expect(consoleErrors).toEqual([]);
 });
 
 test('숫자 누르기 실전형은 1·2라운드 각 6문항과 전환 타이머를 지킨다', async ({ page }) => {
