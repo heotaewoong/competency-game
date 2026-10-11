@@ -1035,6 +1035,151 @@ test('오답 신호 유지 중 종료 확인창은 남은 표시 시간을 보�
   expect(errors).toEqual([]);
 });
 
+test('도형 순서 실전형 첫 무응답 경계는 다음 자극과 새 정답을 구분한다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  const origin = Date.UTC(2030, 0, 11);
+  // 앱의 타이머와 RAF가 만들어지기 전에 가상 시계를 설치한다.
+  await page.clock.install({ time: origin });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  await page.getByRole('button', { name: /도형 순서 기억하기, 난이도 상, 설정 열기/ }).click();
+  const stage = page.locator('section[data-game="nback"]');
+  await expect(stage).toBeVisible();
+  await stage.getByRole('radio', { name: /실전형 연습/ }).click();
+  await expect(stage.locator('.nback-simulation-preset em')).toHaveText('훈련용 47문항');
+  const readSnapshot = () => page.evaluate(() => {
+    const workspace = document.querySelector('.game-workspace.game-nback');
+    const actions = Array.from(workspace?.querySelectorAll<HTMLButtonElement>('.nback-actions button') ?? []);
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    let savedCount: number | null = null;
+    let storageError: string | null = null;
+    try {
+      if (!generation || !/^[A-Za-z0-9_-]{1,128}$/.test(generation)) throw new Error('활성 저장 세대가 올바르지 않습니다.');
+      const raw = localStorage.getItem(`nineflow-practice-results-v4:${generation}`);
+      if (raw === null) savedCount = 0;
+      else {
+        const envelope = JSON.parse(raw) as { version: number; generation: string; results: unknown[] };
+        if (envelope.version !== 4 || envelope.generation !== generation || !Array.isArray(envelope.results)) throw new Error('결과 저장 형식이 올바르지 않습니다.');
+        savedCount = envelope.results.length;
+      }
+    } catch (error) { storageError = String(error); }
+    return {
+      wall: Date.now(), ticks: performance.now(), generation, savedCount, storageError,
+      progress: workspace?.querySelector('.workspace-progress i')?.getAttribute('aria-valuenow') ?? null,
+      glyph: workspace?.querySelector('.nback-stimulus [role="img"]')?.getAttribute('aria-label') ?? null,
+      enabled: actions.filter(action => !action.disabled).length,
+      selected: actions.filter(action => action.getAttribute('aria-pressed') === 'true').length,
+      signals: Array.from(workspace?.querySelectorAll('.answer-signal') ?? []).map(signal => ({
+        label: signal.textContent, tone: signal.getAttribute('data-feedback-tone'),
+      })),
+      live: workspace?.querySelector(':scope > .sr-only[aria-live="polite"]')?.textContent ?? null,
+      footer: workspace?.querySelector('.workspace-foot > b')?.textContent ?? null,
+      resultCount: document.querySelectorAll('.stage-result').length,
+    };
+  });
+  const initial = await readSnapshot();
+  expect(initial.storageError).toBeNull();
+  expect(initial.savedCount).toBe(0);
+  await page.clock.pauseAt(origin + 60_000);
+  const clockStart = await page.evaluate(() => ({ wall: Date.now(), ticks: performance.now() }));
+  let advancedMs = 0;
+  const expectClock = async () => {
+    expect(await page.evaluate(() => ({ wall: Date.now(), ticks: performance.now() }))).toEqual({
+      wall: clockStart.wall + advancedMs, ticks: clockStart.ticks + advancedMs,
+    });
+  };
+  const advanceClock = async (ms: number) => {
+    await page.clock.runFor(ms);
+    advancedMs += ms;
+    await expectClock();
+  };
+  await stage.getByRole('button', { name: /^실전형 연습 시작/ }).click();
+  await expectClock();
+  const workspace = page.locator('.game-workspace.game-nback');
+  await expect(workspace).toBeVisible();
+  for (const second of ['3', '2', '1']) {
+    await expect(workspace.locator('.nback-countdown > b')).toHaveText(second);
+    await advanceClock(1000);
+  }
+  const stimulus = workspace.locator('.nback-stimulus').getByRole('img');
+  const actions = workspace.locator('.nback-actions button');
+  const signal = workspace.locator('.answer-signal');
+  const live = workspace.locator(':scope > .sr-only[aria-live="polite"]');
+  const progress = workspace.locator('.workspace-progress i');
+  const history: string[] = [];
+  for (const position of [1, 2]) {
+    await expect(workspace.locator('.nback-lag-map')).toHaveAttribute('aria-label', `기억 채우기 ${position}/2`);
+    await expect(actions).toHaveCount(0);
+    await expect(signal).toHaveCount(0);
+    const glyph = await stimulus.getAttribute('aria-label');
+    expect(glyph).toBeTruthy();
+    history.push(glyph!);
+    await advanceClock(3000);
+  }
+  await expect(progress).toHaveAttribute('aria-valuenow', '1');
+  await expect(actions).toHaveCount(2);
+  const firstGlyph = await stimulus.getAttribute('aria-label');
+  expect(firstGlyph).toBeTruthy();
+  history.push(firstGlyph!);
+  expect(advancedMs).toBe(9000);
+  await advanceClock(2999);
+  const before = await readSnapshot();
+  await testInfo.attach('nback-omission-before-deadline', { body: JSON.stringify(before), contentType: 'application/json' });
+  expect(before).toMatchObject({ progress: '1', glyph: firstGlyph, enabled: 2, selected: 0, signals: [],
+    generation: initial.generation, savedCount: 0, storageError: null, resultCount: 0 });
+  await page.screenshot({ path: testInfo.outputPath('nback-omission-before-deadline.png') });
+  await expectClock();
+  await advanceClock(1);
+  // +1ms의 신호/문구는 첫 관측 대상이다. 다음 도형의 정오로 해석하지 않는다.
+  const after = await readSnapshot();
+  await testInfo.attach('nback-omission-at-deadline', { body: JSON.stringify(after), contentType: 'application/json' });
+  console.log('NBACK_OMISSION_BOUNDARY', JSON.stringify({ before, after }));
+  expect(after).toMatchObject({ progress: '2', enabled: 2, selected: 0,
+    generation: initial.generation, savedCount: 0, storageError: null, resultCount: 0 });
+  expect(after.glyph).toBeTruthy();
+  expect(after.wall - before.wall).toBe(1);
+  expect(after.ticks - before.ticks).toBe(1);
+  expect(advancedMs).toBe(12000);
+  history.push(after.glyph!);
+  await expect(stimulus).toHaveAttribute('aria-label', after.glyph!);
+  await page.screenshot({ path: testInfo.outputPath('nback-omission-at-deadline.png') });
+  await expectClock();
+  const correctDecision = after.glyph === history.at(-3) ? '2번째 전과 같음' : '2번째 전과 다름';
+  const correctAnswer = actions.filter({ hasText: correctDecision });
+  await expect(correctAnswer).toHaveCount(1);
+  await correctAnswer.click();
+  await expectClock();
+  await expect(correctAnswer).toHaveAttribute('aria-pressed', 'true');
+  for (const action of await actions.all()) await expect(action).toBeDisabled();
+  await expect(signal).toBeVisible();
+  await expect(signal).toHaveText('정답');
+  await expect(signal).toHaveAttribute('data-feedback-tone', 'success');
+  await expect(live).toHaveText(`47문항 중 2번째. 정답 · 현재 도형 ${after.glyph}. 응답 저장됨. 고정 간격이 끝나면 다음 도형으로 이동합니다.`);
+  await expect(signal).toHaveAttribute('aria-label', '응답 결과: 정답');
+  await expect(workspace.locator('.workspace-foot > b')).not.toContainText('정답은');
+  await advanceClock(2999);
+  await expect(progress).toHaveAttribute('aria-valuenow', '2');
+  await expect(signal).toHaveText('정답');
+  await advanceClock(1);
+  await expect(progress).toHaveAttribute('aria-valuenow', '3');
+  await expect(signal).toHaveCount(0);
+  for (const action of await actions.all()) await expect(action).toBeEnabled();
+  await page.screenshot({ path: testInfo.outputPath('nback-omission-next-correct-cleared.png') });
+  await expectClock();
+  await workspace.getByRole('button', { name: '실전형 연습 닫기', exact: true }).click();
+  await expectClock();
+  const confirmation = page.locator('.session-confirm[role="alertdialog"]');
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole('button', { name: '연습창 닫기', exact: true }).click();
+  await expectClock();
+  await expect(page.locator('.stage-panel')).toHaveCount(0);
+  const closed = await readSnapshot();
+  expect(closed).toMatchObject({ generation: initial.generation, savedCount: 0, storageError: null, resultCount: 0 });
+  expect(errors).toEqual([]);
+});
+
 test('도형 순서 실전형 정오 표시는 고정 간격과 일시정지 잔여 시간을 보존한다', async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
