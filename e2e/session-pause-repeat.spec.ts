@@ -1132,18 +1132,25 @@ test('도형 순서 실전형 첫 무응답 경계는 다음 자극과 새 정�
   await page.screenshot({ path: testInfo.outputPath('nback-omission-before-deadline.png') });
   await expectClock();
   await advanceClock(1);
-  // +1ms의 신호/문구는 첫 관측 대상이다. 다음 도형의 정오로 해석하지 않는다.
+  // 이전 무응답 안내는 현재 도형의 정오와 구분하며 다음 입력을 잠그지 않는다.
   const after = await readSnapshot();
   await testInfo.attach('nback-omission-at-deadline', { body: JSON.stringify(after), contentType: 'application/json' });
   console.log('NBACK_OMISSION_BOUNDARY', JSON.stringify({ before, after }));
   expect(after).toMatchObject({ progress: '2', enabled: 2, selected: 0,
+    signals: [{ label: '이전 문항: 시간 초과', tone: 'error' }],
     generation: initial.generation, savedCount: 0, storageError: null, resultCount: 0 });
   expect(after.glyph).toBeTruthy();
+  expect(after.live).toBe(`47문항 중 2번째. 이전 문항: 시간 초과 · 현재 도형 ${after.glyph}. 지금 분류하세요.`);
+  expect(after.footer).toBe(`이전 문항: 시간 초과 · 현재 도형 ${after.glyph}. 지금 분류하세요.`);
   expect(after.wall - before.wall).toBe(1);
   expect(after.ticks - before.ticks).toBe(1);
   expect(advancedMs).toBe(12000);
   history.push(after.glyph!);
   await expect(stimulus).toHaveAttribute('aria-label', after.glyph!);
+  await expect(signal).toBeVisible();
+  await expect(signal).toHaveAttribute('aria-label', '이전 문항 결과: 시간 초과');
+  await expect(signal).toHaveCSS('color', 'rgb(163, 63, 73)');
+  await expect(signal.locator('i')).toHaveCSS('background-color', 'rgb(163, 63, 73)');
   await page.screenshot({ path: testInfo.outputPath('nback-omission-at-deadline.png') });
   await expectClock();
   const correctDecision = after.glyph === history.at(-3) ? '2번째 전과 같음' : '2번째 전과 다름';
