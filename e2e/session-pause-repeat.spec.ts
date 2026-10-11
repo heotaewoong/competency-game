@@ -1153,6 +1153,50 @@ test('도형 순서 실전형 첫 무응답 경계는 다음 자극과 새 정�
   await expect(signal.locator('i')).toHaveCSS('background-color', 'rgb(163, 63, 73)');
   await page.screenshot({ path: testInfo.outputPath('nback-omission-at-deadline.png') });
   await expectClock();
+  await advanceClock(50);
+  await workspace.getByRole('button', { name: '실전형 연습 닫기', exact: true }).click();
+  await expectClock();
+  const pauseConfirmation = page.locator('.session-confirm[role="alertdialog"]');
+  const deadline = workspace.locator('.nback-time');
+  await expect(pauseConfirmation).toBeVisible();
+  await expect(stage.locator('.stage-content')).toHaveAttribute('inert', '');
+  await expect(stage.locator('.stage-content')).toHaveAttribute('aria-hidden', 'true');
+  await expect(stimulus).toHaveCount(0);
+  await expect(deadline.locator('.time-track > i')).toHaveCSS('animation-play-state', 'paused');
+  await expect(deadline).toHaveAttribute('aria-valuenow', '2950');
+  await expect(workspace.locator('.nback-stimulus').getByRole('img', { includeHidden: true })).toHaveAttribute('aria-label', after.glyph!);
+  const paused = await readSnapshot();
+  await testInfo.attach('nback-omission-paused.json', { body: JSON.stringify(paused, null, 2), contentType: 'application/json' });
+  expect(paused).toMatchObject({
+    progress: '2', glyph: after.glyph, enabled: 2, selected: 0,
+    signals: after.signals, live: after.live, footer: after.footer,
+    generation: initial.generation, savedCount: 0, storageError: null, resultCount: 0,
+  });
+  expect(advancedMs).toBe(12050);
+  await expectClock();
+  await advanceClock(5000);
+  const held = await readSnapshot();
+  await testInfo.attach('nback-omission-pause-held.json', { body: JSON.stringify(held, null, 2), contentType: 'application/json' });
+  console.log('NBACK_OMISSION_PAUSE', JSON.stringify({ paused, held }));
+  expect(held).toMatchObject({
+    progress: '2', glyph: after.glyph, enabled: 2, selected: 0,
+    signals: after.signals, live: after.live, footer: after.footer,
+    generation: initial.generation, savedCount: 0, storageError: null, resultCount: 0,
+  });
+  await expect(deadline).toHaveAttribute('aria-valuenow', '2950');
+  await expectClock();
+  await pauseConfirmation.getByRole('button', { name: '계속 연습', exact: true }).click();
+  await expectClock();
+  await expect(pauseConfirmation).toHaveCount(0);
+  await expect(stage.locator('.stage-content')).not.toHaveAttribute('inert', '');
+  await expect(stage.locator('.stage-content')).not.toHaveAttribute('aria-hidden', 'true');
+  await expect(deadline.locator('.time-track > i')).toHaveCSS('animation-play-state', 'running');
+  await expect(stimulus).toHaveAttribute('aria-label', after.glyph!);
+  await expect(signal).toBeVisible();
+  await expect(signal).toHaveText('이전 문항: 시간 초과');
+  for (const action of await actions.all()) await expect(action).toBeEnabled();
+  expect(advancedMs).toBe(17050);
+  await expectClock();
   const correctDecision = after.glyph === history.at(-3) ? '2번째 전과 같음' : '2번째 전과 다름';
   const correctAnswer = actions.filter({ hasText: correctDecision });
   await expect(correctAnswer).toHaveCount(1);
@@ -1166,10 +1210,13 @@ test('도형 순서 실전형 첫 무응답 경계는 다음 자극과 새 정�
   await expect(live).toHaveText(`47문항 중 2번째. 정답 · 현재 도형 ${after.glyph}. 응답 저장됨. 고정 간격이 끝나면 다음 도형으로 이동합니다.`);
   await expect(signal).toHaveAttribute('aria-label', '응답 결과: 정답');
   await expect(workspace.locator('.workspace-foot > b')).not.toContainText('정답은');
-  await advanceClock(2999);
+  await advanceClock(2949);
+  expect(advancedMs).toBe(19999);
   await expect(progress).toHaveAttribute('aria-valuenow', '2');
   await expect(signal).toHaveText('정답');
+  await expectClock();
   await advanceClock(1);
+  expect(advancedMs).toBe(20000);
   await expect(progress).toHaveAttribute('aria-valuenow', '3');
   await expect(signal).toHaveCount(0);
   for (const action of await actions.all()) await expect(action).toBeEnabled();
