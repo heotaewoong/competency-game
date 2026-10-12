@@ -1036,7 +1036,7 @@ test('오답 신호 유지 중 종료 확인창은 남은 표시 시간을 보�
 });
 
 for (const outcome of ['정답', '오답'] as const)
-test(outcome === '정답' ? '도형 순서 실전형 마감 직전 정답은 수락되고 고정 간격에서 초기화된다' : '도형 순서 실전형 마감 직전 오답은 이전 결과로 남고 새 응답에서 교체된다', async ({ page }, testInfo) => {
+test(outcome === '정답' ? '도형 순서 실전형 마감 직전 정답은 수락되고 고정 간격에서 초기화된다' : '도형 순서 실전형 마감 직전 오답은 새 응답과 새 시간 초과를 구분한다', async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
@@ -1231,6 +1231,62 @@ test(outcome === '정답' ? '도형 순서 실전형 마감 직전 정답은 수
     expect(cleared.live).toBe(`47문항 중 3번째. 현재 도형 ${cleared.glyph}. 지금 분류하세요.`);
     expect(cleared.footer).toBe('');
     expect(advancedMs).toBe(20000);
+    await expectClock();
+    // 세 번째 채점 자극의 2-back 기준은 첫 번째 채점 자극이다.
+    const thirdWrongDecision = cleared.glyph === firstGlyph ? '2번째 전과 다름' : '2번째 전과 같음';
+    const thirdWrongAnswer = actions.filter({ hasText: thirdWrongDecision });
+    await expect(thirdWrongAnswer).toHaveCount(1);
+    await expect(thirdWrongAnswer).toBeEnabled();
+    await expectClock();
+    await thirdWrongAnswer.click();
+    const thirdWrong = await readSnapshot();
+    await testInfo.attach('nback-third-wrong-accepted', { body: JSON.stringify(thirdWrong), contentType: 'application/json' });
+    expect(thirdWrong).toMatchObject({ progress: '3', glyph: cleared.glyph, enabled: 0, selected: [thirdWrongDecision], currentSignalCount: 1,
+      signals: [{ label: '오답', tone: 'error', aria: '응답 결과: 오답' }],
+      generation: initial.generation, savedCount: 0, storageError: null, resultCount: 0 });
+    expect(thirdWrong.wall).toBe(clockStart.wall + 20000);
+    expect(thirdWrong.ticks).toBe(clockStart.ticks + 20000);
+    expect(thirdWrong.live).toBe(`47문항 중 3번째. 오답 · 현재 도형 ${cleared.glyph}. 응답 저장됨. 고정 간격이 끝나면 다음 도형으로 이동합니다.`);
+    expect(thirdWrong.footer).toBe(`오답 · 현재 도형 ${cleared.glyph}. 응답 저장됨. 고정 간격이 끝나면 다음 도형으로 이동합니다.`);
+    await expect(signal).toHaveCSS('color', 'rgb(163, 63, 73)');
+    await page.screenshot({ path: testInfo.outputPath('nback-third-wrong-accepted.png') });
+    await expectClock();
+    await advanceClock(2999);
+    const beforeCarry = await readSnapshot();
+    await testInfo.attach('nback-third-wrong-before-carry', { body: JSON.stringify(beforeCarry), contentType: 'application/json' });
+    expect(beforeCarry).toEqual({ ...thirdWrong, wall: clockStart.wall + 22999, ticks: clockStart.ticks + 22999 });
+    await advanceClock(1);
+    const carried = await readSnapshot();
+    await testInfo.attach('nback-previous-error-before-omission', { body: JSON.stringify(carried), contentType: 'application/json' });
+    expect(carried).toMatchObject({ progress: '4', enabled: 2, selected: [], currentSignalCount: 0, signals: previousSignals,
+      generation: initial.generation, savedCount: 0, storageError: null, resultCount: 0 });
+    expect(carried.glyph).toBeTruthy();
+    expect(carried.wall).toBe(clockStart.wall + 23000);
+    expect(carried.ticks).toBe(clockStart.ticks + 23000);
+    expect(carried.live).toBe(`47문항 중 4번째. 이전 문항: 오답 · 현재 도형 ${carried.glyph}. 지금 분류하세요.`);
+    expect(carried.footer).toBe(`이전 문항: 오답 · 현재 도형 ${carried.glyph}. 지금 분류하세요.`);
+    await page.screenshot({ path: testInfo.outputPath('nback-previous-error-before-omission.png') });
+    await expectClock();
+    await advanceClock(2999);
+    const beforeTimeout = await readSnapshot();
+    await testInfo.attach('nback-previous-error-omission-before-deadline', { body: JSON.stringify(beforeTimeout), contentType: 'application/json' });
+    expect(beforeTimeout).toEqual({ ...carried, wall: clockStart.wall + 25999, ticks: clockStart.ticks + 25999 });
+    await advanceClock(1);
+    const timeout = await readSnapshot();
+    await testInfo.attach('nback-previous-error-replaced-by-timeout', { body: JSON.stringify(timeout), contentType: 'application/json' });
+    console.log('NBACK_PREVIOUS_ERROR_TIMEOUT', JSON.stringify({ thirdWrong, beforeCarry, carried, beforeTimeout, timeout }));
+    expect(timeout).toMatchObject({ progress: '5', enabled: 2, selected: [], currentSignalCount: 0,
+      signals: [{ label: '이전 문항: 시간 초과', tone: 'error', aria: '이전 문항 결과: 시간 초과' }],
+      generation: initial.generation, savedCount: 0, storageError: null, resultCount: 0 });
+    expect(timeout.glyph).toBeTruthy();
+    expect(timeout.wall).toBe(clockStart.wall + 26000);
+    expect(timeout.ticks).toBe(clockStart.ticks + 26000);
+    expect(timeout.live).toBe(`47문항 중 5번째. 이전 문항: 시간 초과 · 현재 도형 ${timeout.glyph}. 지금 분류하세요.`);
+    expect(timeout.footer).toBe(`이전 문항: 시간 초과 · 현재 도형 ${timeout.glyph}. 지금 분류하세요.`);
+    expect(advancedMs).toBe(26000);
+    await expect(signal).toHaveCSS('color', 'rgb(163, 63, 73)');
+    await expect(signal.locator('i')).toHaveCSS('background-color', 'rgb(163, 63, 73)');
+    await page.screenshot({ path: testInfo.outputPath('nback-previous-error-replaced-by-timeout.png') });
     await expectClock();
   }
   await workspace.getByRole('button', { name: '실전형 연습 닫기', exact: true }).click();
