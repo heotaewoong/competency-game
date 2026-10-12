@@ -231,6 +231,10 @@ test('도형 순서 기억하기 실전형은 각 라운드의 실제 정답을 
     for (const second of ['3', '2', '1']) {
       await expect(countdown.locator('> b')).toHaveText(second);
       await expect(countdown.locator('> span')).toContainText(`ROUND ${round}`);
+      await expect(workspace.locator('.answer-signal')).toHaveCount(0);
+      await expect(workspace.locator('.workspace-foot > b')).toHaveText('');
+      await expect(workspace.locator(':scope > .sr-only[aria-live="polite"]')).not.toContainText('이전 문항');
+      await expectClock();
       await advanceClock(1_000);
     }
   };
@@ -251,6 +255,12 @@ test('도형 순서 기억하기 실전형은 각 라운드의 실제 정답을 
     const glyph = await nbackStage.locator('.nback-stimulus').getByRole('img').getAttribute('aria-label');
     expect(glyph).toBeTruthy();
     glyphHistory.push(glyph!);
+    if (secondRound && position <= warmupCount) {
+      await expect(workspace.locator('.answer-signal')).toHaveCount(0);
+      await expect(workspace.locator('.workspace-foot > b')).toHaveText('');
+      await expect(workspace.locator(':scope > .sr-only[aria-live="polite"]')).not.toContainText('이전 문항');
+      await expectClock();
+    }
     const shouldAnswerCorrectly = position === warmupCount;
     const progress = workspace.locator('.workspace-progress i');
     const currentProgress = Number(await progress.getAttribute('aria-valuenow'));
