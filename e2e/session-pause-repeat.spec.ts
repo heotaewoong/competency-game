@@ -1036,7 +1036,7 @@ test('오답 신호 유지 중 종료 확인창은 남은 표시 시간을 보�
 });
 
 for (const outcome of ['정답', '오답'] as const)
-test(`도형 순서 실전형 마감 직전 ${outcome}은 수락되고 고정 간격에서 초기화된다`, async ({ page }, testInfo) => {
+test(outcome === '정답' ? '도형 순서 실전형 마감 직전 정답은 수락되고 고정 간격에서 초기화된다' : '도형 순서 실전형 마감 직전 오답은 이전 결과로 남고 새 응답에서 교체된다', async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
@@ -1071,6 +1071,7 @@ test(`도형 순서 실전형 마감 직전 ${outcome}은 수락되고 고정 �
       glyph: workspace?.querySelector('.nback-stimulus [role="img"]')?.getAttribute('aria-label') ?? null,
       enabled: actions.filter(action => !action.disabled).length,
       selected: actions.filter(action => action.getAttribute('aria-pressed') === 'true').map(action => action.querySelector('b')?.textContent),
+      currentSignalCount: workspace?.querySelectorAll('.workspace-title-row .answer-signal').length ?? 0,
       signals: Array.from(workspace?.querySelectorAll('.answer-signal') ?? []).map(signal => ({
         label: signal.textContent, tone: signal.getAttribute('data-feedback-tone'), aria: signal.getAttribute('aria-label'),
       })),
@@ -1131,7 +1132,7 @@ test(`도형 순서 실전형 마감 직전 ${outcome}은 수락되고 고정 �
   await advanceClock(2999);
   const before = await readSnapshot();
   await testInfo.attach('nback-late-before-response', { body: JSON.stringify(before), contentType: 'application/json' });
-  expect(before).toMatchObject({ progress: '1', glyph: firstGlyph, enabled: 2, selected: [], signals: [],
+  expect(before).toMatchObject({ progress: '1', glyph: firstGlyph, enabled: 2, selected: [], currentSignalCount: 0, signals: [],
     generation: initial.generation, savedCount: 0, storageError: null, resultCount: 0 });
   expect(before.live).toBe(`47문항 중 1번째. 현재 도형 ${firstGlyph}. 지금 분류하세요.`);
   await page.screenshot({ path: testInfo.outputPath('nback-late-before-response.png') });
@@ -1140,7 +1141,7 @@ test(`도형 순서 실전형 마감 직전 ${outcome}은 수락되고 고정 �
   // 입력 직후 DOM과 두 시계를 함께 읽어 다음 자극의 결과로 오인하지 않는다.
   const accepted = await readSnapshot();
   await testInfo.attach('nback-late-response-accepted', { body: JSON.stringify(accepted), contentType: 'application/json' });
-  expect(accepted).toMatchObject({ progress: '1', glyph: firstGlyph, enabled: 0, selected: [selectedDecision],
+  expect(accepted).toMatchObject({ progress: '1', glyph: firstGlyph, enabled: 0, selected: [selectedDecision], currentSignalCount: 1,
     signals: [{ label: outcome, tone: outcome === '정답' ? 'success' : 'error', aria: `응답 결과: ${outcome}` }],
     generation: initial.generation, savedCount: 0, storageError: null, resultCount: 0 });
   expect(accepted.wall).toBe(clockStart.wall + 11999);
@@ -1155,16 +1156,83 @@ test(`도형 순서 실전형 마감 직전 ${outcome}은 수락되고 고정 �
   const next = await readSnapshot();
   await testInfo.attach('nback-late-next-stimulus', { body: JSON.stringify(next), contentType: 'application/json' });
   console.log(outcome === '정답' ? 'NBACK_LATE_RESPONSE_BOUNDARY' : 'NBACK_LATE_WRONG_BOUNDARY', JSON.stringify({ before, accepted, next }));
-  expect(next).toMatchObject({ progress: '2', enabled: 2, selected: [], signals: [],
+  const previousSignals = outcome === '오답'
+    ? [{ label: '이전 문항: 오답', tone: 'error', aria: '이전 문항 결과: 오답' }] : [];
+  expect(next).toMatchObject({ progress: '2', enabled: 2, selected: [], currentSignalCount: 0, signals: previousSignals,
     generation: initial.generation, savedCount: 0, storageError: null, resultCount: 0 });
   expect(next.glyph).toBeTruthy();
   expect(next.wall - accepted.wall).toBe(1);
   expect(next.ticks - accepted.ticks).toBe(1);
-  expect(next.live).toBe(`47문항 중 2번째. 현재 도형 ${next.glyph}. 지금 분류하세요.`);
-  expect(next.footer).toBe('');
+  const nextStatus = `현재 도형 ${next.glyph}. 지금 분류하세요.`;
+  expect(next.live).toBe(`47문항 중 2번째. ${outcome === '오답' ? `이전 문항: 오답 · ${nextStatus}` : nextStatus}`);
+  expect(next.footer).toBe(outcome === '오답' ? `이전 문항: 오답 · ${nextStatus}` : '');
   expect(advancedMs).toBe(12000);
   await page.screenshot({ path: testInfo.outputPath('nback-late-next-stimulus.png') });
   await expectClock();
+  if (outcome === '오답') {
+    await expect(signal).toBeVisible();
+    await expect(signal).toHaveCSS('color', 'rgb(163, 63, 73)');
+    await expect(signal.locator('i')).toHaveCSS('background-color', 'rgb(163, 63, 73)');
+    await advanceClock(50);
+    await workspace.getByRole('button', { name: '실전형 연습 닫기', exact: true }).click();
+    await expectClock();
+    const pauseConfirmation = page.locator('.session-confirm[role="alertdialog"]');
+    await expect(pauseConfirmation).toBeVisible();
+    await expect(stage.locator('.stage-content')).toHaveAttribute('inert', '');
+    await expect(stage.locator('.stage-content')).toHaveAttribute('aria-hidden', 'true');
+    await expect(stimulus).toHaveCount(0);
+    await expect(workspace.locator('.nback-stimulus').getByRole('img', { includeHidden: true })).toHaveAttribute('aria-label', next.glyph!);
+    await advanceClock(5000);
+    const paused = await readSnapshot();
+    await testInfo.attach('nback-previous-error-paused', { body: JSON.stringify(paused), contentType: 'application/json' });
+    expect(paused).toMatchObject({ progress: '2', glyph: next.glyph, enabled: 2, selected: [], currentSignalCount: 0,
+      signals: previousSignals, generation: initial.generation, savedCount: 0, storageError: null, resultCount: 0 });
+    expect(paused.wall).toBe(clockStart.wall + 17050);
+    expect(paused.ticks).toBe(clockStart.ticks + 17050);
+    expect(paused.live).toBe(next.live);
+    expect(paused.footer).toBe(next.footer);
+    await expect(workspace.locator('.nback-time')).toHaveAttribute('aria-valuenow', '2950');
+    await page.screenshot({ path: testInfo.outputPath('nback-previous-error-paused.png') });
+    await expectClock();
+    await pauseConfirmation.getByRole('button', { name: '계속 연습', exact: true }).click();
+    await expectClock();
+    await expect(stage.locator('.stage-content')).not.toHaveAttribute('inert');
+    await expect(stage.locator('.stage-content')).not.toHaveAttribute('aria-hidden');
+    await expect(signal).toHaveText('이전 문항: 오답');
+    const nextCorrectDecision = next.glyph === history[1] ? '2번째 전과 같음' : '2번째 전과 다름';
+    const nextCorrectAnswer = actions.filter({ hasText: nextCorrectDecision });
+    await expect(nextCorrectAnswer).toHaveCount(1);
+    await expect(nextCorrectAnswer).toBeEnabled();
+    await expectClock();
+    await nextCorrectAnswer.click();
+    const replacement = await readSnapshot();
+    await testInfo.attach('nback-previous-error-replaced', { body: JSON.stringify(replacement), contentType: 'application/json' });
+    expect(replacement).toMatchObject({ progress: '2', glyph: next.glyph, enabled: 0, selected: [nextCorrectDecision], currentSignalCount: 1,
+      signals: [{ label: '정답', tone: 'success', aria: '응답 결과: 정답' }],
+      generation: initial.generation, savedCount: 0, storageError: null, resultCount: 0 });
+    expect(replacement.live).toBe(`47문항 중 2번째. 정답 · 현재 도형 ${next.glyph}. 응답 저장됨. 고정 간격이 끝나면 다음 도형으로 이동합니다.`);
+    expect(replacement.footer).toBe(`정답 · 현재 도형 ${next.glyph}. 응답 저장됨. 고정 간격이 끝나면 다음 도형으로 이동합니다.`);
+    await expect(signal).toHaveCSS('color', 'rgb(25, 112, 103)');
+    await page.screenshot({ path: testInfo.outputPath('nback-previous-error-replaced.png') });
+    await expectClock();
+    await advanceClock(2949);
+    await expect(workspace.locator('.workspace-progress i')).toHaveAttribute('aria-valuenow', '2');
+    await expect(signal).toHaveText('정답');
+    for (const action of await actions.all()) await expect(action).toBeDisabled();
+    await advanceClock(1);
+    const cleared = await readSnapshot();
+    await testInfo.attach('nback-previous-error-next-cleared', { body: JSON.stringify(cleared), contentType: 'application/json' });
+    console.log('NBACK_PREVIOUS_ERROR_RESUME', JSON.stringify({ paused, replacement, cleared }));
+    expect(cleared).toMatchObject({ progress: '3', enabled: 2, selected: [], currentSignalCount: 0, signals: [],
+      generation: initial.generation, savedCount: 0, storageError: null, resultCount: 0 });
+    expect(cleared.wall).toBe(clockStart.wall + 20000);
+    expect(cleared.ticks).toBe(clockStart.ticks + 20000);
+    expect(cleared.glyph).toBeTruthy();
+    expect(cleared.live).toBe(`47문항 중 3번째. 현재 도형 ${cleared.glyph}. 지금 분류하세요.`);
+    expect(cleared.footer).toBe('');
+    expect(advancedMs).toBe(20000);
+    await expectClock();
+  }
   await workspace.getByRole('button', { name: '실전형 연습 닫기', exact: true }).click();
   await expectClock();
   const confirmation = page.locator('.session-confirm[role="alertdialog"]');
@@ -1512,7 +1580,9 @@ test('도형 순서 실전형 정오 표시는 고정 간격과 일시정지 잔
   await page.screenshot({ path: testInfo.outputPath('nback-simulation-resume-before-deadline.png') });
   await advanceClock(1);
   await expect(progress).toHaveAttribute('aria-valuenow', '2');
-  await expect(signal).toHaveCount(0);
+  await expect(signal).toHaveText('이전 문항: 오답');
+  await expect(signal).toHaveAttribute('aria-label', '이전 문항 결과: 오답');
+  await expect(workspace.locator('.workspace-title-row .answer-signal')).toHaveCount(0);
   for (const action of await actions.all()) await expect(action).toBeEnabled();
   const nextStimulusStartMs = advancedMs;
   const nextGlyph = await stimulus.getAttribute('aria-label');
