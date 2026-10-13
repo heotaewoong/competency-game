@@ -27,11 +27,16 @@ for (const timezone of ['Asia/Seoul', 'America/New_York']) {
         await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
         const saved = await page.evaluate(() => localStorage.getItem('nineflow-practice-results-v4:training-activity-regression'));
         const activity = page.getByRole('region', { name: '최근 7일 훈련 활동', exact: true });
-        const snapshot = await activity.evaluate(element => ({
-          wall: Date.now(),
-          status: element.querySelector('[role="status"]')?.textContent,
-          days: Array.from(element.querySelectorAll('li')).map(day => ({ date: day.getAttribute('data-date'), count: day.querySelector('b')?.textContent })),
-        }));
+        const snapshot = await activity.evaluate(element => {
+          const period = element.querySelector('.training-activity-heading p');
+          return {
+            wall: Date.now(),
+            status: element.querySelector('[role="status"]')?.textContent,
+            statusAtomic: element.querySelector('[role="status"]')?.getAttribute('aria-atomic'),
+            period: { text: period?.textContent, live: period?.getAttribute('aria-live'), atomic: period?.getAttribute('aria-atomic') },
+            days: Array.from(element.querySelectorAll('li')).map(day => ({ date: day.getAttribute('data-date'), count: day.querySelector('b')?.textContent })),
+          };
+        });
         console.log('TRAINING_ACTIVITY', JSON.stringify({ timezone, width, ...snapshot }));
         const expectedDates = await page.evaluate(() => {
           const now = new Date();
@@ -41,6 +46,8 @@ for (const timezone of ['Asia/Seoul', 'America/New_York']) {
           });
         });
         expect(snapshot.wall).toBe(referenceTime);
+        expect(snapshot.period).toEqual({ text: `${expectedDates[0]} ~ ${expectedDates[6]} · 브라우저 현지 날짜 기준`, live: 'polite', atomic: 'true' });
+        expect(snapshot.statusAtomic).toBe('true');
         expect(snapshot.days.map(day => day.date)).toEqual(expectedDates);
         expect(snapshot.days.map(day => day.count)).toEqual(['1회', '0회', '0회', '0회', '0회', '1회', '2회']);
         await expect(activity.getByRole('status')).toHaveText('완료 세션 4회 · 기록이 있는 날 3일 / 7일');
@@ -79,12 +86,19 @@ for (const timezone of ['Asia/Seoul', 'America/New_York']) {
         const attemptedRefresh = await activity.locator('time').evaluateAll(elements => elements.map(element => element.getAttribute('datetime')));
         console.log('TRAINING_ACTIVITY_DAY_REFRESH_ATTEMPT', JSON.stringify({ timezone, width, attemptedRefresh }));
         await expect(activity.locator('time').last()).toHaveAttribute('datetime', nextDay.key);
-        const refreshed = await activity.evaluate(element => ({
-          wall: Date.now(),
-          days: Array.from(element.querySelectorAll('li')).map(day => ({ date: day.getAttribute('data-date'), count: day.querySelector('b')?.textContent })),
-        }));
+        const refreshed = await activity.evaluate(element => {
+          const period = element.querySelector('.training-activity-heading p');
+          return {
+            wall: Date.now(),
+            statusAtomic: element.querySelector('[role="status"]')?.getAttribute('aria-atomic'),
+            period: { text: period?.textContent, live: period?.getAttribute('aria-live'), atomic: period?.getAttribute('aria-atomic') },
+            days: Array.from(element.querySelectorAll('li')).map(day => ({ date: day.getAttribute('data-date'), count: day.querySelector('b')?.textContent })),
+          };
+        });
         console.log('TRAINING_ACTIVITY_DAY_REFRESH', JSON.stringify({ timezone, width, referenceTime, nextDay, refreshed }));
         expect(refreshed.wall).toBe(nextDay.time);
+        expect(refreshed.period).toEqual({ text: `${expectedDates[1]} ~ ${nextDay.key} · 브라우저 현지 날짜 기준`, live: 'polite', atomic: 'true' });
+        expect(refreshed.statusAtomic).toBe('true');
         expect(refreshed.days.map(day => day.date)).toEqual([...expectedDates.slice(1), nextDay.key]);
         expect(refreshed.days.map(day => day.count)).toEqual(['0회', '0회', '0회', '0회', '1회', '2회', '1회']);
         await expect(refresh).toBeFocused();

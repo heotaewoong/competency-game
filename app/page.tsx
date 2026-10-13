@@ -975,8 +975,8 @@ export default function Home() {
           </section>
           <div className="record-summary"><article><span>저장된 최근 연습</span><b>{results.length}회</b></article><article><span>최근 기록 게임</span><b>{practicedGames.length}<small>/ 9종</small></b></article><article><span>{lastResultModeLabel} 마지막 {resultScoreLabel(lastResult)}</span><b>{formatResultScore(lastResult)}</b></article></div>
           <section className="training-activity" aria-labelledby="training-activity-title">
-            <div className="training-activity-heading"><div><h3 id="training-activity-title">최근 7일 훈련 활동</h3><p>{activity.period} · 브라우저 현지 날짜 기준</p></div><button type="button" onClick={() => setActivityDate(new Date())}>오늘 기준으로 새로고침</button></div>
-            <p className="training-activity-summary" role="status">완료 세션 {activity.sessionCount}회 · 기록이 있는 날 {activity.activeDayCount}일 / 7일</p>
+            <div className="training-activity-heading"><div><h3 id="training-activity-title">최근 7일 훈련 활동</h3><p aria-live="polite" aria-atomic="true">{activity.period} · 브라우저 현지 날짜 기준</p></div><button type="button" onClick={() => setActivityDate(new Date())}>오늘 기준으로 새로고침</button></div>
+            <p className="training-activity-summary" role="status" aria-atomic="true">완료 세션 {activity.sessionCount}회 · 기록이 있는 날 {activity.activeDayCount}일 / 7일</p>
             <ol className="training-activity-days" role="list">{activity.days.map(day => <li key={day.key} data-date={day.key} data-active={day.sessions > 0}><time dateTime={day.key}>{day.label}<span>{day.weekday}</span></time><b>{day.sessions}회</b></li>)}</ol>
             {!activity.sessionCount && <p>이 기간에는 완료 기록이 없습니다. 게임 하나를 끝내면 활동이 표시됩니다.</p>}
             <small>이 브라우저에 남아 있는 완료 기록만 집계합니다. 점수·실력 향상 지표가 아닙니다.</small>
