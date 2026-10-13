@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { games, type GameId } from '../lib/game-data';
 import { lockDocumentScroll } from '../lib/scroll-lock';
 import {
@@ -33,14 +33,15 @@ export function FeedbackDialog({ onClose, initialGameId = 'site', sessionMode, n
 
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const releaseScrollLock = lockDocumentScroll();
     const container = backdropRef.current?.parentElement;
     const siblings = !nested && container ? Array.from(container.children).filter((element) => element !== backdropRef.current) as HTMLElement[] : [];
     const siblingState = siblings.map((element) => ({ element, inert: element.inert, ariaHidden: element.getAttribute('aria-hidden') }));
     siblings.forEach((element) => { element.inert = true; element.setAttribute('aria-hidden', 'true'); });
-    const focusFrame = window.requestAnimationFrame(() => noticeRef.current?.focus());
+    // Finish modal setup before input can race its first focus.
+    noticeRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
       const action = event.target instanceof Element ? event.target.closest('button, a[href]') : null;
       if (event.repeat && event.key === 'Enter' && action && dialogRef.current?.contains(action)) {
@@ -64,7 +65,6 @@ export function FeedbackDialog({ onClose, initialGameId = 'site', sessionMode, n
     };
     window.addEventListener('keydown', onKey, true);
     return () => {
-      window.cancelAnimationFrame(focusFrame);
       window.removeEventListener('keydown', onKey, true);
       releaseScrollLock();
       siblingState.forEach(({ element, inert, ariaHidden }) => { element.inert = inert; if (ariaHidden === null) element.removeAttribute('aria-hidden'); else element.setAttribute('aria-hidden', ariaHidden); });
