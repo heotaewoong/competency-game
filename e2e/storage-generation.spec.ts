@@ -41,7 +41,7 @@ test('세대 포인터가 손상돼도 중복을 제거해 v4 세대를 병합 �
 
   await page.goto('/');
   await expect(page.locator('.header-status')).toContainText('3');
-  await expect(page.getByRole('status')).toContainText('저장 위치 정보를 복구');
+  await expect(page.getByRole('status').and(page.locator('.storage-notice'))).toContainText('저장 위치 정보를 복구');
   await expect.poll(() => page.evaluate(({ prefix, generationKey }) => {
     const generation = window.localStorage.getItem(generationKey);
     const activeRaw = generation ? window.localStorage.getItem(`${prefix}${generation}`) : null;
@@ -191,7 +191,7 @@ test('지연 포인터와 손상된 active storage 이벤트는 현재 화면을
   }, { activeKey: resultsKey('generation-current') });
 
   await expect(page.locator('.header-status')).toContainText('1');
-  await expect(page.getByRole('status')).toContainText('현재 화면 기록은 백업할 수 있도록 유지했습니다');
+  await expect(page.getByRole('status').and(page.locator('.storage-notice'))).toContainText('현재 화면 기록은 백업할 수 있도록 유지했습니다');
 });
 
 test('세대 포인터와 orphan 봉투가 함께 손상돼도 자동 정리하지 않고 관리 경로를 남긴다', async ({ page }) => {
@@ -257,7 +257,7 @@ test('v4 복습 내부 필드가 손상되면 원본을 보존하고 화면·저
   await page.goto('/');
 
   await expect(page.locator('.header-status')).toContainText('0');
-  await expect(page.getByRole('status')).toContainText('손상된 연습 기록을 감지');
+  await expect(page.getByRole('status').and(page.locator('.storage-notice'))).toContainText('손상된 연습 기록을 감지');
   await expect.poll(() => page.evaluate(({ activeKey, backupKey }) => ({
     primary: window.localStorage.getItem(activeKey),
     backup: window.localStorage.getItem(backupKey),

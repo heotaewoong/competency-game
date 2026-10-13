@@ -39,6 +39,9 @@ for (const timezone of ['Asia/Seoul', 'America/New_York']) {
         expect(snapshot.days.map(day => day.date)).toEqual(expectedDates);
         expect(snapshot.days.map(day => day.count)).toEqual(['1회', '0회', '0회', '0회', '0회', '1회', '2회']);
         await expect(activity.getByRole('status')).toHaveText('완료 세션 4회 · 기록이 있는 날 3일 / 7일');
+        await expect(activity.getByRole('list')).toHaveAttribute('role', 'list');
+        await expect(activity.getByRole('listitem')).toHaveCount(7);
+        for (const weekday of await activity.locator('time > span').all()) await expect(weekday).toHaveCSS('color', 'rgb(24, 33, 58)');
         await expect(activity).toContainText('브라우저 현지 날짜 기준');
         await expect(activity).toContainText('점수·실력 향상 지표가 아닙니다.');
         const refresh = activity.getByRole('button', { name: '오늘 기준으로 새로고침', exact: true });

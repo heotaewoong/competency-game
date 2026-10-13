@@ -297,7 +297,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 .training-activity-days li { min-width: 0; padding: 9px 2px; border: 1px solid var(--line); border-radius: 8px; text-align: center; font-size: 12px; }
 .training-activity-days li[data-active='true'] { border-color: var(--brand); background: var(--brand-soft); }
 .training-activity-days time, .training-activity-days time span, .training-activity-days b { display: block; }
-.training-activity-days time span { margin: 3px 0 7px; color: var(--muted); }
+.training-activity-days time span { margin: 3px 0 7px; color: var(--ink); }
 .training-activity small { display: block; color: var(--muted); font-size: 11px; }
 .history-panel > summary::after { content: '+'; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--brand); background: var(--brand-soft); font-size: 17px; }
 .history-panel[open] > summary::after { content: '−'; }
