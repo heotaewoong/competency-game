@@ -1,6 +1,60 @@
 import { expect, test } from '@playwright/test';
 import { publicFeedbackEntries } from '../app/lib/feedback';
 
+for (const nested of [false, true]) {
+  test(`${nested ? '연습 설정' : '홈'} 의견창의 첫 초점은 빠른 입력보다 늦게 실행되지 않는다`, async ({ page }, testInfo) => {
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+    await page.goto('/');
+    await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+    if (nested) await page.getByRole('button', { name: /가위바위보, 난이도 하, 설정 열기/ }).click();
+    const opener = nested
+      ? page.locator('section[data-game="rps"]').getByRole('button', { name: '문제 신고', exact: true })
+      : page.locator('#feedback').getByRole('button', { name: '개선 의견 보내기', exact: true });
+    await page.evaluate(() => {
+      const nativeRequest = window.requestAnimationFrame;
+      const nativeCancel = window.cancelAnimationFrame;
+      const pending = new Map<number, FrameRequestCallback>();
+      let nextHandle = -1;
+      window.requestAnimationFrame = callback => { const id = nextHandle--; pending.set(id, callback); return id; };
+      window.cancelAnimationFrame = id => { if (!pending.delete(id)) nativeCancel.call(window, id); };
+      (window as Window & { __releaseFeedbackOpeningFrames?: () => void }).__releaseFeedbackOpeningFrames = () => {
+        window.requestAnimationFrame = nativeRequest;
+        window.cancelAnimationFrame = nativeCancel;
+        for (const callback of pending.values()) callback(performance.now());
+        pending.clear();
+      };
+    });
+    try {
+      await opener.press('Enter');
+      const dialog = page.getByRole('dialog', { name: '의견 보내기', exact: true });
+      await expect(dialog.locator('#feedback-public-notice')).toBeFocused();
+      const message = dialog.locator('textarea');
+      const value = '창을 열자마자 입력한 의견을 보존해 주세요.';
+      await message.fill(value);
+      const beforeRelease = await message.evaluate(input => ({ value: (input as HTMLTextAreaElement).value, focused: document.activeElement === input, locked: document.body.style.position === 'fixed' }));
+      console.log('FEEDBACK_OPEN_FOCUS_BEFORE_RELEASE', JSON.stringify({ nested, ...beforeRelease }));
+      expect(beforeRelease).toEqual({ value, focused: true, locked: true });
+      await page.evaluate(() => (window as Window & { __releaseFeedbackOpeningFrames?: () => void }).__releaseFeedbackOpeningFrames!());
+      const afterRelease = await message.evaluate(input => ({ value: (input as HTMLTextAreaElement).value, focused: document.activeElement === input, locked: document.body.style.position === 'fixed' }));
+      console.log('FEEDBACK_OPEN_FOCUS_AFTER_RELEASE', JSON.stringify({ nested, ...afterRelease }));
+      expect(afterRelease).toEqual(beforeRelease);
+      await expect(message).toHaveValue(value);
+      await expect(message).toBeFocused();
+      await expect(dialog.getByRole('button', { name: /GitHub에서 검토 후 제출/ })).toBeEnabled();
+      await dialog.screenshot({ path: testInfo.outputPath(`feedback-first-input-${nested}.png`) });
+      await page.keyboard.press('Escape');
+      await expect(dialog).toHaveCount(0);
+      await expect(opener).toBeFocused();
+      if (nested) await expect(page.locator('section[data-game="rps"]')).toBeVisible();
+      expect(errors).toEqual([]);
+    } finally {
+      await page.evaluate(() => (window as Window & { __releaseFeedbackOpeningFrames?: () => void }).__releaseFeedbackOpeningFrames?.());
+    }
+  });
+}
+
 test('별점 방향키 직후 의견 입력으로 이동하면 예약된 초점이 입력을 방해하지 않는다', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
