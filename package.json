@@ -40,7 +40,7 @@
     "test:display": "node --test --experimental-strip-types app/lib/result-display.test.ts",
     "test:readiness": "node --test --experimental-strip-types app/lib/readiness.test.ts",
     "test:onboarding": "node --test --experimental-strip-types app/lib/game-onboarding.test.ts",
-    "test:backup": "node --test --experimental-strip-types app/lib/practice-backup.test.ts",
+    "test:backup": "node --test --experimental-strip-types app/lib/practice-backup.test.ts app/lib/practice-summary-csv.test.ts",
     "test:envelope": "node --test --experimental-strip-types app/lib/result-envelope.test.ts"
   },
   "dependencies": {
