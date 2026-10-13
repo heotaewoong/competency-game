@@ -46,7 +46,13 @@ for (const nested of [false, true]) {
       await dialog.screenshot({ path: testInfo.outputPath(`feedback-first-input-${nested}.png`) });
       await page.keyboard.press('Escape');
       await expect(dialog).toHaveCount(0);
+      const returnedFocus = await opener.evaluate(button => ({ focused: document.activeElement === button, inert: Boolean(button.closest('[inert]')), locked: document.body.style.position === 'fixed' }));
+      console.log('FEEDBACK_CLOSE_RETURN_FOCUS', JSON.stringify({ nested, ...returnedFocus }));
       await expect(opener).toBeFocused();
+      const settledFocus = await opener.evaluate(button => ({ focused: document.activeElement === button, inert: Boolean(button.closest('[inert]')), locked: document.body.style.position === 'fixed' }));
+      console.log('FEEDBACK_CLOSE_SETTLED_FOCUS', JSON.stringify({ nested, ...settledFocus }));
+      expect(settledFocus).toEqual({ focused: true, inert: false, locked: nested });
+      await opener.screenshot({ path: testInfo.outputPath(`feedback-return-focus-${nested}.png`) });
       if (nested) await expect(page.locator('section[data-game="rps"]')).toBeVisible();
       expect(errors).toEqual([]);
     } finally {
