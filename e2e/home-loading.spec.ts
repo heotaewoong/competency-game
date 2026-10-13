@@ -5,6 +5,9 @@ for (const timezone of ['Asia/Seoul', 'America/New_York']) {
     test.use({ timezoneId: timezone });
     for (const width of [390, 1280]) {
       test(`${width}px: 현지 날짜 7일의 활동을 읽고 새로고침해도 저장값은 그대로다`, async ({ page }, testInfo) => {
+        const referenceTime = Date.now();
+        // Keep the fixture and date oracle on the same day across midnight.
+        await page.clock.setFixedTime(referenceTime);
         const errors: string[] = [];
         page.on('pageerror', error => errors.push(error.message));
         page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
@@ -25,6 +28,7 @@ for (const timezone of ['Asia/Seoul', 'America/New_York']) {
         const saved = await page.evaluate(() => localStorage.getItem('nineflow-practice-results-v4:training-activity-regression'));
         const activity = page.getByRole('region', { name: '최근 7일 훈련 활동', exact: true });
         const snapshot = await activity.evaluate(element => ({
+          wall: Date.now(),
           status: element.querySelector('[role="status"]')?.textContent,
           days: Array.from(element.querySelectorAll('li')).map(day => ({ date: day.getAttribute('data-date'), count: day.querySelector('b')?.textContent })),
         }));
@@ -36,6 +40,7 @@ for (const timezone of ['Asia/Seoul', 'America/New_York']) {
             return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
           });
         });
+        expect(snapshot.wall).toBe(referenceTime);
         expect(snapshot.days.map(day => day.date)).toEqual(expectedDates);
         expect(snapshot.days.map(day => day.count)).toEqual(['1회', '0회', '0회', '0회', '0회', '1회', '2회']);
         await expect(activity.getByRole('status')).toHaveText('완료 세션 4회 · 기록이 있는 날 3일 / 7일');
@@ -54,6 +59,39 @@ for (const timezone of ['Asia/Seoul', 'America/New_York']) {
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
         await activity.screenshot({ path: testInfo.outputPath(`activity-${width}-${timezone.replace('/', '-')}.png`) });
         await page.screenshot({ path: testInfo.outputPath(`activity-page-${width}-${timezone.replace('/', '-')}.png`), fullPage: true });
+        expect(errors).toEqual([]);
+
+        const nextDay = await page.evaluate(() => {
+          const now = new Date();
+          const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 12);
+          return { time: date.getTime(), key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` };
+        });
+        await page.clock.setFixedTime(nextDay.time);
+        const beforeRefresh = await activity.evaluate(element => ({
+          wall: Date.now(),
+          days: Array.from(element.querySelectorAll('li')).map(day => ({ date: day.getAttribute('data-date'), count: day.querySelector('b')?.textContent })),
+        }));
+        console.log('TRAINING_ACTIVITY_DAY_SHIFT', JSON.stringify({ timezone, width, referenceTime, nextDay, beforeRefresh }));
+        expect(beforeRefresh.wall).toBe(nextDay.time);
+        expect(beforeRefresh.days).toEqual(snapshot.days);
+        await refresh.focus();
+        await page.keyboard.press('Enter');
+        const attemptedRefresh = await activity.locator('time').evaluateAll(elements => elements.map(element => element.getAttribute('datetime')));
+        console.log('TRAINING_ACTIVITY_DAY_REFRESH_ATTEMPT', JSON.stringify({ timezone, width, attemptedRefresh }));
+        await expect(activity.locator('time').last()).toHaveAttribute('datetime', nextDay.key);
+        const refreshed = await activity.evaluate(element => ({
+          wall: Date.now(),
+          days: Array.from(element.querySelectorAll('li')).map(day => ({ date: day.getAttribute('data-date'), count: day.querySelector('b')?.textContent })),
+        }));
+        console.log('TRAINING_ACTIVITY_DAY_REFRESH', JSON.stringify({ timezone, width, referenceTime, nextDay, refreshed }));
+        expect(refreshed.wall).toBe(nextDay.time);
+        expect(refreshed.days.map(day => day.date)).toEqual([...expectedDates.slice(1), nextDay.key]);
+        expect(refreshed.days.map(day => day.count)).toEqual(['0회', '0회', '0회', '0회', '1회', '2회', '1회']);
+        await expect(refresh).toBeFocused();
+        await expect(activity).toContainText(`${expectedDates[1]} ~ ${nextDay.key}`);
+        await expect(activity.getByRole('status')).toHaveText('완료 세션 4회 · 기록이 있는 날 3일 / 7일');
+        expect(await page.evaluate(() => localStorage.getItem('nineflow-practice-results-v4:training-activity-regression'))).toBe(saved);
+        await activity.screenshot({ path: testInfo.outputPath(`activity-next-day-${width}-${timezone.replace('/', '-')}.png`) });
         expect(errors).toEqual([]);
       });
     }
