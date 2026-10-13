@@ -141,7 +141,7 @@ for (const width of [390, 1280]) {
     const chunks: Buffer[] = [];
     for await (const chunk of stream) chunks.push(Buffer.from(chunk));
     const bytes = Buffer.concat(chunks);
-    const csv = bytes.toString('utf8');
+    const csv: string = bytes.toString('utf8');
     const rows = csv.slice(1, -2).split('\r\n').map(line => Array.from(line.matchAll(/"((?:[^"]|"")*)"(?:,|$)/g), match => match[1].replaceAll('""', '"')));
     const after = await page.evaluate(() => ({ generation: localStorage.getItem('nineflow-practice-results-generation-v1'), raw: localStorage.getItem('nineflow-practice-results-v4:csv-summary') }));
     console.log('PRACTICE_SUMMARY_CSV', JSON.stringify({ width, filename: download.suggestedFilename(), bom: [...bytes.subarray(0, 3)], rows, before, after }));
