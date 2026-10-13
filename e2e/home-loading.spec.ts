@@ -1,5 +1,54 @@
 import { expect, test } from '@playwright/test';
 
+for (const width of [390, 1280]) {
+  test(`기록 찾기 ${width}px: 오래된 기록의 게임·모드 필터와 더 보기는 저장값을 바꾸지 않는다`, async ({ page }, testInfo) => {
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+    await page.setViewportSize({ width, height: 844 });
+    await page.addInitScript(() => {
+      const generation = 'history-filter-regression';
+      localStorage.setItem('nineflow-practice-results-generation-v1', generation);
+      localStorage.setItem(`nineflow-practice-results-v4:${generation}`, JSON.stringify({ version: 4, generation, results: Array.from({ length: 12 }, (_, index) => ({
+        id: `history-${index}`, gameId: index < 8 ? 'rps' : 'number',
+        completedAt: new Date(Date.UTC(2026, 9, 1, 12 - index)).toISOString(),
+        accuracy: 80, medianRt: 720, stability: 74, errors: 2,
+        ...(index === 0 ? {} : { detail: { sessionMode: index % 2 ? 'practice' : 'simulation' } }),
+      })) }));
+    });
+    await page.goto('/');
+    await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+    const saved = await page.evaluate(() => localStorage.getItem('nineflow-practice-results-v4:history-filter-regression'));
+    const history = page.locator('.history-panel');
+    await history.locator('summary').click();
+    await expect(history.locator('.record-list > article')).toHaveCount(8);
+    await history.getByRole('button', { name: /기록 더 보기/ }).click();
+    await expect(history.locator('.record-list > article')).toHaveCount(12);
+    await expect(history.getByRole('button', { name: /기록 더 보기/ })).toHaveCount(0);
+    await history.getByLabel('게임', { exact: true }).selectOption('number');
+    await expect(history.locator('.record-list > article')).toHaveCount(4);
+    await expect(history.locator('.record-list')).toContainText('숫자 누르기');
+    await history.getByLabel('모드', { exact: true }).selectOption('simulation');
+    await expect(history.locator('.record-list > article')).toHaveCount(2);
+    await expect(history.getByRole('status')).toHaveText('저장된 12개 중 2개 일치 · 2개 표시');
+    await history.getByLabel('모드', { exact: true }).selectOption('unknown');
+    await expect(history.locator('.record-list > article')).toHaveCount(0);
+    await expect(history.locator('.history-empty')).toBeVisible();
+    await history.getByRole('button', { name: '필터 초기화', exact: true }).click();
+    await expect(history.locator('.record-list > article')).toHaveCount(8);
+    await history.getByLabel('모드', { exact: true }).selectOption('unknown');
+    await expect(history.locator('.record-list > article')).toHaveCount(1);
+    await expect(history.locator('.record-list')).toContainText('가위바위보');
+    await history.getByLabel('게임', { exact: true }).focus();
+    await page.keyboard.press('Tab');
+    await expect(history.getByLabel('모드', { exact: true })).toBeFocused();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    expect(await page.evaluate(() => localStorage.getItem('nineflow-practice-results-v4:history-filter-regression'))).toBe(saved);
+    await page.screenshot({ path: testInfo.outputPath(`history-filter-${width}.png`), fullPage: true });
+    expect(errors).toEqual([]);
+  });
+}
+
 test('첫 화면은 Tailwind 빌드 컴파일러를 내려받지 않는다', async ({ page }) => {
   const scripts: import('@playwright/test').Response[] = [];
   page.on('response', (response) => {

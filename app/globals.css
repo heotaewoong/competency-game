@@ -289,6 +289,14 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 .history-panel > summary::marker { content: ''; }
 .history-panel > summary::after { content: '+'; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--brand); background: var(--brand-soft); font-size: 17px; }
 .history-panel[open] > summary::after { content: '−'; }
+.history-controls { padding: 0 12px 12px; display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.history-controls label { flex: 1 1 170px; display: grid; gap: 5px; color: var(--ink); font-size: 12px; font-weight: 700; }
+.history-controls select, .history-controls button, .history-more { min-height: 44px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); color: var(--ink); font: inherit; }
+.history-controls select { width: 100%; min-width: 0; }
+.history-controls :is(select, button):focus-visible, .history-more:focus-visible { outline: 3px solid var(--brand); outline-offset: 3px; }
+.history-controls p { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 12px; }
+.history-empty { padding: 0 16px 16px; color: var(--ink); }
+.history-more { margin: 0 12px 12px; cursor: pointer; }
 .history-panel > summary span { margin-left: auto; margin-right: 10px; color: #5f6879; font-size: 11px; font-weight: 700; }
 .record-list { padding: 0 12px 12px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .record-list > article { min-width: 0; padding: 12px 13px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: 11px; background: #fff; }
