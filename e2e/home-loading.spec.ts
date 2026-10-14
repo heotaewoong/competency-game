@@ -536,4 +536,93 @@ test('실제 가위바위보 두 번 완주 기록의 점수 변화·활동·필
   expect(restored.results).toEqual(beforeHistory.results);
   await expect(panel.getByRole('heading')).toHaveText(`직전 동일 조건 대비 ${change > 0 ? '+' : ''}${change}%p`);
   expect(errors).toEqual([]);
+
+  const beforeScale = await readSaved();
+  const summary = panel.locator('summary');
+  await summary.press('Enter');
+  await expect(panel.locator('details')).toHaveAttribute('open', '');
+  const observeScale = async (label: string) => {
+    const view = await panel.evaluate((element) => {
+      const summary = element.querySelector('summary')!;
+      const table = element.querySelector('table')!;
+      const font = (selector: string) => Number.parseFloat(getComputedStyle(element.querySelector(selector)!).fontSize);
+      return {
+        scale: document.documentElement.dataset.textScale,
+        fonts: { heading: font('h3'), summary: font('summary'), table: font('table'), paragraph: font('p') },
+        cellFonts: Array.from(element.querySelectorAll('th, td'), cell => Number.parseFloat(getComputedStyle(cell).fontSize)),
+        heading: element.querySelector('h3')?.textContent,
+        rows: Array.from(element.querySelectorAll('tbody tr'), row => row.textContent),
+        open: element.querySelector('details')?.hasAttribute('open'),
+        summaryFocused: document.activeElement === summary,
+        summaryHeight: summary.getBoundingClientRect().height,
+        panelClientWidth: element.clientWidth,
+        panelScrollWidth: element.scrollWidth,
+        tableWidth: table.getBoundingClientRect().width,
+        documentClientWidth: document.documentElement.clientWidth,
+        documentScrollWidth: document.documentElement.scrollWidth,
+      };
+    });
+    const saved = await readSaved();
+    const snapshot = { label, ...view, generation: saved.generation, ids: saved.results.map(item => item.id), profiles: saved.results.map(item => item.detail?.accessibilityProfile) };
+    console.log('RECORD_PROGRESS_TEXT_SCALE', JSON.stringify(snapshot));
+    await testInfo.attach(`record-progress-text-scale-${label}.json`, { body: JSON.stringify(snapshot, null, 2), contentType: 'application/json' });
+    await panel.screenshot({ path: testInfo.outputPath(`record-progress-text-scale-${label}.png`) });
+    return { view, saved };
+  };
+  const standard = await observeScale('standard');
+  const readinessOpener = page.locator('.readiness-banner button');
+  const readiness = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+  await readinessOpener.press('Enter');
+  const largeButton = readiness.getByRole('button', { name: '큰 글자', exact: true });
+  await expect(largeButton).toHaveAttribute('aria-pressed', 'false');
+  await largeButton.press('Enter');
+  await expect(page.locator('html')).toHaveAttribute('data-text-scale', 'large');
+  await expect(largeButton).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
+  await expect(readiness).toHaveCount(0);
+  await expect(readinessOpener).toBeFocused();
+  await summary.press('Space');
+  await expect(panel.locator('details')).not.toHaveAttribute('open', '');
+  await summary.press('Space');
+  await expect(panel.locator('details')).toHaveAttribute('open', '');
+  const large = await observeScale('large');
+  await readinessOpener.press('Enter');
+  const standardButton = readiness.getByRole('button', { name: '기본 크기', exact: true });
+  await standardButton.press('Enter');
+  await expect(page.locator('html')).toHaveAttribute('data-text-scale', 'standard');
+  await expect(standardButton).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
+  await expect(readiness).toHaveCount(0);
+  await expect(readinessOpener).toBeFocused();
+  await summary.press('Space');
+  await expect(panel.locator('details')).not.toHaveAttribute('open', '');
+  await summary.press('Space');
+  await expect(panel.locator('details')).toHaveAttribute('open', '');
+  const reset = await observeScale('reset');
+  for (const observed of [standard, large, reset]) {
+    expect(observed.saved).toEqual(beforeScale);
+    expect(observed.view.rows).toEqual(standard.view.rows);
+    expect(observed.view.heading).toBe(standard.view.heading);
+    expect(observed.view.open).toBe(true);
+    expect(observed.view.summaryFocused).toBe(true);
+    expect(observed.view.summaryHeight).toBeGreaterThanOrEqual(44);
+    expect(observed.view.panelScrollWidth).toBeLessThanOrEqual(observed.view.panelClientWidth + 1);
+    expect(observed.view.documentScrollWidth).toBeLessThanOrEqual(observed.view.documentClientWidth + 1);
+    expect(observed.view.tableWidth).toBeLessThanOrEqual(observed.view.panelClientWidth + 1);
+  }
+  expect(standard.view.scale).toBe('standard');
+  expect(large.view.scale).toBe('large');
+  expect(reset.view.scale).toBe('standard');
+  expect(reset.view.fonts).toEqual(standard.view.fonts);
+  expect(reset.view.cellFonts).toEqual(standard.view.cellFonts);
+  expect(large.view.fonts.paragraph).toBeGreaterThan(standard.view.fonts.paragraph);
+  for (const key of ['heading', 'summary'] as const) {
+    expect(large.view.fonts[key], `large text ${key}`).toBeGreaterThan(standard.view.fonts[key]);
+  }
+  expect(standard.view.cellFonts).toHaveLength(6);
+  expect(large.view.cellFonts).toHaveLength(standard.view.cellFonts.length);
+  for (const [index, size] of large.view.cellFonts.entries()) {
+    expect(size, `large text cell ${index}`).toBeGreaterThan(standard.view.cellFonts[index]);
+  }
+  expect(errors).toEqual([]);
 });
