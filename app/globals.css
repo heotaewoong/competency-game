@@ -3032,6 +3032,7 @@ html[data-motion="reduce"] *, html[data-motion="reduce"] *::before, html[data-mo
 .data-action-card h3 { margin: 0; color: #2d3a51; font-size: 14px; }
 .data-action-card p { margin: 4px 0 0; color: #657288; font-size: 10px; line-height: 1.5; }
 .data-action-card small { margin-top: 4px; display: block; color: #8390a2; font-size: 8px; line-height: 1.5; }
+.data-csv-card p { color: var(--ink); font-size: 12px; }
 .data-action-card > button, .data-action-card > label { min-height: 44px; padding: 8px 12px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #5365bf; border-radius: 9px; color: #fff; background: #5365bf; font-size: 9px; font-weight: 850; white-space: nowrap; }
 .data-action-card > button:disabled { border-color: #d4dae5; color: #8791a2; background: #f1f3f6; }
 .data-action-card > label { position: relative; cursor: pointer; }
