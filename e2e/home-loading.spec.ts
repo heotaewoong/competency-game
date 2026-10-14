@@ -230,3 +230,84 @@ test('이전 설정 없는 기록·단일 기록·마법약 근거 없는 기록
   expect(await progressStorage(page)).toEqual(before);
   expect(errors).toEqual([]);
 });
+
+test('실제 가위바위보 연습 두 번 완료한 기록이 점수 변화에 연결되고 새로고침 뒤에도 유지된다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  const readSaved = () => page.evaluate(() => {
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    const raw = generation ? localStorage.getItem(`nineflow-practice-results-v4:${generation}`) : null;
+    const envelope = raw ? JSON.parse(raw) : null;
+    return { generation, raw, version: envelope?.version, envelopeGeneration: envelope?.generation, results: (envelope?.results ?? []) as SessionResult[] };
+  });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  expect((await readSaved()).results).toEqual([]);
+  await page.getByRole('button', { name: /가위바위보, 난이도 하, 설정 열기/ }).click();
+  const stage = page.locator('section[data-game="rps"]');
+  await expect(stage.getByLabel('문제 수 현재 값')).toHaveText('15');
+  for (let count = 0; count < 2; count += 1) await stage.getByRole('button', { name: '문제 수 줄이기', exact: true }).click();
+  await expect(stage.getByLabel('문제 수 현재 값')).toHaveText('9');
+  await stage.getByText('시간 제한 없이 연습', { exact: true }).click();
+  await expect(stage.getByRole('checkbox', { name: /시간 제한 없이 연습/ })).toBeChecked();
+  await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
+  const result = page.locator('.stage-result');
+  const completions: SessionResult[] = [];
+  for (let session = 0; session < 2; session += 1) {
+    const workspace = page.locator('.game-workspace.game-rps');
+    await expect(workspace.locator('.rps-board')).toBeVisible();
+    await expect(workspace.locator('.guided-pacing-note')).toContainText('시간 제한 없이 연습 중');
+    for (let question = 0; question < 9; question += 1) {
+      await expect(workspace.locator('.workspace-progress > span')).toContainText(`${question + 1} / 9`);
+      const choice = workspace.locator('.rps-actions button').filter({ hasText: '바위' });
+      await expect(choice).toBeEnabled();
+      await choice.click();
+    }
+    await expect(result.getByRole('heading', { name: '가위바위보 결과', exact: true })).toBeVisible();
+    await expect.poll(async () => (await readSaved()).results.length).toBe(session + 1);
+    const saved = (await readSaved()).results[0];
+    completions.push(saved);
+    const snapshot = { id: saved.id, completedAt: saved.completedAt, accuracy: saved.accuracy, errors: saved.errors, detail: saved.detail, reviewSummary: saved.review?.summary };
+    console.log('RECORD_PROGRESS_REAL_COMPLETION', JSON.stringify(snapshot));
+    await testInfo.attach(`record-progress-real-completion-${session + 1}.json`, { body: JSON.stringify(snapshot, null, 2), contentType: 'application/json' });
+    expect(saved.gameId).toBe('rps');
+    expect(saved.detail).toMatchObject({ quantity: 9, paceMs: 4500, trialCount: 9, responseCount: 9, practiceFocus: 'full', guidedPacing: '제한시간 없음', sessionMode: '연습 모드', visibilityPauses: 0 });
+    expect(saved.detail?.accessibilityProfile).toMatch(/\S+/);
+    expect(Number(saved.detail?.correctCount) + saved.errors).toBe(9);
+    expect(saved.review?.summary.attemptedCount).toBe(9);
+    await expect(result.locator('.result-metrics article').first().locator('b')).toHaveText(`${saved.accuracy}%`);
+    if (session === 0) await result.getByRole('button', { name: '다시 연습', exact: true }).click();
+  }
+  const [previous, latest] = completions;
+  expect(latest.id).not.toBe(previous.id);
+  expect(Date.parse(latest.completedAt)).toBeGreaterThan(Date.parse(previous.completedAt));
+  for (const key of ['quantity', 'paceMs', 'practiceFocus', 'guidedPacing', 'sessionMode', 'accessibilityProfile']) expect(latest.detail?.[key]).toEqual(previous.detail?.[key]);
+  const beforeHistory = await readSaved();
+  expect(beforeHistory.version).toBe(4);
+  expect(beforeHistory.envelopeGeneration).toBe(beforeHistory.generation);
+  await result.getByRole('button', { name: /^게임 목록/ }).click();
+  await expect(page.locator('.stage-panel')).toHaveCount(0);
+  const panel = page.getByRole('region', { name: '가위바위보 같은 조건 기록 변화', exact: true });
+  await panel.locator('summary').focus();
+  await page.keyboard.press('Enter');
+  const snapshot = await panel.evaluate((element) => ({ heading: element.querySelector('h3')?.textContent, scores: Array.from(element.querySelectorAll('tbody td:last-child'), (cell) => cell.textContent), rows: Array.from(element.querySelectorAll('tbody tr'), (row) => row.textContent), open: element.querySelector('details')?.hasAttribute('open') }));
+  console.log('RECORD_PROGRESS_REAL_HISTORY', JSON.stringify(snapshot));
+  await testInfo.attach('record-progress-real-history.json', { body: JSON.stringify(snapshot, null, 2), contentType: 'application/json' });
+  const change = Math.round((latest.accuracy - previous.accuracy) * 10) / 10;
+  await expect(panel.getByRole('heading')).toHaveText(`직전 동일 조건 대비 ${change > 0 ? '+' : ''}${change}%p`);
+  expect(snapshot.scores).toEqual([`${latest.accuracy}%`, `${previous.accuracy}%`]);
+  expect(snapshot.open).toBe(true);
+  const card = page.locator('.game-record-grid > article').filter({ has: panel });
+  await expect(card.locator('dl dd')).toHaveText([`${latest.accuracy}%`, `${Math.max(latest.accuracy, previous.accuracy)}%`, '2회']);
+  await panel.screenshot({ path: testInfo.outputPath('record-progress-real-history.png') });
+  expect(await readSaved()).toEqual(beforeHistory);
+  await page.reload();
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  const restored = await readSaved();
+  console.log('RECORD_PROGRESS_REAL_RELOAD', JSON.stringify({ generation: restored.generation, ids: restored.results.map((item) => item.id), scores: restored.results.map((item) => item.accuracy) }));
+  expect(restored.generation).toBe(beforeHistory.generation);
+  expect(restored.results).toEqual(beforeHistory.results);
+  await expect(panel.getByRole('heading')).toHaveText(`직전 동일 조건 대비 ${change > 0 ? '+' : ''}${change}%p`);
+  expect(errors).toEqual([]);
+});
