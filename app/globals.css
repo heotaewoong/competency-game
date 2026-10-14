@@ -2943,6 +2943,7 @@ html[data-contrast="high"] :where(.game-card, .continue-card, .readiness-banner,
 html[data-contrast="high"] :where(.hero-copy p, .card-copy p, .readiness-banner-copy p, .simulator-note, small) { color: #3d485b; }
 html[data-contrast="high"] button:focus-visible, html[data-contrast="high"] a:focus-visible, html[data-contrast="high"] summary:focus-visible { outline-color: #004bd6; outline-width: 4px; }
 html[data-text-scale="large"] :where(button, a, label, legend) { font-size: max(13px, .875em); }
+html[data-text-scale="large"] .record-progress :where(h3, summary, table) { font-size: max(13px, .875em); }
 html[data-text-scale="large"] :where(p, li, dt, dd, small) { font-size: max(12px, .8em); }
 html[data-text-scale="large"] .hero-copy > p:not(.eyebrow) { font-size: 16px; }
 html[data-text-scale="large"] :where(.mode-options button > span, .mode-options button > b, .appointment-practice-options b, .appointment-round-picker em, .intro-settings-shortcut b, .intro-settings-shortcut em) { font-size: 12px !important; }
