@@ -1,4 +1,15 @@
-import type { SessionResult } from './game-data.ts';
+import type { GameId, SessionResult } from './game-data.ts';
+import { getResultMode, type ResultMode } from './result-comparison.ts';
+
+/** Filters the saved history without changing its order or comparison context. */
+export function filterResultHistory(
+  results: readonly SessionResult[],
+  gameId: GameId | 'all',
+  mode: ResultMode | 'all',
+) {
+  return results.filter((result) => (gameId === 'all' || result.gameId === gameId)
+    && (mode === 'all' || getResultMode(result) === mode));
+}
 
 export function usesPotionEvidenceScore(result: SessionResult) {
   return result.gameId === 'potion' && result.detail?.scoringVersion === 'potion-evidence-v1';

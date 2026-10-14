@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { SessionResult } from '../lib/game-data';
+import { createPracticeSummaryCsv } from '../lib/practice-summary-csv';
 import {
   MAX_PRACTICE_RESULTS_BACKUP_BYTES,
   createPracticeResultsBackup,
@@ -97,24 +98,24 @@ export function DataManagementDialog({
     };
   }, []);
 
-  function exportResults() {
+  function exportResults(format: 'json' | 'csv') {
     if (!results.length) return;
     try {
       const now = new Date();
-      const json = createPracticeResultsBackup(results, now);
-      const url = URL.createObjectURL(new Blob([json], { type: 'application/json;charset=utf-8' }));
+      const content = format === 'json' ? createPracticeResultsBackup(results, now) : createPracticeSummaryCsv(results);
+      const url = URL.createObjectURL(new Blob([content], { type: format === 'json' ? 'application/json;charset=utf-8' : 'text/csv;charset=utf-8' }));
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = backupFilename(now);
+      anchor.download = format === 'json' ? backupFilename(now) : `nineflow-practice-summary-${now.toISOString().slice(0, 10)}.csv`;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 0);
       setNoticeTone('success');
-      setNotice(`연습 기록 ${results.length}개를 JSON 파일로 내보냈습니다.`);
+      setNotice(format === 'json' ? `연습 기록 ${results.length}개를 JSON 파일로 내보냈습니다.` : `연습 요약 ${results.length}개를 CSV 파일로 내보냈습니다. 복원에는 JSON 백업을 사용해 주세요.`);
     } catch {
       setNoticeTone('error');
-      setNotice('백업 파일을 만들지 못했습니다. 잠시 후 다시 시도해 주세요.');
+      setNotice(format === 'json' ? '백업 파일을 만들지 못했습니다. 잠시 후 다시 시도해 주세요.' : 'CSV 요약 파일을 만들지 못했습니다. 기록은 그대로입니다. 잠시 후 다시 시도해 주세요.');
     }
   }
 
@@ -192,18 +193,24 @@ export function DataManagementDialog({
         <section className="data-action-card" aria-labelledby="export-title">
           <div className="data-action-number">01</div>
           <div><h3 id="export-title">기록 내보내기</h3><p>현재 저장된 점수·세부 설정·문항별 복습을 버전이 있는 JSON 한 파일로 저장합니다.</p><small>현재 기록 {results.length}개 · 개인 식별정보는 별도로 수집하지 않습니다.</small></div>
-          <button type="button" disabled={!results.length} onClick={exportResults}>{results.length ? 'JSON 백업 받기' : '내보낼 기록 없음'}</button>
+          <button type="button" disabled={!results.length} onClick={() => exportResults('json')}>{results.length ? 'JSON 백업 받기' : '내보낼 기록 없음'}</button>
+        </section>
+
+        <section className="data-action-card data-csv-card" aria-labelledby="csv-title">
+          <div className="data-action-number">02</div>
+          <div><h3 id="csv-title">연습 요약 표로 보기</h3><p>완료 시각·게임·모드·점수 지표·시간·오류·설정을 CSV로 받아 표 프로그램에서 살펴보세요.</p><p id="csv-summary-note">UTF-8 · 시각은 UTC 기준 · 다른 모드·설정·점수 지표는 단순 비교하지 마세요. 복원·문항별 복습 보관은 JSON 백업을 사용하세요.</p></div>
+          <button type="button" aria-describedby="csv-summary-note" disabled={!results.length} onClick={() => exportResults('csv')}>CSV 요약 받기</button>
         </section>
 
         <section className="data-action-card data-import-card" aria-labelledby="import-title">
-          <div className="data-action-number">02</div>
+          <div className="data-action-number">03</div>
           <div><h3 id="import-title">기록 가져오기</h3><p>파일 전체와 복습 버전을 먼저 검증한 뒤, 현재 기록을 지우지 않고 중복 ID를 제외해 합칩니다.</p><small>부분 가져오기는 하지 않습니다. 한 항목이라도 손상되면 파일 전체를 거절합니다.</small></div>
           <label className={reading ? 'is-reading' : ''}><input ref={fileRef} type="file" accept="application/json,.json" disabled={reading} onChange={(event) => void readBackupFile(event.target.files?.[0])} /><span>{reading ? '파일 확인 중…' : 'JSON 파일 선택'}</span></label>
           {preview && <aside className="data-import-preview" role="status"><div><span>검증 완료</span><b>{preview.results.length}개 기록</b><small>{formatDate(preview.exportedAt)} 백업</small></div><button type="button" onClick={importPreview}>기존 기록과 합치기</button><button type="button" className="data-preview-cancel" onClick={() => { setPreview(null); setNotice(''); }}>취소</button></aside>}
         </section>
 
         <section className="data-action-card data-clear-card" aria-labelledby="clear-title">
-          <div className="data-action-number">03</div>
+          <div className="data-action-number">04</div>
           <div><h3 id="clear-title">이 브라우저 기록 삭제</h3><p>연습 결과와 문항별 복습만 삭제합니다. 게임 설정과 접근성 설정은 유지합니다.</p><small>삭제 후에는 JSON 백업이 없으면 복구할 수 없습니다.</small></div>
           {!confirmClear
             ? <button ref={clearTriggerRef} type="button" className="data-clear-trigger" disabled={!hasClearableData} onClick={showClearConfirmation}>{results.length ? '전체 기록 삭제' : storedArtifactsPresent ? '저장 데이터 삭제' : '삭제할 기록 없음'}</button>

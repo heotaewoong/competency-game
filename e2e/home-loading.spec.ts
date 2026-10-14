@@ -1,4 +1,166 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+import { games, type GameId, type SessionResult } from '../app/lib/game-data';
+
+for (const width of [390, 1280]) {
+  test(`기록 찾기 ${width}px: 오래된 기록의 게임·모드 필터와 더 보기는 저장값을 바꾸지 않는다`, async ({ page }, testInfo) => {
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+    await page.setViewportSize({ width, height: 844 });
+    await page.addInitScript(() => {
+      const generation = 'history-filter-regression';
+      localStorage.setItem('nineflow-practice-results-generation-v1', generation);
+      localStorage.setItem(`nineflow-practice-results-v4:${generation}`, JSON.stringify({ version: 4, generation, results: Array.from({ length: 12 }, (_, index) => ({
+        id: `history-${index}`, gameId: index < 8 ? 'rps' : 'number',
+        completedAt: new Date(Date.UTC(2026, 9, 1, 12 - index)).toISOString(),
+        accuracy: 80, medianRt: 720, stability: 74, errors: 2,
+        ...(index === 0 ? {} : { detail: { sessionMode: index % 2 ? 'practice' : 'simulation' } }),
+      })) }));
+    });
+    await page.goto('/');
+    await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+    const saved = await page.evaluate(() => localStorage.getItem('nineflow-practice-results-v4:history-filter-regression'));
+    const history = page.locator('.history-panel');
+    await history.locator('summary').click();
+    await expect(history.locator('.record-list > article')).toHaveCount(8);
+    await history.getByRole('button', { name: /기록 더 보기/ }).click();
+    await expect(history.locator('.record-list > article')).toHaveCount(12);
+    await expect(history.getByRole('button', { name: /기록 더 보기/ })).toHaveCount(0);
+    await history.getByRole('combobox', { name: '게임', exact: true }).selectOption('number');
+    await expect(history.locator('.record-list > article')).toHaveCount(4);
+    await expect(history.locator('.record-list')).toContainText('숫자 누르기');
+    await history.getByRole('combobox', { name: '모드', exact: true }).selectOption('simulation');
+    await expect(history.locator('.record-list > article')).toHaveCount(2);
+    await expect(history.getByRole('status')).toHaveText('저장된 12개 중 2개 일치 · 2개 표시');
+    await history.getByRole('combobox', { name: '모드', exact: true }).selectOption('unknown');
+    await expect(history.locator('.record-list > article')).toHaveCount(0);
+    await expect(history.locator('.history-empty')).toBeVisible();
+    await history.getByRole('button', { name: '필터 초기화', exact: true }).click();
+    await expect(history.locator('.record-list > article')).toHaveCount(8);
+    await history.getByRole('combobox', { name: '모드', exact: true }).selectOption('unknown');
+    await expect(history.locator('.record-list > article')).toHaveCount(1);
+    await expect(history.locator('.record-list')).toContainText('가위바위보');
+    await history.getByRole('combobox', { name: '게임', exact: true }).focus();
+    await page.keyboard.press('Tab');
+    await expect(history.getByRole('combobox', { name: '모드', exact: true })).toBeFocused();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    expect(await page.evaluate(() => localStorage.getItem('nineflow-practice-results-v4:history-filter-regression'))).toBe(saved);
+    await page.screenshot({ path: testInfo.outputPath(`history-filter-${width}.png`), fullPage: true });
+    expect(errors).toEqual([]);
+  });
+}
+
+for (const timezone of ['Asia/Seoul', 'America/New_York']) {
+  test.describe(`훈련 활동 ${timezone}`, () => {
+    test.use({ timezoneId: timezone });
+    for (const width of [390, 1280]) {
+      test(`${width}px: 현지 날짜 7일의 활동을 읽고 새로고침해도 저장값은 그대로다`, async ({ page }, testInfo) => {
+        const referenceTime = Date.now();
+        // Keep the fixture and date oracle on the same day across midnight.
+        await page.clock.setFixedTime(referenceTime);
+        const errors: string[] = [];
+        page.on('pageerror', error => errors.push(error.message));
+        page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+        await page.setViewportSize({ width, height: 844 });
+        await page.addInitScript(() => {
+          const now = new Date();
+          const generation = 'training-activity-regression';
+          const results = [0, 0, -1, -6, -7, 1].map((offset, index) => ({
+            id: `activity-${index}`, gameId: 'rps',
+            completedAt: new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, offset === -1 ? 23 : offset < 0 ? 12 : 0, offset === -1 ? 59 : 0).toISOString(),
+            accuracy: 80, medianRt: 720, stability: 74, errors: 2,
+          }));
+          localStorage.setItem('nineflow-practice-results-generation-v1', generation);
+          localStorage.setItem(`nineflow-practice-results-v4:${generation}`, JSON.stringify({ version: 4, generation, results }));
+        });
+        await page.goto('/');
+        await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+        const saved = await page.evaluate(() => localStorage.getItem('nineflow-practice-results-v4:training-activity-regression'));
+        const activity = page.getByRole('region', { name: '최근 7일 훈련 활동', exact: true });
+        const snapshot = await activity.evaluate(element => {
+          const period = element.querySelector('.training-activity-heading p');
+          return {
+            wall: Date.now(),
+            status: element.querySelector('[role="status"]')?.textContent,
+            statusAtomic: element.querySelector('[role="status"]')?.getAttribute('aria-atomic'),
+            period: { text: period?.textContent, live: period?.getAttribute('aria-live'), atomic: period?.getAttribute('aria-atomic') },
+            days: Array.from(element.querySelectorAll('li')).map(day => ({ date: day.getAttribute('data-date'), count: day.querySelector('b')?.textContent })),
+          };
+        });
+        console.log('TRAINING_ACTIVITY', JSON.stringify({ timezone, width, ...snapshot }));
+        const expectedDates = await page.evaluate(() => {
+          const now = new Date();
+          return Array.from({ length: 7 }, (_, index) => {
+            const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6 + index);
+            return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+          });
+        });
+        expect(snapshot.wall).toBe(referenceTime);
+        expect(snapshot.period).toEqual({ text: `${expectedDates[0]} ~ ${expectedDates[6]} · 브라우저 현지 날짜 기준`, live: 'polite', atomic: 'true' });
+        expect(snapshot.statusAtomic).toBe('true');
+        expect(snapshot.days.map(day => day.date)).toEqual(expectedDates);
+        expect(snapshot.days.map(day => day.count)).toEqual(['1회', '0회', '0회', '0회', '0회', '1회', '2회']);
+        await expect(activity.getByRole('status')).toHaveText('완료 세션 4회 · 기록이 있는 날 3일 / 7일');
+        await expect(activity.getByRole('list')).toHaveAttribute('role', 'list');
+        await expect(activity.getByRole('listitem')).toHaveCount(7);
+        for (const weekday of await activity.locator('time > span').all()) await expect(weekday).toHaveCSS('color', 'rgb(24, 33, 58)');
+        await expect(activity).toContainText('브라우저 현지 날짜 기준');
+        await expect(activity).toContainText('점수·실력 향상 지표가 아닙니다.');
+        const refresh = activity.getByRole('button', { name: '오늘 기준으로 새로고침', exact: true });
+        await refresh.focus();
+        await page.keyboard.press('Enter');
+        await expect(refresh).toBeFocused();
+        await expect(activity.getByRole('status')).toHaveText('완료 세션 4회 · 기록이 있는 날 3일 / 7일');
+        expect(await activity.locator('time').evaluateAll(elements => elements.map(element => element.getAttribute('datetime')))).toEqual(expectedDates);
+        expect(await page.evaluate(() => localStorage.getItem('nineflow-practice-results-v4:training-activity-regression'))).toBe(saved);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+        await activity.screenshot({ path: testInfo.outputPath(`activity-${width}-${timezone.replace('/', '-')}.png`) });
+        await page.screenshot({ path: testInfo.outputPath(`activity-page-${width}-${timezone.replace('/', '-')}.png`), fullPage: true });
+        expect(errors).toEqual([]);
+
+        const nextDay = await page.evaluate(() => {
+          const now = new Date();
+          const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 12);
+          return { time: date.getTime(), key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` };
+        });
+        await page.clock.setFixedTime(nextDay.time);
+        const beforeRefresh = await activity.evaluate(element => ({
+          wall: Date.now(),
+          days: Array.from(element.querySelectorAll('li')).map(day => ({ date: day.getAttribute('data-date'), count: day.querySelector('b')?.textContent })),
+        }));
+        console.log('TRAINING_ACTIVITY_DAY_SHIFT', JSON.stringify({ timezone, width, referenceTime, nextDay, beforeRefresh }));
+        expect(beforeRefresh.wall).toBe(nextDay.time);
+        expect(beforeRefresh.days).toEqual(snapshot.days);
+        await refresh.focus();
+        await page.keyboard.press('Enter');
+        const attemptedRefresh = await activity.locator('time').evaluateAll(elements => elements.map(element => element.getAttribute('datetime')));
+        console.log('TRAINING_ACTIVITY_DAY_REFRESH_ATTEMPT', JSON.stringify({ timezone, width, attemptedRefresh }));
+        await expect(activity.locator('time').last()).toHaveAttribute('datetime', nextDay.key);
+        const refreshed = await activity.evaluate(element => {
+          const period = element.querySelector('.training-activity-heading p');
+          return {
+            wall: Date.now(),
+            statusAtomic: element.querySelector('[role="status"]')?.getAttribute('aria-atomic'),
+            period: { text: period?.textContent, live: period?.getAttribute('aria-live'), atomic: period?.getAttribute('aria-atomic') },
+            days: Array.from(element.querySelectorAll('li')).map(day => ({ date: day.getAttribute('data-date'), count: day.querySelector('b')?.textContent })),
+          };
+        });
+        console.log('TRAINING_ACTIVITY_DAY_REFRESH', JSON.stringify({ timezone, width, referenceTime, nextDay, refreshed }));
+        expect(refreshed.wall).toBe(nextDay.time);
+        expect(refreshed.period).toEqual({ text: `${expectedDates[1]} ~ ${nextDay.key} · 브라우저 현지 날짜 기준`, live: 'polite', atomic: 'true' });
+        expect(refreshed.statusAtomic).toBe('true');
+        expect(refreshed.days.map(day => day.date)).toEqual([...expectedDates.slice(1), nextDay.key]);
+        expect(refreshed.days.map(day => day.count)).toEqual(['0회', '0회', '0회', '0회', '1회', '2회', '1회']);
+        await expect(refresh).toBeFocused();
+        await expect(activity).toContainText(`${expectedDates[1]} ~ ${nextDay.key}`);
+        await expect(activity.getByRole('status')).toHaveText('완료 세션 4회 · 기록이 있는 날 3일 / 7일');
+        expect(await page.evaluate(() => localStorage.getItem('nineflow-practice-results-v4:training-activity-regression'))).toBe(saved);
+        await activity.screenshot({ path: testInfo.outputPath(`activity-next-day-${width}-${timezone.replace('/', '-')}.png`) });
+        expect(errors).toEqual([]);
+      });
+    }
+  });
+}
 
 test('첫 화면은 Tailwind 빌드 컴파일러를 내려받지 않는다', async ({ page }) => {
   const scripts: import('@playwright/test').Response[] = [];
@@ -108,4 +270,270 @@ test('저장소 접근이 차단돼도 기록 로딩이 끝나고 게임 설정�
   await expect(page.locator('.hero-primary')).toBeEnabled();
   await page.getByRole('button', { name: /가위바위보, 난이도 하, 설정 열기/ }).click();
   await expect(page.locator('section[data-game="rps"]')).toBeVisible();
+});
+
+function progressRecord(gameId: GameId, day: number, accuracy: number, extra: Record<string, string | number> = {}): SessionResult {
+  const specifics: Partial<Record<GameId, Record<string, string | number>>> = {
+    rotation: { rotationContent: 'letters', rotationLetters: 'F', rotationTargetIds: 'turn90', previewUsed: '숨김' },
+    appointment: { appointmentRounds: '1→2→3→4' },
+    potion: { evidenceHint: '표시', scoringVersion: 'potion-evidence-v1', evidenceTrials: 10 },
+    nback: { nbackTask: 'n2', nbackGroupSetting: 'auto', nbackProgression: 'fixed', nbackNameLabels: '숨김', nbackMnemonics: '숨김' },
+  };
+  return { id: `${gameId}-${day}-${accuracy}`, gameId, completedAt: `2026-10-${String(day).padStart(2, '0')}T00:00:00.000Z`, accuracy, medianRt: 720, stability: 74, errors: 2, detail: { sessionMode: 'practice', quantity: 20, paceMs: 3000, practiceFocus: 'full', guidedPacing: '제한시간 없음', accessibilityProfile: 'standard|standard|system', ...specifics[gameId], ...extra } };
+}
+
+async function installProgressRecords(page: Page, results: SessionResult[]) {
+  await page.addInitScript((saved) => {
+    const generation = 'progress-regression';
+    window.localStorage.setItem('nineflow-practice-results-generation-v1', generation);
+    window.localStorage.setItem(`nineflow-practice-results-v4:${generation}`, JSON.stringify({ version: 4, generation, results: saved }));
+  }, results);
+}
+
+async function progressStorage(page: Page) {
+  return page.evaluate(() => ({ generation: window.localStorage.getItem('nineflow-practice-results-generation-v1'), raw: window.localStorage.getItem('nineflow-practice-results-v4:progress-regression') }));
+}
+
+test('9게임 동일 조건 점수 변화와 최근 이력을 키보드로 열어도 기록은 바뀌지 않는다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  await installProgressRecords(page, games.flatMap((game) => [progressRecord(game.id, 12, 80), progressRecord(game.id, 13, 90)]));
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  const before = await progressStorage(page);
+  const snapshot = await page.locator('.record-progress').evaluateAll((panels) => panels.map((panel) => ({ label: panel.getAttribute('aria-label'), heading: panel.querySelector('h3')?.textContent, rows: Array.from(panel.querySelectorAll('tbody tr'), (row) => row.textContent), summaryHeight: panel.querySelector('summary')!.getBoundingClientRect().height })));
+  console.log('RECORD_PROGRESS_ALL_GAMES', JSON.stringify(snapshot));
+  await testInfo.attach('record-progress-all-games.json', { body: JSON.stringify(snapshot, null, 2), contentType: 'application/json' });
+  expect(snapshot).toHaveLength(9);
+  for (const [index, game] of games.entries()) {
+    const panel = page.getByRole('region', { name: `${game.title} 같은 조건 기록 변화`, exact: true });
+    await expect(panel.getByRole('heading')).toHaveText('직전 동일 조건 대비 +10%p');
+    const summary = panel.locator('summary');
+    await summary.focus();
+    await page.keyboard.press('Enter');
+    await expect(summary).toBeFocused();
+    await expect(panel.locator('details')).toHaveAttribute('open', '');
+    await expect(panel.getByRole('table')).toBeVisible();
+    await expect(panel.locator('tbody tr')).toHaveCount(2);
+    await expect(panel.locator('tbody td:last-child')).toHaveText(['90%', '80%']);
+    await expect(panel.locator('tbody tr').first()).toContainText('2026');
+    await expect(panel).toContainText('실제 역량이나 JOBDA 점수의 변화를 뜻하지 않습니다.');
+    expect(snapshot[index].summaryHeight).toBeGreaterThanOrEqual(44);
+    expect(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+    if (index === 0) await panel.screenshot({ path: testInfo.outputPath('record-progress-open.png') });
+    await page.keyboard.press('Space');
+    await expect(panel.locator('details')).not.toHaveAttribute('open');
+  }
+  expect(await progressStorage(page)).toEqual(before);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('동일 조건 최근 5회에는 다른 게임·설정·모드·탭 이탈 기록이 섞이지 않는다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  const differences: Record<string, string | number>[] = [{ quantity: 30 }, { paceMs: 4000 }, { practiceFocus: 'mixed' }, { guidedPacing: '설정 제한시간 적용' }, { accessibilityProfile: 'high|large|reduced' }, { sessionMode: 'simulation', simulationPresetVersion: 'public-rules-training-v4-2026-09' }, { visibilityPauses: 1 }];
+  await installProgressRecords(page, [
+    ...Array.from({ length: 7 }, (_, index) => progressRecord('rps', index + 1, (index + 1) * 10)),
+    ...differences.map((detail, index) => ({ ...progressRecord('rps', 6, 99, detail), id: `excluded-${index}` })),
+    progressRecord('number', 6, 99),
+    { ...progressRecord('rps', 6, 99), id: 'legacy', detail: undefined },
+  ]);
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  const before = await progressStorage(page);
+  const panel = page.getByRole('region', { name: '가위바위보 같은 조건 기록 변화', exact: true });
+  await panel.locator('summary').click();
+  const snapshot = await panel.evaluate((element) => ({ heading: element.querySelector('h3')?.textContent, rows: Array.from(element.querySelectorAll('tbody tr'), (row) => row.textContent), scores: Array.from(element.querySelectorAll('tbody td:last-child'), (cell) => cell.textContent), text: element.textContent }));
+  console.log('RECORD_PROGRESS_FILTERED', JSON.stringify(snapshot));
+  await testInfo.attach('record-progress-filtered.json', { body: JSON.stringify(snapshot, null, 2), contentType: 'application/json' });
+  await expect(panel.getByRole('heading')).toHaveText('직전 동일 조건 대비 +10%p');
+  expect(snapshot.scores).toEqual(['70%', '60%', '50%', '40%', '30%']);
+  expect(snapshot.rows).toHaveLength(5);
+  await expect(panel).not.toContainText('99%');
+  await panel.screenshot({ path: testInfo.outputPath('record-progress-filtered.png') });
+  expect(await progressStorage(page)).toEqual(before);
+  expect(errors).toEqual([]);
+});
+
+test('이전 설정 없는 기록·단일 기록·마법약 근거 없는 기록은 점수 변화와 0점 최고를 만들지 않는다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  await installProgressRecords(page, [
+    { ...progressRecord('rps', 13, 80), detail: undefined },
+    progressRecord('number', 13, 80),
+    progressRecord('potion', 12, 0, { evidenceTrials: 0 }),
+    progressRecord('potion', 13, 0, { evidenceTrials: 0 }),
+  ]);
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  const before = await progressStorage(page);
+  const snapshot = await page.locator('.record-progress').evaluateAll((panels) => panels.map((panel) => ({ label: panel.getAttribute('aria-label'), text: panel.textContent })));
+  console.log('RECORD_PROGRESS_PENDING', JSON.stringify(snapshot));
+  await testInfo.attach('record-progress-pending.json', { body: JSON.stringify(snapshot, null, 2), contentType: 'application/json' });
+  const legacy = page.getByRole('region', { name: '가위바위보 같은 조건 기록 변화', exact: true });
+  await expect(legacy).toContainText('설정·날짜 정보가 부족하거나 탭 이탈이 있는 기록은 비교하지 않습니다.');
+  await expect(legacy.locator('summary')).toHaveCount(0);
+  const single = page.getByRole('region', { name: '숫자 누르기 같은 조건 기록 변화', exact: true });
+  await expect(single).toContainText('동일 조건 기록을 한 번 더 완료하면 비교할 수 있습니다.');
+  await expect(single.locator('summary')).toHaveCount(0);
+  const potion = page.getByRole('region', { name: '마법약 만들기 같은 조건 기록 변화', exact: true });
+  await expect(potion).toContainText('비교 가능한 점수가 없어 변화는 표시하지 않습니다.');
+  await potion.locator('summary').click();
+  await expect(potion.getByRole('columnheader', { name: '근거 정렬률', exact: true })).toBeVisible();
+  await expect(potion.locator('tbody td:last-child')).toHaveText(['—', '—']);
+  const potionCard = page.locator('.game-record-grid > article').filter({ has: potion });
+  await expect(potionCard.locator('dl dd')).toHaveText(['—', '—', '2회']);
+  await potionCard.screenshot({ path: testInfo.outputPath('record-progress-unscored.png') });
+  expect(await progressStorage(page)).toEqual(before);
+  expect(errors).toEqual([]);
+});
+
+test('실제 가위바위보 두 번 완주 기록의 점수 변화·활동·필터·CSV와 새로고침이 함께 유지된다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  const readSaved = () => page.evaluate(() => {
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    const raw = generation ? localStorage.getItem(`nineflow-practice-results-v4:${generation}`) : null;
+    const envelope = raw ? JSON.parse(raw) : null;
+    return { generation, raw, version: envelope?.version, envelopeGeneration: envelope?.generation, results: (envelope?.results ?? []) as SessionResult[] };
+  });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  expect((await readSaved()).results).toEqual([]);
+  await page.getByRole('button', { name: /가위바위보, 난이도 하, 설정 열기/ }).click();
+  const stage = page.locator('section[data-game="rps"]');
+  await expect(stage.getByLabel('문제 수 현재 값')).toHaveText('15');
+  for (let count = 0; count < 2; count += 1) await stage.getByRole('button', { name: '문제 수 줄이기', exact: true }).click();
+  await expect(stage.getByLabel('문제 수 현재 값')).toHaveText('9');
+  await stage.getByText('시간 제한 없이 연습', { exact: true }).click();
+  await expect(stage.getByRole('checkbox', { name: /시간 제한 없이 연습/ })).toBeChecked();
+  await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
+  const result = page.locator('.stage-result');
+  const completions: SessionResult[] = [];
+  for (let session = 0; session < 2; session += 1) {
+    const workspace = page.locator('.game-workspace.game-rps');
+    await expect(workspace.locator('.rps-board')).toBeVisible();
+    await expect(workspace.locator('.guided-pacing-note')).toContainText('시간 제한 없이 연습 중');
+    for (let question = 0; question < 9; question += 1) {
+      await expect(workspace.locator('.workspace-progress > span')).toContainText(`${question + 1} / 9`);
+      const choice = workspace.locator('.rps-actions button').filter({ hasText: '바위' });
+      await expect(choice).toBeEnabled();
+      await choice.click();
+    }
+    await expect(result.getByRole('heading', { name: '가위바위보 결과', exact: true })).toBeVisible();
+    await expect.poll(async () => (await readSaved()).results.length).toBe(session + 1);
+    const saved = (await readSaved()).results[0];
+    completions.push(saved);
+    const snapshot = { id: saved.id, completedAt: saved.completedAt, accuracy: saved.accuracy, errors: saved.errors, detail: saved.detail, reviewSummary: saved.review?.summary };
+    console.log('RECORD_PROGRESS_REAL_COMPLETION', JSON.stringify(snapshot));
+    await testInfo.attach(`record-progress-real-completion-${session + 1}.json`, { body: JSON.stringify(snapshot, null, 2), contentType: 'application/json' });
+    expect(saved.gameId).toBe('rps');
+    expect(saved.detail).toMatchObject({ quantity: 9, paceMs: 4500, trialCount: 9, responseCount: 9, practiceFocus: 'full', guidedPacing: '제한시간 없음', sessionMode: '연습 모드', visibilityPauses: 0 });
+    expect(saved.detail?.accessibilityProfile).toMatch(/\S+/);
+    expect(Number(saved.detail?.correctCount) + saved.errors).toBe(9);
+    expect(saved.review?.summary.attemptedCount).toBe(9);
+    await expect(result.locator('.result-metrics article').first().locator('b')).toHaveText(`${saved.accuracy}%`);
+    if (session === 0) await result.getByRole('button', { name: '다시 연습', exact: true }).click();
+  }
+  const [previous, latest] = completions;
+  expect(latest.id).not.toBe(previous.id);
+  expect(Date.parse(latest.completedAt)).toBeGreaterThan(Date.parse(previous.completedAt));
+  for (const key of ['quantity', 'paceMs', 'practiceFocus', 'guidedPacing', 'sessionMode', 'accessibilityProfile']) expect(latest.detail?.[key]).toEqual(previous.detail?.[key]);
+  const beforeHistory = await readSaved();
+  expect(beforeHistory.version).toBe(4);
+  expect(beforeHistory.envelopeGeneration).toBe(beforeHistory.generation);
+  await result.getByRole('button', { name: /^게임 목록/ }).click();
+  await expect(page.locator('.stage-panel')).toHaveCount(0);
+  const panel = page.getByRole('region', { name: '가위바위보 같은 조건 기록 변화', exact: true });
+  await panel.locator('summary').focus();
+  await page.keyboard.press('Enter');
+  const snapshot = await panel.evaluate((element) => ({ heading: element.querySelector('h3')?.textContent, scores: Array.from(element.querySelectorAll('tbody td:last-child'), (cell) => cell.textContent), rows: Array.from(element.querySelectorAll('tbody tr'), (row) => row.textContent), open: element.querySelector('details')?.hasAttribute('open') }));
+  console.log('RECORD_PROGRESS_REAL_HISTORY', JSON.stringify(snapshot));
+  await testInfo.attach('record-progress-real-history.json', { body: JSON.stringify(snapshot, null, 2), contentType: 'application/json' });
+  const change = Math.round((latest.accuracy - previous.accuracy) * 10) / 10;
+  await expect(panel.getByRole('heading')).toHaveText(`직전 동일 조건 대비 ${change > 0 ? '+' : ''}${change}%p`);
+  expect(snapshot.scores).toEqual([`${latest.accuracy}%`, `${previous.accuracy}%`]);
+  expect(snapshot.open).toBe(true);
+  const card = page.locator('.game-record-grid > article').filter({ has: panel });
+  await expect(card.locator('dl dd')).toHaveText([`${latest.accuracy}%`, `${Math.max(latest.accuracy, previous.accuracy)}%`, '2회']);
+  await panel.screenshot({ path: testInfo.outputPath('record-progress-real-history.png') });
+  expect(await readSaved()).toEqual(beforeHistory);
+  const activity = page.getByRole('region', { name: '최근 7일 훈련 활동', exact: true });
+  await activity.getByRole('button', { name: '오늘 기준으로 새로고침', exact: true }).press('Enter');
+  const activitySnapshot = await activity.evaluate((element, saved) => {
+    const dates = Array.from(element.querySelectorAll('li'), day => day.getAttribute('data-date'));
+    const expected = dates.map(date => saved.filter(record => {
+      const completed = new Date(record.completedAt);
+      const key = `${completed.getFullYear()}-${String(completed.getMonth() + 1).padStart(2, '0')}-${String(completed.getDate()).padStart(2, '0')}`;
+      return key === date;
+    }).length);
+    return { dates, expected, counts: Array.from(element.querySelectorAll('li b'), count => count.textContent), status: element.querySelector('[role="status"]')?.textContent };
+  }, beforeHistory.results);
+  console.log('PRACTICE_DASHBOARD_REAL_ACTIVITY', JSON.stringify(activitySnapshot));
+  expect(activitySnapshot.dates).toHaveLength(7);
+  expect(activitySnapshot.expected.reduce((sum, count) => sum + count, 0)).toBe(2);
+  expect(activitySnapshot.counts).toEqual(activitySnapshot.expected.map(count => `${count}회`));
+  await expect(activity.getByRole('status')).toHaveText(`완료 세션 2회 · 기록이 있는 날 ${activitySnapshot.expected.filter(count => count > 0).length}일 / 7일`);
+  const history = page.locator('.history-panel');
+  await history.locator('summary').press('Enter');
+  await history.getByRole('combobox', { name: '게임', exact: true }).selectOption('rps');
+  await history.getByRole('combobox', { name: '모드', exact: true }).selectOption('practice');
+  await expect(history.locator('.record-list > article')).toHaveCount(2);
+  await expect(history.getByRole('status')).toHaveText('저장된 2개 중 2개 일치 · 2개 표시');
+  await history.getByRole('combobox', { name: '게임', exact: true }).selectOption('number');
+  await expect(history.locator('.record-list > article')).toHaveCount(0);
+  await expect(history.locator('.history-empty')).toBeVisible();
+  // A view filter must not hide records from progress, activity, or a full export.
+  await expect(panel.getByRole('heading')).toHaveText(`직전 동일 조건 대비 ${change > 0 ? '+' : ''}${change}%p`);
+  await expect(activity.getByRole('status')).toHaveText(activitySnapshot.status!);
+  const opener = page.locator('.records-data-button');
+  await opener.press('Enter');
+  const dialog = page.getByRole('dialog', { name: '내 기록 백업·복원', exact: true });
+  const csvButton = dialog.getByRole('button', { name: 'CSV 요약 받기', exact: true });
+  const downloadPromise = page.waitForEvent('download');
+  await csvButton.press('Enter');
+  const download = await downloadPromise;
+  const stream = await download.createReadStream();
+  if (!stream) throw new Error('Actual practice CSV download stream is unavailable');
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  const bytes = Buffer.concat(chunks);
+  const csv: string = bytes.toString('utf8');
+  const csvRows = csv.slice(1, -2).split('\r\n').map(line => Array.from(line.matchAll(/"((?:[^"]|"")*)"(?:,|$)/g), match => match[1].replaceAll('""', '"')));
+  console.log('PRACTICE_DASHBOARD_REAL_CSV', JSON.stringify({ filename: download.suggestedFilename(), bom: [...bytes.subarray(0, 3)], rows: csvRows }));
+  expect(await download.failure()).toBeNull();
+  expect(download.suggestedFilename()).toMatch(/^nineflow-practice-summary-\d{4}-\d{2}-\d{2}\.csv$/);
+  expect([...bytes.subarray(0, 3)]).toEqual([239, 187, 191]);
+  expect(csv.endsWith('\r\n')).toBe(true);
+  expect(csvRows).toHaveLength(3);
+  expect(csvRows.every(row => row.length === 10)).toBe(true);
+  expect(csvRows[0]).toEqual(['완료 시각(UTC)', '게임', '모드', '점수 지표', '점수(%)', '시간 지표', '중앙시간(ms)', '오류 지표', '오류 수', '훈련 설정(JSON)']);
+  for (const [index, saved] of beforeHistory.results.entries()) {
+    expect(csvRows[index + 1].slice(0, 9)).toEqual([saved.completedAt, '가위바위보', '연습 모드', '정확도', String(saved.accuracy), '중앙 반응', saved.medianRt ? String(saved.medianRt) : '', '오류', String(saved.errors)]);
+    expect(JSON.parse(csvRows[index + 1][9])).toEqual(saved.detail);
+    expect(csv).not.toContain(saved.id);
+  }
+  await expect(dialog.locator('.data-dialog-notice')).toContainText('연습 요약 2개를 CSV 파일로 내보냈습니다.');
+  await expect(csvButton).toBeFocused();
+  await dialog.screenshot({ path: testInfo.outputPath('practice-dashboard-real-csv.png') });
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  await history.getByRole('button', { name: '필터 초기화', exact: true }).press('Enter');
+  await expect(history.locator('.record-list > article')).toHaveCount(2);
+  await page.screenshot({ path: testInfo.outputPath('practice-dashboard-real-home.png'), fullPage: true });
+  expect(await readSaved()).toEqual(beforeHistory);
+  await page.reload();
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  const restored = await readSaved();
+  console.log('RECORD_PROGRESS_REAL_RELOAD', JSON.stringify({ generation: restored.generation, ids: restored.results.map((item) => item.id), scores: restored.results.map((item) => item.accuracy) }));
+  expect(restored.generation).toBe(beforeHistory.generation);
+  expect(restored.results).toEqual(beforeHistory.results);
+  await expect(panel.getByRole('heading')).toHaveText(`직전 동일 조건 대비 ${change > 0 ? '+' : ''}${change}%p`);
+  expect(errors).toEqual([]);
 });

@@ -19,11 +19,12 @@ import {
   resultsStorageKey,
   serializeResultsEnvelope,
 } from './lib/result-envelope';
-import { getResultComparisonKey, getResultMode, type ResultMode } from './lib/result-comparison';
-import { formatResultScore, resultErrorLabel, resultScoreLabel } from './lib/result-display';
+import { getResultComparisonKey, getResultMode, getResultProgress, type ResultMode } from './lib/result-comparison';
+import { filterResultHistory, formatResultScore, resultErrorLabel, resultScoreLabel } from './lib/result-display';
 import { isReviewPayloadStructurallyValid } from './lib/practice-backup';
 import { resolveReadinessOverall } from './lib/readiness';
 import { chooseTrainingRecommendation, type RecommendationReason } from './lib/training-recommendation';
+import { summarizeTrainingActivity } from './lib/training-activity';
 import { AccessibilityBootstrap, ReadinessCenter, READINESS_STORAGE_KEY, captureCurrentReadinessAssessment, parseSavedReadinessSummary, type SavedReadinessSummary } from './components/readiness-center';
 import type { DataManagementActionResult } from './components/data-management-dialog';
 import { lockDocumentScroll } from './lib/scroll-lock';
@@ -252,10 +253,10 @@ function cleanInactiveResultEnvelopes(storage: Storage, activeGeneration: string
   staleKeys.forEach((key) => storage.removeItem(key));
 }
 
-function formatCompletedAt(value: string) {
+function formatCompletedAt(value: string, includeYear = false) {
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp)) return '날짜 정보 없음';
-  return new Intl.DateTimeFormat('ko-KR', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }).format(new Date(timestamp));
+  return new Intl.DateTimeFormat('ko-KR', { ...(includeYear ? { year: 'numeric' as const } : {}), month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }).format(new Date(timestamp));
 }
 
 function summarizeSessions(sessions: SessionResult[]) {
@@ -263,12 +264,14 @@ function summarizeSessions(sessions: SessionResult[]) {
   const mode = latest ? getResultMode(latest) : null;
   const comparisonKey = latest ? getResultComparisonKey(latest) : null;
   const comparableSessions = comparisonKey ? sessions.filter((result) => getResultComparisonKey(result) === comparisonKey) : [];
+  const progress = latest ? getResultProgress(latest, sessions) : null;
   return {
     latest,
     mode,
     comparisonAvailable: comparisonKey !== null,
     comparableSessions,
-    best: comparableSessions.length ? Math.max(...comparableSessions.map((result) => result.accuracy)) : 0,
+    best: progress?.best ?? null,
+    progress,
   };
 }
 
@@ -285,6 +288,10 @@ export default function Home() {
   const [results, setResults] = useState<SessionResult[]>([]);
   const [resultsLoaded, setResultsLoaded] = useState(false);
   const [gameOrder, setGameOrder] = useState<GameOrder>('published');
+  const [historyGame, setHistoryGame] = useState<GameId | 'all'>('all');
+  const [historyMode, setHistoryMode] = useState<ResultMode | 'all'>('all');
+  const [historyLimit, setHistoryLimit] = useState(8);
+  const [activityDate, setActivityDate] = useState(() => new Date());
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [dataManagementOpen, setDataManagementOpen] = useState(false);
   const [readinessOpen, setReadinessOpen] = useState(false);
@@ -683,6 +690,9 @@ export default function Home() {
   const switchActiveGame = useCallback((gameId: GameId) => setActiveGame(gameId), []);
 
   const recentResults = results.slice(0, 8);
+  const filteredHistory = filterResultHistory(results, historyGame, historyMode);
+  const visibleHistory = filteredHistory.slice(0, historyLimit);
+  const activity = summarizeTrainingActivity(results, activityDate);
   const reviewableResults = results.filter((result) => hasReviewData(result.review));
   const scoredReviewResults = reviewableResults.filter((result) => (result.review?.summary.attemptedCount ?? 0) > 0);
   const recurringErrors = aggregateReviewErrors(scoredReviewResults);
@@ -948,7 +958,7 @@ export default function Home() {
                   </div>
                   <dl className="card-record" aria-busy={!resultsLoaded} aria-label={!resultsLoaded ? '이 게임의 기록 확인 중' : last ? (comparisonAvailable ? `${modeLabel} 안에서 비교한 이 게임의 기록` : `${modeLabel}, 비교할 설정 정보가 없는 이전 기록`) : '이 게임의 기록 없음'}>
                     <div><dt>{last ? `${modeLabel} 최근 ${resultScoreLabel(last)}` : '최근'}</dt><dd>{last ? formatResultScore(last) : '—'}</dd></div>
-                    <div><dt>{last ? `${modeLabel} 최고` : '최고'}</dt><dd>{last && comparisonAvailable ? `${best}%` : '—'}</dd></div>
+                    <div><dt>{last ? `${modeLabel} 최고` : '최고'}</dt><dd>{last && comparisonAvailable && best !== null ? `${best}%` : '—'}</dd></div>
                     <div><dt>{last ? '동일 설정 횟수' : '횟수'}</dt><dd>{!resultsLoaded ? '—' : last && comparisonAvailable ? `${comparableSessions.length}회` : (last ? '설정 없음' : '0회')}</dd></div>
                   </dl>
                   <div className="card-action">
@@ -971,16 +981,40 @@ export default function Home() {
             {recurringErrors.length > 0 ? <div className="home-review-ranking">{recurringErrors.slice(0, 3).map((summary, index) => { const game = games.find((item) => item.id === summary.gameId)!; return <button type="button" key={`${summary.gameId}-${summary.contextKey}-${summary.errorCode}`} onClick={(event) => openReview(event.currentTarget, summary.representativeSessionId, summary.errorCode)}><span>{index + 1}</span><div><small>{game.title} · {summary.contextLabel} · {summary.count}/{summary.attemptedCount}회 · {summary.sessionCount}개 세션</small><b>{summary.label}</b><p>{summary.tip}</p></div><em>{summary.rate}%</em></button>; })}</div> : <div className="home-review-empty"><b>반복 오류가 아직 없습니다.</b><span>게임을 완료하면 오답뿐 아니라 비효율 조작과 확률 판단도 분리해 기록합니다.</span></div>}
           </section>
           <div className="record-summary"><article><span>저장된 최근 연습</span><b>{results.length}회</b></article><article><span>최근 기록 게임</span><b>{practicedGames.length}<small>/ 9종</small></b></article><article><span>{lastResultModeLabel} 마지막 {resultScoreLabel(lastResult)}</span><b>{formatResultScore(lastResult)}</b></article></div>
+          <section className="training-activity" aria-labelledby="training-activity-title">
+            <div className="training-activity-heading"><div><h3 id="training-activity-title">최근 7일 훈련 활동</h3><p aria-live="polite" aria-atomic="true">{activity.period} · 브라우저 현지 날짜 기준</p></div><button type="button" onClick={() => setActivityDate(new Date())}>오늘 기준으로 새로고침</button></div>
+            <p className="training-activity-summary" role="status" aria-atomic="true">완료 세션 {activity.sessionCount}회 · 기록이 있는 날 {activity.activeDayCount}일 / 7일</p>
+            <ol className="training-activity-days" role="list">{activity.days.map(day => <li key={day.key} data-date={day.key} data-active={day.sessions > 0}><time dateTime={day.key}>{day.label}<span>{day.weekday}</span></time><b>{day.sessions}회</b></li>)}</ol>
+            {!activity.sessionCount && <p>이 기간에는 완료 기록이 없습니다. 게임 하나를 끝내면 활동이 표시됩니다.</p>}
+            <small>이 브라우저에 남아 있는 완료 기록만 집계합니다. 점수·실력 향상 지표가 아닙니다.</small>
+          </section>
           <div className="game-record-grid" aria-label="게임별 기록">
-            {practicedGames.map(({ game, latest, mode, comparisonAvailable, comparableSessions, best }) => <article key={game.id} className={`tone-${game.tone}`}>
+            {practicedGames.map(({ game, latest, mode, comparisonAvailable, comparableSessions, best, progress }) => <article key={game.id} className={`tone-${game.tone}`}>
               <div><span>{game.no}</span><div><small>{game.skill}</small><b>{game.title}</b></div></div>
-              <dl aria-label={comparisonAvailable ? `${resultModeLabels[mode ?? 'unknown']}의 동일 설정 안에서 비교한 기록` : '비교할 설정 정보가 없는 이전 기록'}><div><dt>{resultModeLabels[mode ?? 'unknown']} 최근 {resultScoreLabel(latest)}</dt><dd>{formatResultScore(latest)}</dd></div><div><dt>동일 설정 최고</dt><dd>{comparisonAvailable ? `${best}%` : '—'}</dd></div><div><dt>동일 설정 횟수</dt><dd>{comparisonAvailable ? `${comparableSessions.length}회` : '설정 없음'}</dd></div></dl>
+              <dl aria-label={comparisonAvailable ? `${resultModeLabels[mode ?? 'unknown']}의 동일 설정 안에서 비교한 기록` : '비교할 설정 정보가 없는 이전 기록'}><div><dt>{resultModeLabels[mode ?? 'unknown']} 최근 {resultScoreLabel(latest)}</dt><dd>{formatResultScore(latest)}</dd></div><div><dt>동일 설정 최고</dt><dd>{comparisonAvailable && best !== null ? `${best}%` : '—'}</dd></div><div><dt>동일 설정 횟수</dt><dd>{comparisonAvailable ? `${comparableSessions.length}회` : '설정 없음'}</dd></div></dl>
+              <section className="record-progress" aria-label={`${game.title} 같은 조건 기록 변화`}>
+                <h3>직전 동일 조건 대비 <b>{progress?.scoreChange == null ? '비교 대기' : `${progress.scoreChange > 0 ? '+' : ''}${progress.scoreChange}%p`}</b></h3>
+                <p>{!progress ? '설정·날짜 정보가 부족하거나 탭 이탈이 있는 기록은 비교하지 않습니다.' : !progress.previous ? '시간 순서가 확인되는 동일 조건 기록을 한 번 더 완료하면 비교할 수 있습니다.' : progress.scoreChange === null ? '최근 또는 직전 기록에 비교 가능한 점수가 없어 변화는 표시하지 않습니다.' : `${resultScoreLabel(latest)} ${formatResultScore(progress.previous)} → ${formatResultScore(latest)} · 직전 ${formatCompletedAt(progress.previous.completedAt, true)}`}</p>
+                {progress && progress.history.length > 1 && <details>
+                  <summary aria-label={`${game.title} 동일 조건 최근 ${Math.min(progress.history.length, 5)}회 보기`}>동일 조건 최근 {Math.min(progress.history.length, 5)}회 보기</summary>
+                  <table><caption className="sr-only">{game.title} 동일 조건 최근 기록 · 최신순</caption><thead><tr><th scope="col">완료 시각</th><th scope="col">{resultScoreLabel(latest)}</th></tr></thead><tbody>{progress.history.slice(0, 5).map((result, index) => <tr key={result.id}><td><time dateTime={result.completedAt}>{formatCompletedAt(result.completedAt, true)}</time>{index === 0 && <span> · 최근</span>}</td><td>{formatResultScore(result)}</td></tr>)}</tbody></table>
+                  <p>게임·모드·분량·속도·집중·접근성 표시 등 저장 설정이 같은 기록입니다. 무작위 문항은 다를 수 있으며, 실제 역량이나 JOBDA 점수의 변화를 뜻하지 않습니다.</p>
+                </details>}
+              </section>
               <div className="game-record-actions">{hasReviewData(latest.review) ? <button type="button" onClick={(event) => openReview(event.currentTarget, latest.id)} aria-label={`${game.title} 최근 세션 복습`}>{latest.review?.attempts.length ? '복습' : '통계'}</button> : <span>복습 기록 없음</span>}<button type="button" onPointerEnter={preloadGameStage} onPointerDown={preloadGameStage} onFocus={preloadGameStage} onClick={(event) => openGame(game.id, event.currentTarget)} aria-label={`${game.title} 다시 연습`}>다시 연습 <span aria-hidden="true">→</span></button></div>
             </article>)}
           </div>
           <details className="history-panel">
-            <summary>최근 세션 상세 보기 <span>{recentResults.length}개</span></summary>
-            <div className="record-list">{recentResults.map((result) => { const game = games.find((item) => item.id === result.gameId)!; const modeLabel = resultModeLabels[getResultMode(result)]; return <article key={result.id}><div><span>{game.no}</span><b>{game.title}</b><small>{formatCompletedAt(result.completedAt)} · {modeLabel}</small></div><dl><div><dt>{resultScoreLabel(result)}</dt><dd>{formatResultScore(result)}</dd></div><div><dt>{result.gameId === 'path' ? '경로 연결 중앙시간' : '중앙 반응'}</dt><dd>{result.medianRt ? `${result.medianRt}ms` : '—'}</dd></div><div><dt>{resultErrorLabel(result)}</dt><dd>{result.errors}</dd></div></dl>{hasReviewData(result.review) ? <button type="button" onClick={(event) => openReview(event.currentTarget, result.id)}>{result.review?.attempts.length ? '문항별 복습' : '오류 통계'}</button> : <small className="legacy-review-label">복습 데이터 없음</small>}</article>; })}</div>
+            <summary>최근 세션 상세 보기 <span>저장된 {results.length}개</span></summary>
+            <div className="history-controls">
+              <label>게임<select value={historyGame} onChange={(event) => { setHistoryGame(event.target.value as GameId | 'all'); setHistoryLimit(8); }}><option value="all">전체 게임</option>{games.map((game) => <option key={game.id} value={game.id}>{game.title}</option>)}</select></label>
+              <label>모드<select value={historyMode} onChange={(event) => { setHistoryMode(event.target.value as ResultMode | 'all'); setHistoryLimit(8); }}><option value="all">전체 모드</option><option value="practice">연습</option><option value="simulation">실전형</option><option value="unknown">이전 기록 · 모드 정보 없음</option></select></label>
+              <button type="button" onClick={() => { setHistoryGame('all'); setHistoryMode('all'); setHistoryLimit(8); }}>필터 초기화</button>
+              <p role="status">저장된 {results.length}개 중 {filteredHistory.length}개 일치 · {visibleHistory.length}개 표시</p>
+            </div>
+            <div className="record-list">{visibleHistory.map((result) => { const game = games.find((item) => item.id === result.gameId)!; const modeLabel = resultModeLabels[getResultMode(result)]; return <article key={result.id}><div><span>{game.no}</span><b>{game.title}</b><small>{formatCompletedAt(result.completedAt)} · {modeLabel}</small></div><dl><div><dt>{resultScoreLabel(result)}</dt><dd>{formatResultScore(result)}</dd></div><div><dt>{result.gameId === 'path' ? '경로 연결 중앙시간' : '중앙 반응'}</dt><dd>{result.medianRt ? `${result.medianRt}ms` : '—'}</dd></div><div><dt>{resultErrorLabel(result)}</dt><dd>{result.errors}</dd></div></dl>{hasReviewData(result.review) ? <button type="button" onClick={(event) => openReview(event.currentTarget, result.id)}>{result.review?.attempts.length ? '문항별 복습' : '오류 통계'}</button> : <small className="legacy-review-label">복습 데이터 없음</small>}</article>; })}</div>
+            {!filteredHistory.length && <p className="history-empty">이 조건의 기록이 없습니다. 다른 게임·모드를 선택하거나 필터를 초기화하세요.</p>}
+            {visibleHistory.length < filteredHistory.length && <button type="button" className="history-more" onClick={() => setHistoryLimit((limit) => limit + 8)}>기록 더 보기 ({filteredHistory.length - visibleHistory.length}개 남음)</button>}
           </details>
         </> : <div className="records-empty" role={resultsLoaded ? undefined : 'status'}><Image className="records-empty-coach" src="/assets/mori-coach-hero-v2-800.webp" alt="" width={800} height={700} sizes="(max-width: 620px) 66px, 86px" /><div><b>{resultsLoaded ? '첫 기록을 만들어 볼까요?' : '연습 기록을 불러오고 있어요.'}</b><span>{resultsLoaded ? '게임 하나를 끝내면 최근 점수와 자주 틀린 이유를 여기서 확인할 수 있어요.' : '이 브라우저에 저장된 점수와 복습 기록을 확인하는 중입니다.'}</span>{resultsLoaded && <button type="button" onPointerEnter={preloadGameStage} onPointerDown={preloadGameStage} onFocus={preloadGameStage} onClick={(event) => openGame(featuredGame.id, event.currentTarget)}>추천 게임 시작</button>}</div></div>}
       </section>
