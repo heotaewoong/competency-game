@@ -1,4 +1,5 @@
 import type { GameId, SessionResult } from './game-data';
+import { formatResultScore } from './result-display.ts';
 
 export type ResultMode = 'practice' | 'simulation' | 'unknown';
 export const SIMULATION_PRESET_VERSION = 'public-rules-training-v4-2026-09';
@@ -68,4 +69,30 @@ export function getResultComparisonKey(result: SessionResult) {
     mode,
     ...comparisonDetailKeys.map((key) => detail[key] ?? null),
   ]);
+}
+
+/** Compare saved scores, not ability: randomized questions may still differ. */
+export function getResultProgress(latest: SessionResult, results: readonly SessionResult[]) {
+  const key = getResultComparisonKey(latest);
+  const completedAt = Date.parse(latest.completedAt);
+  if (key === null || !Number.isFinite(completedAt)) return null;
+  const seen = new Set([latest.id]);
+  const history = [latest, ...results
+    .filter((result) => {
+      const timestamp = Date.parse(result.completedAt);
+      if (seen.has(result.id) || result.gameId !== latest.gameId || !Number.isFinite(timestamp) || timestamp > completedAt || getResultComparisonKey(result) !== key) return false;
+      seen.add(result.id);
+      return true;
+    })
+    .sort((a, b) => Date.parse(b.completedAt) - Date.parse(a.completedAt))];
+  // Equal timestamps cannot establish which session came before the other.
+  const previous = history.slice(1).find((result) => Date.parse(result.completedAt) < completedAt);
+  const hasScore = (result: SessionResult) => Number.isFinite(result.accuracy) && result.accuracy >= 0 && result.accuracy <= 100 && formatResultScore(result) !== '—';
+  const scores = history.filter(hasScore).map((result) => result.accuracy);
+  return {
+    history,
+    previous,
+    scoreChange: previous && hasScore(latest) && hasScore(previous) ? Math.round((latest.accuracy - previous.accuracy) * 10) / 10 : null,
+    best: scores.length ? Math.max(...scores) : null,
+  };
 }
