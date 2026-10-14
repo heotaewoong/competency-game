@@ -392,7 +392,7 @@ test('이전 설정 없는 기록·단일 기록·마법약 근거 없는 기록
   expect(errors).toEqual([]);
 });
 
-test('실제 가위바위보 연습 두 번 완료한 기록이 점수 변화에 연결되고 새로고침 뒤에도 유지된다', async ({ page }, testInfo) => {
+test('실제 가위바위보 두 번 완주 기록의 점수 변화·활동·필터·CSV와 새로고침이 함께 유지된다', async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
@@ -462,6 +462,71 @@ test('실제 가위바위보 연습 두 번 완료한 기록이 점수 변화에
   const card = page.locator('.game-record-grid > article').filter({ has: panel });
   await expect(card.locator('dl dd')).toHaveText([`${latest.accuracy}%`, `${Math.max(latest.accuracy, previous.accuracy)}%`, '2회']);
   await panel.screenshot({ path: testInfo.outputPath('record-progress-real-history.png') });
+  expect(await readSaved()).toEqual(beforeHistory);
+  const activity = page.getByRole('region', { name: '최근 7일 훈련 활동', exact: true });
+  await activity.getByRole('button', { name: '오늘 기준으로 새로고침', exact: true }).press('Enter');
+  const activitySnapshot = await activity.evaluate((element, saved) => {
+    const dates = Array.from(element.querySelectorAll('li'), day => day.getAttribute('data-date'));
+    const expected = dates.map(date => saved.filter(record => {
+      const completed = new Date(record.completedAt);
+      const key = `${completed.getFullYear()}-${String(completed.getMonth() + 1).padStart(2, '0')}-${String(completed.getDate()).padStart(2, '0')}`;
+      return key === date;
+    }).length);
+    return { dates, expected, counts: Array.from(element.querySelectorAll('li b'), count => count.textContent), status: element.querySelector('[role="status"]')?.textContent };
+  }, beforeHistory.results);
+  console.log('PRACTICE_DASHBOARD_REAL_ACTIVITY', JSON.stringify(activitySnapshot));
+  expect(activitySnapshot.dates).toHaveLength(7);
+  expect(activitySnapshot.expected.reduce((sum, count) => sum + count, 0)).toBe(2);
+  expect(activitySnapshot.counts).toEqual(activitySnapshot.expected.map(count => `${count}회`));
+  await expect(activity.getByRole('status')).toHaveText(`완료 세션 2회 · 기록이 있는 날 ${activitySnapshot.expected.filter(count => count > 0).length}일 / 7일`);
+  const history = page.locator('.history-panel');
+  await history.locator('summary').press('Enter');
+  await history.getByRole('combobox', { name: '게임', exact: true }).selectOption('rps');
+  await history.getByRole('combobox', { name: '모드', exact: true }).selectOption('practice');
+  await expect(history.locator('.record-list > article')).toHaveCount(2);
+  await expect(history.getByRole('status')).toHaveText('저장된 2개 중 2개 일치 · 2개 표시');
+  await history.getByRole('combobox', { name: '게임', exact: true }).selectOption('number');
+  await expect(history.locator('.record-list > article')).toHaveCount(0);
+  await expect(history.locator('.history-empty')).toBeVisible();
+  // A view filter must not hide records from progress, activity, or a full export.
+  await expect(panel.getByRole('heading')).toHaveText(`직전 동일 조건 대비 ${change > 0 ? '+' : ''}${change}%p`);
+  await expect(activity.getByRole('status')).toHaveText(activitySnapshot.status!);
+  const opener = page.locator('.records-data-button');
+  await opener.press('Enter');
+  const dialog = page.getByRole('dialog', { name: '내 기록 백업·복원', exact: true });
+  const csvButton = dialog.getByRole('button', { name: 'CSV 요약 받기', exact: true });
+  const downloadPromise = page.waitForEvent('download');
+  await csvButton.press('Enter');
+  const download = await downloadPromise;
+  const stream = await download.createReadStream();
+  if (!stream) throw new Error('Actual practice CSV download stream is unavailable');
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  const bytes = Buffer.concat(chunks);
+  const csv = bytes.toString('utf8');
+  const csvRows = csv.slice(1, -2).split('\r\n').map(line => Array.from(line.matchAll(/"((?:[^"]|"")*)"(?:,|$)/g), match => match[1].replaceAll('""', '"')));
+  console.log('PRACTICE_DASHBOARD_REAL_CSV', JSON.stringify({ filename: download.suggestedFilename(), bom: [...bytes.subarray(0, 3)], rows: csvRows }));
+  expect(await download.failure()).toBeNull();
+  expect(download.suggestedFilename()).toMatch(/^nineflow-practice-summary-\d{4}-\d{2}-\d{2}\.csv$/);
+  expect([...bytes.subarray(0, 3)]).toEqual([239, 187, 191]);
+  expect(csv.endsWith('\r\n')).toBe(true);
+  expect(csvRows).toHaveLength(3);
+  expect(csvRows.every(row => row.length === 10)).toBe(true);
+  expect(csvRows[0]).toEqual(['완료 시각(UTC)', '게임', '모드', '점수 지표', '점수(%)', '시간 지표', '중앙시간(ms)', '오류 지표', '오류 수', '훈련 설정(JSON)']);
+  for (const [index, saved] of beforeHistory.results.entries()) {
+    expect(csvRows[index + 1].slice(0, 9)).toEqual([saved.completedAt, '가위바위보', '연습 모드', '정확도', String(saved.accuracy), '중앙 반응', saved.medianRt ? String(saved.medianRt) : '', '오류', String(saved.errors)]);
+    expect(JSON.parse(csvRows[index + 1][9])).toEqual(saved.detail);
+    expect(csv).not.toContain(saved.id);
+  }
+  await expect(dialog.locator('.data-dialog-notice')).toContainText('연습 요약 2개를 CSV 파일로 내보냈습니다.');
+  await expect(csvButton).toBeFocused();
+  await dialog.screenshot({ path: testInfo.outputPath('practice-dashboard-real-csv.png') });
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  await history.getByRole('button', { name: '필터 초기화', exact: true }).press('Enter');
+  await expect(history.locator('.record-list > article')).toHaveCount(2);
+  await page.screenshot({ path: testInfo.outputPath('practice-dashboard-real-home.png'), fullPage: true });
   expect(await readSaved()).toEqual(beforeHistory);
   await page.reload();
   await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
