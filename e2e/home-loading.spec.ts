@@ -49,6 +49,118 @@ for (const width of [390, 1280]) {
   });
 }
 
+for (const timezone of ['Asia/Seoul', 'America/New_York']) {
+  test.describe(`훈련 활동 ${timezone}`, () => {
+    test.use({ timezoneId: timezone });
+    for (const width of [390, 1280]) {
+      test(`${width}px: 현지 날짜 7일의 활동을 읽고 새로고침해도 저장값은 그대로다`, async ({ page }, testInfo) => {
+        const referenceTime = Date.now();
+        // Keep the fixture and date oracle on the same day across midnight.
+        await page.clock.setFixedTime(referenceTime);
+        const errors: string[] = [];
+        page.on('pageerror', error => errors.push(error.message));
+        page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+        await page.setViewportSize({ width, height: 844 });
+        await page.addInitScript(() => {
+          const now = new Date();
+          const generation = 'training-activity-regression';
+          const results = [0, 0, -1, -6, -7, 1].map((offset, index) => ({
+            id: `activity-${index}`, gameId: 'rps',
+            completedAt: new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, offset === -1 ? 23 : offset < 0 ? 12 : 0, offset === -1 ? 59 : 0).toISOString(),
+            accuracy: 80, medianRt: 720, stability: 74, errors: 2,
+          }));
+          localStorage.setItem('nineflow-practice-results-generation-v1', generation);
+          localStorage.setItem(`nineflow-practice-results-v4:${generation}`, JSON.stringify({ version: 4, generation, results }));
+        });
+        await page.goto('/');
+        await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+        const saved = await page.evaluate(() => localStorage.getItem('nineflow-practice-results-v4:training-activity-regression'));
+        const activity = page.getByRole('region', { name: '최근 7일 훈련 활동', exact: true });
+        const snapshot = await activity.evaluate(element => {
+          const period = element.querySelector('.training-activity-heading p');
+          return {
+            wall: Date.now(),
+            status: element.querySelector('[role="status"]')?.textContent,
+            statusAtomic: element.querySelector('[role="status"]')?.getAttribute('aria-atomic'),
+            period: { text: period?.textContent, live: period?.getAttribute('aria-live'), atomic: period?.getAttribute('aria-atomic') },
+            days: Array.from(element.querySelectorAll('li')).map(day => ({ date: day.getAttribute('data-date'), count: day.querySelector('b')?.textContent })),
+          };
+        });
+        console.log('TRAINING_ACTIVITY', JSON.stringify({ timezone, width, ...snapshot }));
+        const expectedDates = await page.evaluate(() => {
+          const now = new Date();
+          return Array.from({ length: 7 }, (_, index) => {
+            const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6 + index);
+            return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+          });
+        });
+        expect(snapshot.wall).toBe(referenceTime);
+        expect(snapshot.period).toEqual({ text: `${expectedDates[0]} ~ ${expectedDates[6]} · 브라우저 현지 날짜 기준`, live: 'polite', atomic: 'true' });
+        expect(snapshot.statusAtomic).toBe('true');
+        expect(snapshot.days.map(day => day.date)).toEqual(expectedDates);
+        expect(snapshot.days.map(day => day.count)).toEqual(['1회', '0회', '0회', '0회', '0회', '1회', '2회']);
+        await expect(activity.getByRole('status')).toHaveText('완료 세션 4회 · 기록이 있는 날 3일 / 7일');
+        await expect(activity.getByRole('list')).toHaveAttribute('role', 'list');
+        await expect(activity.getByRole('listitem')).toHaveCount(7);
+        for (const weekday of await activity.locator('time > span').all()) await expect(weekday).toHaveCSS('color', 'rgb(24, 33, 58)');
+        await expect(activity).toContainText('브라우저 현지 날짜 기준');
+        await expect(activity).toContainText('점수·실력 향상 지표가 아닙니다.');
+        const refresh = activity.getByRole('button', { name: '오늘 기준으로 새로고침', exact: true });
+        await refresh.focus();
+        await page.keyboard.press('Enter');
+        await expect(refresh).toBeFocused();
+        await expect(activity.getByRole('status')).toHaveText('완료 세션 4회 · 기록이 있는 날 3일 / 7일');
+        expect(await activity.locator('time').evaluateAll(elements => elements.map(element => element.getAttribute('datetime')))).toEqual(expectedDates);
+        expect(await page.evaluate(() => localStorage.getItem('nineflow-practice-results-v4:training-activity-regression'))).toBe(saved);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+        await activity.screenshot({ path: testInfo.outputPath(`activity-${width}-${timezone.replace('/', '-')}.png`) });
+        await page.screenshot({ path: testInfo.outputPath(`activity-page-${width}-${timezone.replace('/', '-')}.png`), fullPage: true });
+        expect(errors).toEqual([]);
+
+        const nextDay = await page.evaluate(() => {
+          const now = new Date();
+          const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 12);
+          return { time: date.getTime(), key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` };
+        });
+        await page.clock.setFixedTime(nextDay.time);
+        const beforeRefresh = await activity.evaluate(element => ({
+          wall: Date.now(),
+          days: Array.from(element.querySelectorAll('li')).map(day => ({ date: day.getAttribute('data-date'), count: day.querySelector('b')?.textContent })),
+        }));
+        console.log('TRAINING_ACTIVITY_DAY_SHIFT', JSON.stringify({ timezone, width, referenceTime, nextDay, beforeRefresh }));
+        expect(beforeRefresh.wall).toBe(nextDay.time);
+        expect(beforeRefresh.days).toEqual(snapshot.days);
+        await refresh.focus();
+        await page.keyboard.press('Enter');
+        const attemptedRefresh = await activity.locator('time').evaluateAll(elements => elements.map(element => element.getAttribute('datetime')));
+        console.log('TRAINING_ACTIVITY_DAY_REFRESH_ATTEMPT', JSON.stringify({ timezone, width, attemptedRefresh }));
+        await expect(activity.locator('time').last()).toHaveAttribute('datetime', nextDay.key);
+        const refreshed = await activity.evaluate(element => {
+          const period = element.querySelector('.training-activity-heading p');
+          return {
+            wall: Date.now(),
+            statusAtomic: element.querySelector('[role="status"]')?.getAttribute('aria-atomic'),
+            period: { text: period?.textContent, live: period?.getAttribute('aria-live'), atomic: period?.getAttribute('aria-atomic') },
+            days: Array.from(element.querySelectorAll('li')).map(day => ({ date: day.getAttribute('data-date'), count: day.querySelector('b')?.textContent })),
+          };
+        });
+        console.log('TRAINING_ACTIVITY_DAY_REFRESH', JSON.stringify({ timezone, width, referenceTime, nextDay, refreshed }));
+        expect(refreshed.wall).toBe(nextDay.time);
+        expect(refreshed.period).toEqual({ text: `${expectedDates[1]} ~ ${nextDay.key} · 브라우저 현지 날짜 기준`, live: 'polite', atomic: 'true' });
+        expect(refreshed.statusAtomic).toBe('true');
+        expect(refreshed.days.map(day => day.date)).toEqual([...expectedDates.slice(1), nextDay.key]);
+        expect(refreshed.days.map(day => day.count)).toEqual(['0회', '0회', '0회', '0회', '1회', '2회', '1회']);
+        await expect(refresh).toBeFocused();
+        await expect(activity).toContainText(`${expectedDates[1]} ~ ${nextDay.key}`);
+        await expect(activity.getByRole('status')).toHaveText('완료 세션 4회 · 기록이 있는 날 3일 / 7일');
+        expect(await page.evaluate(() => localStorage.getItem('nineflow-practice-results-v4:training-activity-regression'))).toBe(saved);
+        await activity.screenshot({ path: testInfo.outputPath(`activity-next-day-${width}-${timezone.replace('/', '-')}.png`) });
+        expect(errors).toEqual([]);
+      });
+    }
+  });
+}
+
 test('첫 화면은 Tailwind 빌드 컴파일러를 내려받지 않는다', async ({ page }) => {
   const scripts: import('@playwright/test').Response[] = [];
   page.on('response', (response) => {

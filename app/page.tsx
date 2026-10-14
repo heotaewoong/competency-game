@@ -24,6 +24,7 @@ import { filterResultHistory, formatResultScore, resultErrorLabel, resultScoreLa
 import { isReviewPayloadStructurallyValid } from './lib/practice-backup';
 import { resolveReadinessOverall } from './lib/readiness';
 import { chooseTrainingRecommendation, type RecommendationReason } from './lib/training-recommendation';
+import { summarizeTrainingActivity } from './lib/training-activity';
 import { AccessibilityBootstrap, ReadinessCenter, READINESS_STORAGE_KEY, captureCurrentReadinessAssessment, parseSavedReadinessSummary, type SavedReadinessSummary } from './components/readiness-center';
 import type { DataManagementActionResult } from './components/data-management-dialog';
 import { lockDocumentScroll } from './lib/scroll-lock';
@@ -288,6 +289,7 @@ export default function Home() {
   const [historyGame, setHistoryGame] = useState<GameId | 'all'>('all');
   const [historyMode, setHistoryMode] = useState<ResultMode | 'all'>('all');
   const [historyLimit, setHistoryLimit] = useState(8);
+  const [activityDate, setActivityDate] = useState(() => new Date());
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [dataManagementOpen, setDataManagementOpen] = useState(false);
   const [readinessOpen, setReadinessOpen] = useState(false);
@@ -688,6 +690,7 @@ export default function Home() {
   const recentResults = results.slice(0, 8);
   const filteredHistory = filterResultHistory(results, historyGame, historyMode);
   const visibleHistory = filteredHistory.slice(0, historyLimit);
+  const activity = summarizeTrainingActivity(results, activityDate);
   const reviewableResults = results.filter((result) => hasReviewData(result.review));
   const scoredReviewResults = reviewableResults.filter((result) => (result.review?.summary.attemptedCount ?? 0) > 0);
   const recurringErrors = aggregateReviewErrors(scoredReviewResults);
@@ -976,6 +979,13 @@ export default function Home() {
             {recurringErrors.length > 0 ? <div className="home-review-ranking">{recurringErrors.slice(0, 3).map((summary, index) => { const game = games.find((item) => item.id === summary.gameId)!; return <button type="button" key={`${summary.gameId}-${summary.contextKey}-${summary.errorCode}`} onClick={(event) => openReview(event.currentTarget, summary.representativeSessionId, summary.errorCode)}><span>{index + 1}</span><div><small>{game.title} · {summary.contextLabel} · {summary.count}/{summary.attemptedCount}회 · {summary.sessionCount}개 세션</small><b>{summary.label}</b><p>{summary.tip}</p></div><em>{summary.rate}%</em></button>; })}</div> : <div className="home-review-empty"><b>반복 오류가 아직 없습니다.</b><span>게임을 완료하면 오답뿐 아니라 비효율 조작과 확률 판단도 분리해 기록합니다.</span></div>}
           </section>
           <div className="record-summary"><article><span>저장된 최근 연습</span><b>{results.length}회</b></article><article><span>최근 기록 게임</span><b>{practicedGames.length}<small>/ 9종</small></b></article><article><span>{lastResultModeLabel} 마지막 {resultScoreLabel(lastResult)}</span><b>{formatResultScore(lastResult)}</b></article></div>
+          <section className="training-activity" aria-labelledby="training-activity-title">
+            <div className="training-activity-heading"><div><h3 id="training-activity-title">최근 7일 훈련 활동</h3><p aria-live="polite" aria-atomic="true">{activity.period} · 브라우저 현지 날짜 기준</p></div><button type="button" onClick={() => setActivityDate(new Date())}>오늘 기준으로 새로고침</button></div>
+            <p className="training-activity-summary" role="status" aria-atomic="true">완료 세션 {activity.sessionCount}회 · 기록이 있는 날 {activity.activeDayCount}일 / 7일</p>
+            <ol className="training-activity-days" role="list">{activity.days.map(day => <li key={day.key} data-date={day.key} data-active={day.sessions > 0}><time dateTime={day.key}>{day.label}<span>{day.weekday}</span></time><b>{day.sessions}회</b></li>)}</ol>
+            {!activity.sessionCount && <p>이 기간에는 완료 기록이 없습니다. 게임 하나를 끝내면 활동이 표시됩니다.</p>}
+            <small>이 브라우저에 남아 있는 완료 기록만 집계합니다. 점수·실력 향상 지표가 아닙니다.</small>
+          </section>
           <div className="game-record-grid" aria-label="게임별 기록">
             {practicedGames.map(({ game, latest, mode, comparisonAvailable, comparableSessions, best }) => <article key={game.id} className={`tone-${game.tone}`}>
               <div><span>{game.no}</span><div><small>{game.skill}</small><b>{game.title}</b></div></div>

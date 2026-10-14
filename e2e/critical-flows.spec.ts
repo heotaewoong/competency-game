@@ -358,7 +358,7 @@ test('저장 공간 쓰기가 실패해도 완료 결과와 복습 동작은 유
   await page.getByRole('button', { name: /결과 보기/ }).click();
 
   await expect(page.getByRole('heading', { name: '도형 회전하기 결과' })).toBeVisible();
-  await expect(page.getByRole('status')).toContainText('브라우저 저장 공간을 사용할 수 없습니다');
+  await expect(page.getByRole('status').and(page.locator('.result-storage-notice:not(.result-comparison-notice)'))).toContainText('브라우저 저장 공간을 사용할 수 없습니다');
   await expect(page.getByRole('button', { name: '다시 연습' })).toBeVisible();
   await expect(page.getByRole('button', { name: '문항별 복습' })).toBeVisible();
   await expect.poll(() => page.evaluate(({ prefix, generationKey }) => {
@@ -424,7 +424,7 @@ test('더 새로운 복습 스키마는 회전 연습 완료 후에도 원본 �
   }, { resultsKey: LEGACY_RESULTS_KEY, raw: futurePayloadRaw });
   await page.goto('/');
 
-  await expect(page.getByRole('status')).toContainText('현재 앱보다 새 형식의 복습 기록을 감지해 원본을 별도 백업했습니다');
+  await expect(page.getByRole('status').and(page.locator('.storage-notice'))).toContainText('현재 앱보다 새 형식의 복습 기록을 감지해 원본을 별도 백업했습니다');
   await expect.poll(() => page.evaluate(({ resultsKey, backupKey }) => ({
     primary: window.localStorage.getItem(resultsKey),
     backup: window.localStorage.getItem(backupKey),
@@ -440,7 +440,7 @@ test('더 새로운 복습 스키마는 회전 연습 완료 후에도 원본 �
 
   await expect(page.getByRole('heading', { name: '도형 회전하기 결과' })).toBeVisible();
   await expect(page.getByRole('region', { name: '도형 회전하기 결과' })).toContainText('100%');
-  await expect(page.getByRole('status')).toContainText('새 형식의 기존 복습 기록을 보호하기 위해 이번 결과는 현재 화면에만 표시합니다');
+  await expect(page.getByRole('status').and(page.locator('.result-storage-notice:not(.result-comparison-notice)'))).toContainText('새 형식의 기존 복습 기록을 보호하기 위해 이번 결과는 현재 화면에만 표시합니다');
   await expect.poll(() => page.evaluate(({ resultsKey, backupKey }) => ({
     primary: window.localStorage.getItem(resultsKey),
     backup: window.localStorage.getItem(backupKey),
