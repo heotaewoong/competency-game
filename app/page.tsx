@@ -19,7 +19,7 @@ import {
   resultsStorageKey,
   serializeResultsEnvelope,
 } from './lib/result-envelope';
-import { getResultComparisonKey, getResultMode, type ResultMode } from './lib/result-comparison';
+import { getResultComparisonKey, getResultMode, getResultProgress, type ResultMode } from './lib/result-comparison';
 import { filterResultHistory, formatResultScore, resultErrorLabel, resultScoreLabel } from './lib/result-display';
 import { isReviewPayloadStructurallyValid } from './lib/practice-backup';
 import { resolveReadinessOverall } from './lib/readiness';
@@ -253,10 +253,10 @@ function cleanInactiveResultEnvelopes(storage: Storage, activeGeneration: string
   staleKeys.forEach((key) => storage.removeItem(key));
 }
 
-function formatCompletedAt(value: string) {
+function formatCompletedAt(value: string, includeYear = false) {
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp)) return '날짜 정보 없음';
-  return new Intl.DateTimeFormat('ko-KR', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }).format(new Date(timestamp));
+  return new Intl.DateTimeFormat('ko-KR', { ...(includeYear ? { year: 'numeric' as const } : {}), month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }).format(new Date(timestamp));
 }
 
 function summarizeSessions(sessions: SessionResult[]) {
@@ -264,12 +264,14 @@ function summarizeSessions(sessions: SessionResult[]) {
   const mode = latest ? getResultMode(latest) : null;
   const comparisonKey = latest ? getResultComparisonKey(latest) : null;
   const comparableSessions = comparisonKey ? sessions.filter((result) => getResultComparisonKey(result) === comparisonKey) : [];
+  const progress = latest ? getResultProgress(latest, sessions) : null;
   return {
     latest,
     mode,
     comparisonAvailable: comparisonKey !== null,
     comparableSessions,
-    best: comparableSessions.length ? Math.max(...comparableSessions.map((result) => result.accuracy)) : 0,
+    best: progress?.best ?? null,
+    progress,
   };
 }
 
@@ -956,7 +958,7 @@ export default function Home() {
                   </div>
                   <dl className="card-record" aria-busy={!resultsLoaded} aria-label={!resultsLoaded ? '이 게임의 기록 확인 중' : last ? (comparisonAvailable ? `${modeLabel} 안에서 비교한 이 게임의 기록` : `${modeLabel}, 비교할 설정 정보가 없는 이전 기록`) : '이 게임의 기록 없음'}>
                     <div><dt>{last ? `${modeLabel} 최근 ${resultScoreLabel(last)}` : '최근'}</dt><dd>{last ? formatResultScore(last) : '—'}</dd></div>
-                    <div><dt>{last ? `${modeLabel} 최고` : '최고'}</dt><dd>{last && comparisonAvailable ? `${best}%` : '—'}</dd></div>
+                    <div><dt>{last ? `${modeLabel} 최고` : '최고'}</dt><dd>{last && comparisonAvailable && best !== null ? `${best}%` : '—'}</dd></div>
                     <div><dt>{last ? '동일 설정 횟수' : '횟수'}</dt><dd>{!resultsLoaded ? '—' : last && comparisonAvailable ? `${comparableSessions.length}회` : (last ? '설정 없음' : '0회')}</dd></div>
                   </dl>
                   <div className="card-action">
@@ -987,9 +989,18 @@ export default function Home() {
             <small>이 브라우저에 남아 있는 완료 기록만 집계합니다. 점수·실력 향상 지표가 아닙니다.</small>
           </section>
           <div className="game-record-grid" aria-label="게임별 기록">
-            {practicedGames.map(({ game, latest, mode, comparisonAvailable, comparableSessions, best }) => <article key={game.id} className={`tone-${game.tone}`}>
+            {practicedGames.map(({ game, latest, mode, comparisonAvailable, comparableSessions, best, progress }) => <article key={game.id} className={`tone-${game.tone}`}>
               <div><span>{game.no}</span><div><small>{game.skill}</small><b>{game.title}</b></div></div>
-              <dl aria-label={comparisonAvailable ? `${resultModeLabels[mode ?? 'unknown']}의 동일 설정 안에서 비교한 기록` : '비교할 설정 정보가 없는 이전 기록'}><div><dt>{resultModeLabels[mode ?? 'unknown']} 최근 {resultScoreLabel(latest)}</dt><dd>{formatResultScore(latest)}</dd></div><div><dt>동일 설정 최고</dt><dd>{comparisonAvailable ? `${best}%` : '—'}</dd></div><div><dt>동일 설정 횟수</dt><dd>{comparisonAvailable ? `${comparableSessions.length}회` : '설정 없음'}</dd></div></dl>
+              <dl aria-label={comparisonAvailable ? `${resultModeLabels[mode ?? 'unknown']}의 동일 설정 안에서 비교한 기록` : '비교할 설정 정보가 없는 이전 기록'}><div><dt>{resultModeLabels[mode ?? 'unknown']} 최근 {resultScoreLabel(latest)}</dt><dd>{formatResultScore(latest)}</dd></div><div><dt>동일 설정 최고</dt><dd>{comparisonAvailable && best !== null ? `${best}%` : '—'}</dd></div><div><dt>동일 설정 횟수</dt><dd>{comparisonAvailable ? `${comparableSessions.length}회` : '설정 없음'}</dd></div></dl>
+              <section className="record-progress" aria-label={`${game.title} 같은 조건 기록 변화`}>
+                <h3>직전 동일 조건 대비 <b>{progress?.scoreChange == null ? '비교 대기' : `${progress.scoreChange > 0 ? '+' : ''}${progress.scoreChange}%p`}</b></h3>
+                <p>{!progress ? '설정·날짜 정보가 부족하거나 탭 이탈이 있는 기록은 비교하지 않습니다.' : !progress.previous ? '시간 순서가 확인되는 동일 조건 기록을 한 번 더 완료하면 비교할 수 있습니다.' : progress.scoreChange === null ? '최근 또는 직전 기록에 비교 가능한 점수가 없어 변화는 표시하지 않습니다.' : `${resultScoreLabel(latest)} ${formatResultScore(progress.previous)} → ${formatResultScore(latest)} · 직전 ${formatCompletedAt(progress.previous.completedAt, true)}`}</p>
+                {progress && progress.history.length > 1 && <details>
+                  <summary aria-label={`${game.title} 동일 조건 최근 ${Math.min(progress.history.length, 5)}회 보기`}>동일 조건 최근 {Math.min(progress.history.length, 5)}회 보기</summary>
+                  <table><caption className="sr-only">{game.title} 동일 조건 최근 기록 · 최신순</caption><thead><tr><th scope="col">완료 시각</th><th scope="col">{resultScoreLabel(latest)}</th></tr></thead><tbody>{progress.history.slice(0, 5).map((result, index) => <tr key={result.id}><td><time dateTime={result.completedAt}>{formatCompletedAt(result.completedAt, true)}</time>{index === 0 && <span> · 최근</span>}</td><td>{formatResultScore(result)}</td></tr>)}</tbody></table>
+                  <p>게임·모드·분량·속도·집중·접근성 표시 등 저장 설정이 같은 기록입니다. 무작위 문항은 다를 수 있으며, 실제 역량이나 JOBDA 점수의 변화를 뜻하지 않습니다.</p>
+                </details>}
+              </section>
               <div className="game-record-actions">{hasReviewData(latest.review) ? <button type="button" onClick={(event) => openReview(event.currentTarget, latest.id)} aria-label={`${game.title} 최근 세션 복습`}>{latest.review?.attempts.length ? '복습' : '통계'}</button> : <span>복습 기록 없음</span>}<button type="button" onPointerEnter={preloadGameStage} onPointerDown={preloadGameStage} onFocus={preloadGameStage} onClick={(event) => openGame(game.id, event.currentTarget)} aria-label={`${game.title} 다시 연습`}>다시 연습 <span aria-hidden="true">→</span></button></div>
             </article>)}
           </div>

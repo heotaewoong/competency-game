@@ -284,6 +284,18 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 .game-record-grid dd { margin: 3px 0 0; font-size: 13px; font-weight: 850; font-variant-numeric: tabular-nums; }
 .game-record-grid button { grid-column: 2; grid-row: 1; min-height: 44px; padding: 0 9px; border: 0; border-radius: 9px; color: var(--accent); background: color-mix(in srgb, var(--accent), white 93%); font-size: 11px; font-weight: 850; white-space: nowrap; }
 .game-record-grid button:hover { color: #fff; background: var(--accent); }
+.record-progress { grid-column: 1 / -1; min-width: 0; }
+.record-progress h3 { margin: 0; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; color: #425168; font-size: 12px; }
+.record-progress h3 b { font-variant-numeric: tabular-nums; }
+.record-progress p { margin: 6px 0 0; color: #5c697d; font-size: 11px; line-height: 1.65; overflow-wrap: anywhere; }
+.record-progress summary { min-height: 44px; display: flex; align-items: center; gap: 6px; cursor: pointer; color: #425168; font-size: 12px; font-weight: 750; }
+.record-progress summary::before { content: '+'; }
+.record-progress details[open] summary::before { content: '−'; }
+.record-progress table { width: 100%; border-collapse: collapse; font-size: 11px; font-variant-numeric: tabular-nums; }
+.record-progress th, .record-progress td { padding: 7px 3px; border-bottom: 1px solid #edf0f5; text-align: left; overflow-wrap: anywhere; }
+.record-progress th:last-child, .record-progress td:last-child { text-align: right; }
+.record-progress th { color: #425168; }
+.record-progress td { color: #5c697d; }
 .history-panel { margin-top: 12px; border: 1px solid var(--line); border-radius: 15px; background: rgba(255,255,255,.72); }
 .history-panel > summary { min-height: 54px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; color: #4f5c71; font-size: 13px; font-weight: 800; }
 .history-panel > summary::marker { content: ''; }
