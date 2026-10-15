@@ -678,6 +678,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
   const onSwitchRef = useRef(onSwitch);
   const overlayWasOpenRef = useRef(false);
   const overlayReturnFocusRef = useRef<HTMLButtonElement | null>(null);
+  const settingsFocusRequestedRef = useRef(false);
   const overlayOpenRef = useRef(false);
   const visibilityPausedRef = useRef(false);
   const startRequestRef = useRef(0);
@@ -743,6 +744,13 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
     setPhase('intro');
     setResult(null);
     setRun((value) => value + 1);
+  }, []);
+
+  const focusPracticeSettings = useCallback(() => {
+    const target = panelRef.current?.querySelector<HTMLElement>('.simulation-preset, .appointment-practice-options')
+      ?? panelRef.current?.querySelector<HTMLElement>('.session-settings');
+    target?.scrollIntoView({ block: 'start' });
+    target?.focus({ preventScroll: true });
   }, []);
 
   const resumeVisibilityPause = useCallback(() => {
@@ -813,6 +821,11 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
     panelRef.current?.scrollTo({ top: 0 });
     panelRef.current?.querySelector<HTMLElement>('.stage-intro')?.scrollTo({ top: 0 });
     const focusFrame = window.requestAnimationFrame(() => {
+      if (phase === 'intro' && settingsFocusRequestedRef.current) {
+        settingsFocusRequestedRef.current = false;
+        const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        if (!overlayOpenRef.current && (!active || !panelRef.current?.contains(active) || active === panelRef.current)) focusPracticeSettings();
+      }
       if (phase === 'play' && prepCountdown === null) {
         const workspace = panelRef.current?.querySelector<HTMLElement>('.game-workspace');
         const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -821,7 +834,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
       if (phase === 'result') panelRef.current?.querySelector<HTMLElement>('.stage-result')?.focus();
     });
     return () => window.cancelAnimationFrame(focusFrame);
-  }, [phase, prepCountdown, run]);
+  }, [phase, prepCountdown, run, focusPracticeSettings]);
 
   useEffect(() => {
     const compactLayout = window.matchMedia('(max-width: 620px)');
@@ -1138,17 +1151,6 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
     : `${quantitySummary(practiceConfig, 'practice')} · ${practiceTimingSummary}`;
   const simulationStartSummary = `${gameId === 'appointment' ? `${APPOINTMENT_ROUNDS.length}라운드 · ` : ''}${quantitySummary(fixedConfig, 'simulation')} · ${gameId === 'rotation' ? '단계당' : gameId === 'nback' ? '도형 간격' : practiceSpecs[gameId].paceLabel} ${formatPace(fixedConfig.paceMs)}`;
 
-  function focusPracticeSettings() {
-    const selector = sessionMode === 'simulation'
-      ? '.simulation-preset'
-      : gameId === 'appointment'
-        ? '.appointment-practice-options'
-        : '.session-settings';
-    const target = panelRef.current?.querySelector<HTMLElement>(selector);
-    target?.scrollIntoView({ block: 'start' });
-    target?.focus({ preventScroll: true });
-  }
-
   return (
     <div className="stage-backdrop" role="presentation">
       <section ref={panelRef} className="stage-panel" data-game={gameId} role={overlayOpen ? undefined : 'dialog'} aria-modal={overlayOpen ? undefined : true} aria-label={overlayOpen ? undefined : `${game.title} ${sessionMode === 'practice' ? '연습' : '실전형 연습'}`} tabIndex={-1}>
@@ -1215,7 +1217,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
           </>
         )}
         {phase === 'play' && <GamePauseContext.Provider value={sessionPaused}><SessionModeContext.Provider value={{ mode: sessionMode, showGlyphNames }}><GuidedPacingContext.Provider value={sessionMode === 'practice' && guidedPacing}><FocusedPracticeContext.Provider value={sessionMode === 'practice' ? focusedPractice : DEFAULT_FOCUSED_PRACTICE}><StageActionsContext.Provider value={{ openGameSwitcher, openFeedback }}>{prepCountdown !== null ? <GamePreparation gameId={gameId} countdown={prepCountdown} total={gameId === 'rotation' && sessionMode === 'simulation' ? 2 : gameId === 'appointment' ? (sessionMode === 'simulation' ? APPOINTMENT_SIMULATION_TOTAL_QUESTIONS : practiceConfig.quantity * appointmentPreferences.selectedRounds.length) : (sessionMode === 'practice' ? practiceConfig : simulationConfig(gameId)).quantity} onClose={requestClose} /> : <GameRouter key={`${gameId}-${run}`} gameId={gameId} config={sessionMode === 'practice' ? practiceConfig : simulationConfig(gameId)} glyphMnemonics={glyphMnemonics} nbackPreferences={nbackPreferences} rotationPreferences={rotationPreferences} appointmentPreferences={appointmentPreferences} onRotationPreviewChange={(showPreview) => saveRotationPreferences({ ...rotationPreferences, showPreview })} onFinish={finish} onClose={requestClose} />}</StageActionsContext.Provider></FocusedPracticeContext.Provider></GuidedPacingContext.Provider></SessionModeContext.Provider></GamePauseContext.Provider>}
-        {phase === 'result' && result && <ResultView result={result} mode={sessionMode} storageNotice={saveNotice} onClose={requestClose} onRestart={() => restart()} onOpenGuide={() => setStrategyGuideOpen(true)} onReview={(opener) => { overlayReturnFocusRef.current = opener; setReviewOpen(true); }} onOpenBackup={onOpenBackup} />}
+        {phase === 'result' && result && <ResultView result={result} mode={sessionMode} storageNotice={saveNotice} onClose={requestClose} onRestart={() => restart()} onConfigure={(nextMode) => { setSessionMode(nextMode); settingsFocusRequestedRef.current = true; stopActiveSession(); }} onOpenGuide={() => setStrategyGuideOpen(true)} onReview={(opener) => { overlayReturnFocusRef.current = opener; setReviewOpen(true); }} onOpenBackup={onOpenBackup} />}
         </div>
         {switcherOpen && <GameSwitcher currentGameId={gameId} sessionWasStopped={switcherEndedSession} onClose={() => setSwitcherOpen(false)} onSelect={(nextGameId) => { setSwitcherOpen(false); if (nextGameId !== gameId) onSwitchRef.current(nextGameId); }} />}
         {feedbackOpen && <FeedbackDialog initialGameId={gameId} sessionMode={sessionMode === 'practice' ? '연습 모드' : '실전형 연습'} nested onClose={() => setFeedbackOpen(false)} />}
@@ -1805,7 +1807,7 @@ function GamePreparation({ gameId, countdown, total, onClose }: { gameId: GameId
   );
 }
 
-function ResultView({ result, mode, storageNotice, onClose, onRestart, onOpenGuide, onReview, onOpenBackup }: { result: SessionResult; mode: SessionMode; storageNotice?: string; onClose: () => void; onRestart: () => void; onOpenGuide: () => void; onReview: (opener: HTMLButtonElement) => void; onOpenBackup: (signal: AbortSignal) => Promise<void> }) {
+function ResultView({ result, mode, storageNotice, onClose, onRestart, onConfigure, onOpenGuide, onReview, onOpenBackup }: { result: SessionResult; mode: SessionMode; storageNotice?: string; onClose: () => void; onRestart: () => void; onConfigure: (mode: SessionMode) => void; onOpenGuide: () => void; onReview: (opener: HTMLButtonElement) => void; onOpenBackup: (signal: AbortSignal) => Promise<void> }) {
   const [backupStatus, setBackupStatus] = useState<'idle' | 'opening' | 'error'>('idle');
   const backupRequestRef = useRef<AbortController | null>(null);
   useEffect(() => () => { backupRequestRef.current?.abort(); }, []);
@@ -1917,7 +1919,7 @@ function ResultView({ result, mode, storageNotice, onClose, onRestart, onOpenGui
       {mouseDetail.length > 0 && <aside className="rotation-result-detail mouse-result-detail" aria-label="고양이 술래잡기 상세 결과"><b>판단과 확신을 함께 확인하세요</b><dl>{mouseDetail.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><p>확신도가 높은 것 자체는 점수가 아닙니다. 고확신 오답이 있다면 복습에서 해당 위치 판단을 먼저 확인하세요.</p></aside>}
       {visibilityPauses > 0 && <aside className="result-storage-notice result-comparison-notice" role="status"><b>탭 이탈 {visibilityPauses}회 · 참고용 기록</b><p>다른 탭에 있던 시간은 제외했으며, 공정한 비교를 위해 이 결과는 동일 설정 최고 기록 계산에 포함하지 않습니다.</p></aside>}
       {hasActionableReview && <aside className="result-review"><b>이번 세션 복습 포인트</b><p>{reviewAdvice[result.gameId]}</p></aside>}
-      <div className="result-actions"><button onClick={() => { cancelBackup(); onRestart(); }}>{mode === 'practice' ? '다시 연습' : '실전형으로 다시 하기'}</button>{hasReview && <button className="result-review-button" onClick={(event) => { cancelBackup(); onReview(event.currentTarget); }}>문항별 복습</button>}<button className="result-guide" onClick={() => { cancelBackup(); onOpenGuide(); }}>공략 복습</button><button className="stage-start" onClick={() => { cancelBackup(); onClose(); }}>게임 목록 <span>→</span></button></div>
+      <div className="result-actions"><button onClick={() => { cancelBackup(); onRestart(); }}>{mode === 'practice' ? '다시 연습' : '실전형으로 다시 하기'}</button><button className="result-guide result-mode-settings" type="button" onClick={() => { cancelBackup(); onConfigure(mode === 'practice' ? 'simulation' : 'practice'); }}>{mode === 'practice' ? '실전형 설정 보기' : '맞춤 연습 설정 보기'}</button>{hasReview && <button className="result-review-button" onClick={(event) => { cancelBackup(); onReview(event.currentTarget); }}>문항별 복습</button>}<button className="result-guide" onClick={() => { cancelBackup(); onOpenGuide(); }}>공략 복습</button><button className="stage-start" onClick={() => { cancelBackup(); onClose(); }}>게임 목록 <span>→</span></button></div>
       <small>개인 연습 기록이며 실제 역량검사 점수나 채용 결과가 아닙니다.</small>
     </section>
   );
