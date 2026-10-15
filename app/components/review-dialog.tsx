@@ -448,7 +448,7 @@ export function ReviewDialog({ results, onClose, onPracticeGame, initialSessionI
 
               <div className="review-attempt-detail" role="region" aria-label="선택한 시도 상세. 방향키나 Page Up, Page Down으로 내용을 스크롤할 수 있습니다." tabIndex={0}>
                 <div className="review-attempt-filter">
-                  <label>복습 유형<select value={attemptFilter.activeErrorCode} onChange={(event) => { setErrorCode(event.target.value); setSelectedAttemptId(''); }}><option value="">전체 유형</option>{attemptFilter.errorCodes.map((code) => <option key={code} value={code}>{getReviewErrorMeta(selectedGameId, code).label}</option>)}</select></label>
+                  <label>복습 유형<select value={attemptFilter.activeErrorCode} onChange={(event) => { setSelectedSessionId(selectedSession?.id ?? ''); setErrorCode(event.target.value); setSelectedAttemptId(''); }}><option value="">전체 유형</option>{attemptFilter.errorCodes.map((code) => <option key={code} value={code}>{getReviewErrorMeta(selectedGameId, code).label}</option>)}</select></label>
                   <p role="status">현재 표시 {visibleAttempts.length}개 · 저장된 상세 {selectedSession?.review.attempts.length ?? 0}개{(selectedReviewSummary?.omittedDetailCount ?? 0) > 0 ? ` · 상세 ${selectedReviewSummary!.omittedDetailCount}개가 정리되었습니다.` : ''}</p>
                 </div>
                 <p className="sr-only" aria-live="polite">{selectedAttempt ? `${selectedAttempt.index + 1}번 시도 상세를 표시합니다.` : '표시할 시도가 없습니다.'}</p>
