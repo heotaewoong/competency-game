@@ -20,6 +20,17 @@ function reviewFilterFixtures(): SessionResult[] {
   ];
 }
 
+async function importReviewFilterRecords(page: Page, results: SessionResult[], expectedTotal: number) {
+  await page.locator('.records-data-button').click();
+  const data = page.getByRole('dialog', { name: '내 기록 백업·복원', exact: true });
+  const backup = createPracticeResultsBackup(results, new Date('2026-10-14T13:00:00.000Z'));
+  await data.locator('input[type="file"]').setInputFiles({ name: 'review-types.json', mimeType: 'application/json', buffer: Buffer.from(backup) });
+  await expect(data.locator('.data-import-preview')).toContainText(`${results.length}개 기록`);
+  await data.getByRole('button', { name: '기존 기록과 합치기', exact: true }).click();
+  await expect(data.locator('.data-dialog-notice')).toContainText(`현재 총 ${expectedTotal}개`);
+  await data.getByRole('button', { name: '닫기', exact: true }).click();
+}
+
 for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }, { width: 844, height: 360 }]) {
   test(`복습 유형 ${viewport.width}x${viewport.height}: 가져온 상세만 분류하고 통계·저장·키보드 탐색을 보존한다`, async ({ page }, testInfo) => {
     const errors: string[] = [];
@@ -27,14 +38,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
     await page.setViewportSize(viewport);
     await page.goto('/');
-    await page.locator('.records-data-button').click();
-    const data = page.getByRole('dialog', { name: '내 기록 백업·복원', exact: true });
-    const backup = createPracticeResultsBackup(reviewFilterFixtures(), new Date('2026-10-14T13:00:00.000Z'));
-    await data.locator('input[type="file"]').setInputFiles({ name: 'review-types.json', mimeType: 'application/json', buffer: Buffer.from(backup) });
-    await expect(data.locator('.data-import-preview')).toContainText('3개 기록');
-    await data.getByRole('button', { name: '기존 기록과 합치기', exact: true }).click();
-    await expect(data.locator('.data-dialog-notice')).toContainText('현재 총 3개');
-    await data.getByRole('button', { name: '닫기', exact: true }).click();
+    await importReviewFilterRecords(page, reviewFilterFixtures(), 3);
     const readSaved = () => page.evaluate(() => {
       const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
       return { generation, raw: generation ? localStorage.getItem(`nineflow-practice-results-v4:${generation}`) : null };
@@ -84,8 +88,10 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
     await expect(list.getByRole('option', { selected: true })).toBeFocused();
     await list.getByRole('option', { selected: true }).press('Home');
     await expect(list.getByRole('option', { selected: true })).toHaveAttribute('data-review-attempt-id', 'loss-1');
+    await expect(list.getByRole('option', { selected: true })).toBeFocused();
     await list.getByRole('option', { selected: true }).press('End');
     await expect(list.getByRole('option', { selected: true })).toHaveAttribute('data-review-attempt-id', 'loss-2');
+    await expect(list.getByRole('option', { selected: true })).toBeFocused();
     await filter.focus();
     await filter.selectOption('rps-tie');
     const tie = await observe('tie');
@@ -131,6 +137,63 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
     expect(errors).toEqual([]);
   });
 }
+
+test('복습 유형은 다른 탭의 정상 가져오기로 선택 세션이 정리된 뒤에도 새 세션에서 선택할 수 있다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await importReviewFilterRecords(page, reviewFilterFixtures(), 3);
+  const readSaved = () => page.evaluate(() => {
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    return { generation, raw: generation ? localStorage.getItem(`nineflow-practice-results-v4:${generation}`) : null };
+  });
+  const initial = await readSaved();
+  await page.locator('.home-review-ranking').getByRole('button', { name: /지는 관계 선택/ }).click();
+  const review = page.getByRole('dialog', { name: '내 실수 복습', exact: true });
+  const session = review.getByRole('combobox', { name: '세션·비교 기준', exact: true });
+  const filter = review.getByRole('combobox', { name: '복습 유형', exact: true });
+  const list = review.getByRole('listbox', { name: '저장된 시도 목록' });
+  await expect(session).toHaveValue('filter-full');
+  await expect(filter).toHaveValue('rps-loss');
+  const peer = await page.context().newPage();
+  peer.on('pageerror', error => errors.push(error.message));
+  peer.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  try {
+    await peer.goto('/');
+    const prototype = reviewFilterFixtures()[0];
+    const replacements = Array.from({ length: 100 }, (_, index) => ({ ...prototype, id: `peer-filter-${index}`, completedAt: new Date(Date.UTC(2026, 9, 14, 13, 0, index)).toISOString() }));
+    await importReviewFilterRecords(peer, replacements, 100);
+    await expect(session).toHaveValue('peer-filter-99');
+    await expect(filter).toHaveValue('');
+    const afterImport = await readSaved();
+    const results = JSON.parse(afterImport.raw!).results as SessionResult[];
+    expect(results).toHaveLength(100);
+    expect(results.some(result => result.id === 'filter-full')).toBe(false);
+    expect(afterImport.generation).toBe(initial.generation);
+    await filter.selectOption('rps-tie');
+    const observed = {
+      session: await session.inputValue(), value: await filter.inputValue(),
+      ids: await list.getByRole('option').evaluateAll(items => items.map(item => item.getAttribute('data-review-attempt-id'))),
+      status: await review.locator('.review-attempt-filter [role="status"]').textContent(),
+      generation: (await readSaved()).generation, retained: results.length, removedOriginal: !results.some(result => result.id === 'filter-full'), errors,
+    };
+    console.log('REVIEW_TYPE_PEER_PRUNE', JSON.stringify(observed));
+    await testInfo.attach('review-type-peer-prune.json', { body: JSON.stringify(observed, null, 2), contentType: 'application/json' });
+    await page.screenshot({ path: testInfo.outputPath('review-type-peer-prune.png') });
+    expect(observed.session).toBe('peer-filter-99');
+    expect(observed.value).toBe('rps-tie');
+    expect(observed.ids).toEqual(['tie-1']);
+    expect(observed.status).toBe('현재 표시 1개 · 저장된 상세 4개');
+    expect(await readSaved()).toEqual(afterImport);
+    expect(errors).toEqual([]);
+    await review.getByRole('button', { name: '복습 센터 닫기', exact: true }).click();
+    await expect(review).toHaveCount(0);
+  } finally {
+    await peer.close();
+  }
+});
 
 for (const width of [390, 1280]) {
   test(`기록 찾기 ${width}px: 오래된 기록의 게임·모드 필터와 더 보기는 저장값을 바꾸지 않는다`, async ({ page }, testInfo) => {
