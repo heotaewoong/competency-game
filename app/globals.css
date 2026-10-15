@@ -2929,6 +2929,12 @@ body {
 .readiness-accessibility fieldset > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
 .readiness-accessibility fieldset button { min-height: 42px; padding: 7px 9px; border: 1px solid #d6dce7; border-radius: 8px; color: #59667a; background: #fafbfc; font-size: 9px; font-weight: 800; }
 .readiness-accessibility fieldset button[aria-pressed="true"] { border-color: #5365c5; color: #fff; background: #5365c5; box-shadow: inset 0 0 0 1px #5365c5; }
+.support-guide { margin-top: 18px; padding: 2px 14px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); background: var(--surface); font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+.support-guide > summary { min-height: 44px; padding-block: 10px; cursor: pointer; font-weight: 800; }
+.support-guide dl { margin: 6px 0 12px; display: grid; gap: 12px; }
+.support-guide dt { font-weight: 800; }
+.support-guide dd { margin: 3px 0 0; }
+.support-guide > p { margin: 12px 0; padding-top: 10px; border-top: 1px solid var(--line); }
 .readiness-dialog > footer { min-height: 72px; padding: 10px 22px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid #e1e5ed; background: #fafbfc; }
 .readiness-dialog > footer span { color: #667388; font-size: 9px; }
 .readiness-dialog > footer button { min-height: 48px; padding: 9px 16px; border: 0; border-radius: 10px; color: #fff; background: #35476a; font-size: 10px; font-weight: 850; }
@@ -2949,6 +2955,7 @@ html[data-contrast="high"] button:focus-visible, html[data-contrast="high"] a:fo
 html[data-text-scale="large"] :where(button, a, label, legend) { font-size: max(13px, .875em); }
 html[data-text-scale="large"] .record-progress :where(h3, summary, table) { font-size: max(13px, .875em); }
 html[data-text-scale="large"] :where(p, li, dt, dd, small) { font-size: max(12px, .8em); }
+html[data-text-scale="large"] .support-guide :where(summary, dt, dd, p) { font-size: 14px; }
 html[data-text-scale="large"] .hero-copy > p:not(.eyebrow) { font-size: 16px; }
 html[data-text-scale="large"] :where(.mode-options button > span, .mode-options button > b, .appointment-practice-options b, .appointment-round-picker em, .intro-settings-shortcut b, .intro-settings-shortcut em) { font-size: 12px !important; }
 html[data-text-scale="large"] :where(.mode-options button > small, .appointment-practice-options small, .intro-start-options .stage-start > small, .intro-settings-shortcut small) { overflow: visible; font-size: 12px !important; line-height: 1.45; text-overflow: clip; white-space: normal; }

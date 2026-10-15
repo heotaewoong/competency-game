@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { games, type GameId } from '../lib/game-data';
 import { lockDocumentScroll } from '../lib/scroll-lock';
+import { SupportGuide } from './support-guide';
 import {
   buildFeedbackIssueText,
   buildFeedbackIssueUrl,
@@ -55,7 +56,7 @@ export function FeedbackDialog({ onClose, initialGameId = 'site', sessionMode, n
         return;
       }
       if (event.key !== 'Tab') return;
-      const items = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], select, textarea, input:not(:disabled)') ?? []).filter((item) => item.offsetParent !== null);
+      const items = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], summary, select, textarea, input:not(:disabled)') ?? []).filter((item) => item.offsetParent !== null);
       if (!items.length) return;
       const first = items[0]; const last = items.at(-1)!;
       const active = document.activeElement;
@@ -137,7 +138,8 @@ export function FeedbackDialog({ onClose, initialGameId = 'site', sessionMode, n
           <button type="button" aria-label="의견 보내기 닫기" onClick={onClose}>×</button>
         </header>
 
-        <div ref={noticeRef} id="feedback-public-notice" className="feedback-notice" role="note" tabIndex={-1}><b>제출 내용은 GitHub에 공개됩니다.</b><span>이름·연락처·회사 지원 정보·점수처럼 개인을 알아볼 수 있는 내용은 입력하지 마세요.</span></div>
+        <div ref={noticeRef} id="feedback-public-notice" className="feedback-notice" role="note" tabIndex={-1}><b>제출 내용은 GitHub에 공개됩니다.</b><span>이름·연락처·회사 지원 정보·점수·건강·진단 정보·초대장·계정 정보처럼 개인을 알아볼 수 있는 내용은 입력하지 마세요.</span></div>
+        <SupportGuide />
 
         <div className="feedback-fields">
           <label><span>의견 유형</span><select value={category} onChange={(event) => setCategory(event.target.value as FeedbackCategory)}>{feedbackCategories.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>

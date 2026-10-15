@@ -1,5 +1,107 @@
 import { expect, test } from '@playwright/test';
 
+for (const nested of [false, true]) {
+  for (const kind of ['준비센터', '의견창'] as const) {
+    test(`${nested ? '게임 설정 큰 글자' : '홈'} ${kind}에서 문의 경로 안내를 키보드로 읽고 닫아도 기록과 초점을 보존한다`, async ({ page }, testInfo) => {
+      const errors: string[] = [];
+      const githubRequests: string[] = [];
+      const popups: string[] = [];
+      page.on('pageerror', error => errors.push(error.message));
+      page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+      page.on('request', request => { if (/(^|\.)(github\.com|githubusercontent\.com)$/.test(new URL(request.url()).hostname)) githubRequests.push(request.url()); });
+      page.on('popup', popup => popups.push(popup.url()));
+      await page.goto('/');
+      await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+      if (nested) {
+        await page.locator('.readiness-banner button').click();
+        const preparation = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+        await preparation.getByRole('button', { name: '고대비', exact: true }).click();
+        await preparation.getByRole('button', { name: '큰 글자', exact: true }).click();
+        await page.keyboard.press('Escape');
+        await expect(preparation).toHaveCount(0);
+      }
+      const homeGameOpener = page.locator('.game-card-hitarea[aria-describedby="rps-summary"]');
+      const stage = page.locator('section[data-game="rps"]');
+      if (nested) await homeGameOpener.click();
+      const opener = nested
+        ? stage.getByRole('button', { name: kind === '준비센터' ? '응시 준비센터 열기' : '문제 신고', exact: true })
+        : kind === '준비센터' ? page.locator('.readiness-banner button') : page.locator('#feedback').getByRole('button', { name: '개선 의견 보내기', exact: true });
+      const resultStorage = () => page.evaluate(() => Object.fromEntries(Object.keys(localStorage).filter(key => key.startsWith('nineflow-practice-results')).sort().map(key => [key, localStorage.getItem(key)])));
+      const before = await resultStorage();
+      await opener.click();
+      const dialog = page.getByRole('dialog', { name: kind === '준비센터' ? '응시 준비센터' : '의견 보내기', exact: true });
+      const guide = dialog.locator('.support-guide');
+      const summary = guide.locator('summary');
+      await expect(guide).not.toHaveAttribute('open');
+      await expect(guide.locator('dl')).toBeHidden();
+      if (kind === '의견창') {
+        await expect(dialog.locator('#feedback-public-notice')).toBeFocused();
+        await expect(dialog.locator('#feedback-public-notice')).toContainText('건강·진단 정보·초대장·계정 정보');
+        await page.keyboard.press('Tab');
+        await expect(dialog.getByRole('button', { name: '의견 보내기 닫기', exact: true })).toBeFocused();
+      } else {
+        await dialog.getByRole('button', { name: '움직임 줄이기', exact: true }).focus();
+      }
+      await page.keyboard.press('Tab');
+      await expect(summary).toBeFocused();
+      await page.keyboard.press('Enter');
+      const opened = await guide.evaluate(element => ({
+        open: (element as HTMLDetailsElement).open,
+        labels: Array.from(element.querySelectorAll('dt'), item => item.textContent),
+        fonts: Array.from(element.querySelectorAll('summary, dt, dd, p'), item => getComputedStyle(item).fontSize),
+        targetHeight: element.querySelector('summary')!.getBoundingClientRect().height,
+        fits: element.scrollWidth <= element.clientWidth,
+      }));
+      console.log('SUPPORT_GUIDE_OPEN', JSON.stringify({ nested, kind, ...opened, savedUnchanged: JSON.stringify(await resultStorage()) === JSON.stringify(before) }));
+      await testInfo.attach('support-guide-open', { body: JSON.stringify(opened), contentType: 'application/json' });
+      await page.screenshot({ path: testInfo.outputPath('support-guide-open.png') });
+      expect(opened.open).toBe(true);
+      expect(opened.labels).toEqual(['HeoBrain 오류·기능 의견', '실제 응시 기한·결과', '편의지원·대체 절차']);
+      expect(opened.fonts.every(font => parseFloat(font) >= (nested ? 14 : 13))).toBe(true);
+      expect(opened.targetHeight).toBeGreaterThanOrEqual(44);
+      expect(opened.fits).toBe(true);
+      for (const text of ['초대 메일이나 회사 채용 안내', '응시 전에 초대장이나 응시 기관', '실제 평가에 적용되지 않습니다', '조회하거나 변경하지 않습니다']) await expect(guide).toContainText(text);
+      await expect(guide.locator('dl')).toBeVisible();
+      await page.keyboard.press('Tab');
+      const nextFocus = await dialog.evaluate(element => {
+        const active = document.activeElement;
+        return { tag: active?.tagName, label: active?.closest('label')?.querySelector('span')?.textContent ?? active?.textContent, inside: Boolean(active && element.contains(active)) };
+      });
+      console.log('SUPPORT_GUIDE_NEXT_FOCUS', JSON.stringify({ nested, kind, ...nextFocus }));
+      await testInfo.attach('support-guide-next-focus', { body: JSON.stringify(nextFocus), contentType: 'application/json' });
+      await expect(kind === '의견창' ? dialog.getByRole('combobox', { name: '의견 유형', exact: true }) : dialog.getByRole('button', { name: '설정 저장하고 닫기', exact: true })).toBeFocused();
+      await page.keyboard.press('Shift+Tab');
+      await expect(summary).toBeFocused();
+      await page.keyboard.press('Space');
+      await expect(guide).not.toHaveAttribute('open');
+      await expect(guide.locator('dl')).toBeHidden();
+      await page.setViewportSize({ width: 844, height: 360 });
+      await summary.click();
+      const landscape = await guide.evaluate(element => ({ open: (element as HTMLDetailsElement).open, fits: element.scrollWidth <= element.clientWidth, targetHeight: element.querySelector('summary')!.getBoundingClientRect().height }));
+      console.log('SUPPORT_GUIDE_LANDSCAPE', JSON.stringify({ nested, kind, ...landscape, savedUnchanged: JSON.stringify(await resultStorage()) === JSON.stringify(before) }));
+      await page.screenshot({ path: testInfo.outputPath('support-guide-landscape.png') });
+      expect(landscape.open).toBe(true);
+      expect(landscape.fits).toBe(true);
+      expect(landscape.targetHeight).toBeGreaterThanOrEqual(44);
+      expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+      expect(await resultStorage()).toEqual(before);
+      await page.keyboard.press('Escape');
+      await expect(dialog).toHaveCount(0);
+      await expect(opener).toBeFocused();
+      if (nested) {
+        await expect(stage).toHaveAttribute('role', 'dialog');
+        await expect(stage.locator('.stage-content')).not.toHaveAttribute('inert', '');
+        await page.keyboard.press('Escape');
+        await expect(stage).toHaveCount(0);
+        await expect(homeGameOpener).toBeFocused();
+      }
+      expect(githubRequests).toEqual([]);
+      expect(popups).toEqual([]);
+      expect(errors).toEqual([]);
+    });
+  }
+}
+
 test('게임 내부 준비센터 포인터 종료는 실제 버튼에 초점을 복귀한다', async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
