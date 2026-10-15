@@ -1127,6 +1127,16 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
 
   const selectedAppointmentRounds = APPOINTMENT_ROUNDS.filter((round) => appointmentPreferences.selectedRounds.includes(round.kind));
   const appointmentPracticeSummary = `선택: ${selectedAppointmentRounds.map((round) => round.kind === 'bus' ? round.label : round.shortLabel).join(' · ')} · 총 ${selectedAppointmentRounds.length * practiceConfig.quantity}문항`;
+  const fixedConfig = simulationConfig(gameId);
+  const quantitySummary = (config: PracticeConfig, mode: SessionMode) => gameId === 'nback'
+    ? `채점 ${config.quantity}문항 · 준비 별도`
+    : `${config.quantity}${progressUnitForGame(gameId, mode)}`;
+  const practiceTimingSummary = guidedPacing ? '응답 제한 없음'
+    : gameId === 'nback' && nbackPreferences.progression === 'fast' ? '응답 후 빠른 전환'
+      : `${gameId === 'nback' ? '고정 간격' : practiceSpecs[gameId].paceLabel} ${formatPace(practiceConfig.paceMs)}`;
+  const practiceStartSummary = gameId === 'appointment' ? practiceTimingSummary
+    : `${quantitySummary(practiceConfig, 'practice')} · ${practiceTimingSummary}`;
+  const simulationStartSummary = `${gameId === 'appointment' ? `${APPOINTMENT_ROUNDS.length}라운드 · ` : ''}${quantitySummary(fixedConfig, 'simulation')} · ${gameId === 'rotation' ? '단계당' : gameId === 'nback' ? '도형 간격' : practiceSpecs[gameId].paceLabel} ${formatPace(fixedConfig.paceMs)}`;
 
   function focusPracticeSettings() {
     const selector = sessionMode === 'simulation'
@@ -1198,8 +1208,8 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
             <div className="intro-actions">
               <a href={`https://www.jobda.im/info/${officialInfo[gameId]}`} target="_blank" rel="noreferrer"><span>공식 공개 해설</span><small>2023 레거시 ↗</small></a>
               <div className="intro-start-options" aria-label="시작 방식 바로 선택">
-                <button className={`stage-start stage-start-practice ${sessionMode === 'practice' ? 'is-selected' : ''}`.trim()} type="button" onPointerEnter={() => gameId === 'appointment' && appointmentPreferences.selectedRounds.includes('food') && preloadAppointmentFoodAtlas()} onFocus={() => gameId === 'appointment' && appointmentPreferences.selectedRounds.includes('food') && preloadAppointmentFoodAtlas()} onClick={() => startSession('practice')}><span>설명·연습 시작</span><small>{gameId === 'appointment' ? appointmentPracticeSummary : sessionMode === 'practice' ? '선택한 내 설정으로 시작' : '맞춤 연습으로 바로 전환'}</small></button>
-                <button className={`stage-start stage-start-simulation ${sessionMode === 'simulation' ? 'is-selected' : ''}`.trim()} type="button" onPointerEnter={() => gameId === 'appointment' && preloadAppointmentFoodAtlas()} onFocus={() => gameId === 'appointment' && preloadAppointmentFoodAtlas()} onClick={() => startSession('simulation')}><span>실전형 연습 시작</span><small>{ruleCheckComplete ? '규칙 확인 완료 · 고정 프리셋' : sessionMode === 'simulation' ? '무점수 예제는 선택 사항입니다' : '실전형으로 바로 전환'}</small></button>
+                <button className={`stage-start stage-start-practice ${sessionMode === 'practice' ? 'is-selected' : ''}`.trim()} type="button" onPointerEnter={() => gameId === 'appointment' && appointmentPreferences.selectedRounds.includes('food') && preloadAppointmentFoodAtlas()} onFocus={() => gameId === 'appointment' && appointmentPreferences.selectedRounds.includes('food') && preloadAppointmentFoodAtlas()} onClick={() => startSession('practice')}><span>설명·연습 시작</span><small>{practiceStartSummary}<br />{gameId === 'appointment' ? appointmentPracticeSummary : sessionMode === 'practice' ? '선택한 내 설정으로 시작' : '맞춤 연습으로 바로 전환'}</small></button>
+                <button className={`stage-start stage-start-simulation ${sessionMode === 'simulation' ? 'is-selected' : ''}`.trim()} type="button" onPointerEnter={() => gameId === 'appointment' && preloadAppointmentFoodAtlas()} onFocus={() => gameId === 'appointment' && preloadAppointmentFoodAtlas()} onClick={() => startSession('simulation')}><span>실전형 연습 시작</span><small>{simulationStartSummary}<br />{ruleCheckComplete ? '규칙 확인 완료 · 고정 프리셋' : sessionMode === 'simulation' ? '무점수 예제는 선택 사항입니다' : '실전형으로 바로 전환'}</small></button>
               </div>
             </div>
           </>

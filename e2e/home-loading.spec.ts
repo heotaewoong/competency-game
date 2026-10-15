@@ -971,3 +971,150 @@ test('실제 가위바위보 두 번 완주 기록의 점수 변화·활동·필
   }
   expect(errors).toEqual([]);
 });
+
+test('9게임 시작 버튼은 현재 패널과 무관하게 각 모드의 실제 분량·시간을 알린다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  const expected: Record<GameId, [string, string]> = {
+    rotation: ['10문제 · 문제 제한 30초', '2단계 · 단계당 180초'],
+    rps: ['15문항 · 문제 제한 4.5초', '30문항 · 문제 제한 4.5초'],
+    appointment: ['한 사람 제시 3초', '4라운드 · 40문항 · 한 사람 제시 1초'],
+    path: ['3문제 · 문제 제한 60초', '4문제 · 문제 제한 60초'],
+    potion: ['42시행 · 응답 제한 7초', '100시행 · 응답 제한 3초'],
+    nback: ['채점 20문항 · 준비 별도 · 고정 간격 3초', '채점 47문항 · 준비 별도 · 도형 간격 3초'],
+    number: ['10문제 · 문제 제한 20초', '12문제 · 문제 제한 20초'],
+    count: ['15문항 · 단어 제시 1초', '46문항 · 단어 제시 1초'],
+    mouse: ['5라운드 · 생쥐 제시 1초', '20라운드 · 생쥐 제시 1초'],
+  };
+  const saved = () => page.evaluate(() => {
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    return { generation, raw: generation ? localStorage.getItem(`nineflow-practice-results-v4:${generation}`) : null };
+  });
+  const before = await saved();
+  for (const game of games) {
+    await page.getByRole('button', { name: new RegExp(`${game.title}, 난이도`) }).click();
+    const stage = page.locator(`section[data-game="${game.id}"]`);
+    const practice = stage.getByRole('button', { name: /^설명·연습 시작/ });
+    const simulation = stage.getByRole('button', { name: /^실전형 연습 시작/ });
+    for (const mode of ['practice', 'simulation'] as const) {
+      if (mode === 'simulation') await stage.getByRole('radiogroup', { name: '진행 방식', exact: true }).getByRole('radio', { name: /^실전형 연습/ }).press('Space');
+      const snapshot = await stage.locator('.intro-start-options').evaluate(element => Array.from(element.querySelectorAll('button'), button => {
+        const box = button.getBoundingClientRect();
+        return { title: button.querySelector(':scope > span')?.textContent, text: button.querySelector(':scope > small')?.innerHTML, smallCount: button.querySelectorAll(':scope > small').length, selected: button.classList.contains('is-selected'), x: box.x, y: box.y, right: box.right, bottom: box.bottom, width: button.clientWidth, scrollWidth: button.scrollWidth };
+      }));
+      console.log('START_SETTING_SUMMARY', JSON.stringify({ game: game.id, mode, snapshot }));
+      await testInfo.attach(`start-summary-${game.id}-${mode}.json`, { body: JSON.stringify({ game: game.id, mode, snapshot }, null, 2), contentType: 'application/json' });
+      await expect(practice.locator(':scope > small')).toContainText(expected[game.id][0]);
+      await expect(simulation.locator(':scope > small')).toContainText(expected[game.id][1]);
+      if (game.id === 'appointment') await expect(practice).toContainText('선택: 요일 · 위치 · 메뉴 · 미탑승 버스 · 총 12문항');
+      expect(snapshot.map(item => item.title)).toEqual(['설명·연습 시작', '실전형 연습 시작']);
+      expect(snapshot.map(item => item.selected)).toEqual([mode === 'practice', mode === 'simulation']);
+      for (const button of snapshot) {
+        expect(button.smallCount).toBe(1);
+        expect(button.x).toBeGreaterThanOrEqual(0);
+        expect(button.y).toBeGreaterThanOrEqual(0);
+        expect(button.right).toBeLessThanOrEqual(320);
+        expect(button.bottom).toBeLessThanOrEqual(568);
+        expect(button.scrollWidth).toBeLessThanOrEqual(button.width + 1);
+      }
+      expect(await saved()).toEqual(before);
+    }
+    await stage.screenshot({ path: testInfo.outputPath(`start-summary-${game.id}.png`) });
+    await stage.getByRole('button', { name: '실전형 연습 닫기', exact: true }).click();
+  }
+  expect(errors).toEqual([]);
+});
+
+for (const target of ['practice', 'simulation'] as const) {
+  test(`시작 요약 ${target}: 숨겨진 맞춤 설정을 보존하고 누른 버튼의 모드로 진입한다`, async ({ page }, testInfo) => {
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+    await page.goto('/');
+    await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+    const open = () => page.getByRole('button', { name: /숫자 누르기, 난이도 하, 설정 열기/ }).click();
+    await open();
+    const stage = page.locator('section[data-game="number"]');
+    await stage.getByRole('button', { name: '문제 수 늘리기', exact: true }).press('Enter');
+    await stage.getByRole('button', { name: '문제 제한 늘리기', exact: true }).press('Enter');
+    await stage.getByRole('checkbox', { name: /시간 제한 없이 연습/ }).press('Space');
+    await expect(stage.getByRole('button', { name: /^설명·연습 시작/ })).toContainText('15문제 · 응답 제한 없음');
+    await page.reload();
+    await open();
+    await expect(stage.getByRole('checkbox', { name: /시간 제한 없이 연습/ })).toBeChecked();
+    await expect(stage.getByLabel('문제 수 현재 값', { exact: true })).toHaveText('15');
+    await expect(stage.getByLabel('문제 제한 현재 값', { exact: true })).toHaveText('25초');
+    const readSaved = () => page.evaluate(() => {
+      const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+      return { generation, raw: generation ? localStorage.getItem(`nineflow-practice-results-v4:${generation}`) : null };
+    });
+    const before = await readSaved();
+    const modes = stage.getByRole('radiogroup', { name: '진행 방식', exact: true });
+    if (target === 'practice') await modes.getByRole('radio', { name: /^실전형 연습/ }).press('Space');
+    await expect(stage.getByRole('button', { name: /^설명·연습 시작/ })).toContainText('15문제 · 응답 제한 없음');
+    await expect(stage.getByRole('button', { name: /^실전형 연습 시작/ })).toContainText('12문제 · 문제 제한 20초');
+    await stage.screenshot({ path: testInfo.outputPath(`start-summary-cross-${target}.png`) });
+    await stage.getByRole('button', { name: target === 'practice' ? /^설명·연습 시작/ : /^실전형 연습 시작/ }).press('Enter');
+    const workspace = page.locator('.game-workspace.game-number');
+    await expect(workspace.locator('.number-board-pro')).toBeVisible();
+    const snapshot = await workspace.evaluate(element => ({ mode: element.getAttribute('data-mode'), progress: element.querySelector('.workspace-progress span')?.textContent, guided: element.querySelector('.guided-pacing-note')?.textContent ?? null, deadline: element.querySelector('.time-strip')?.getAttribute('aria-valuemax') ?? null, selected: element.querySelectorAll('.number-board-pro button:disabled').length }));
+    console.log('START_SETTING_CROSS_MODE', JSON.stringify({ target, ...snapshot }));
+    await testInfo.attach(`start-summary-cross-${target}.json`, { body: JSON.stringify({ target, ...snapshot }, null, 2), contentType: 'application/json' });
+    expect(snapshot.mode).toBe(target);
+    expect(snapshot.progress).toBe(`1라운드 · 점등 숫자 · 1 / ${target === 'practice' ? 7 : 6} 문제`);
+    expect(snapshot.selected).toBe(0);
+    if (target === 'practice') {
+      expect(snapshot.guided).toContain('시간 제한 없이 연습 중');
+      expect(snapshot.deadline).toBeNull();
+      await expect(workspace.locator('.time-strip')).toHaveCount(0);
+    } else {
+      expect(snapshot.guided).toBeNull();
+      expect(snapshot.deadline).toBe('20000');
+      await expect(workspace.locator('.time-strip')).toBeVisible();
+    }
+    await workspace.getByRole('button', { name: target === 'practice' ? '연습 닫기' : '실전형 연습 닫기', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: '연습창 닫기', exact: true }).click();
+    await expect(stage).toHaveCount(0);
+    await expect(page.locator('.record-summary')).toHaveCount(0);
+    expect(await readSaved()).toEqual(before);
+    expect(errors).toEqual([]);
+  });
+}
+
+test('시작 요약은 N-back 빠른 전환보다 무시간제를 우선하고 약속의 선택 분량을 갱신한다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  await page.goto('/');
+  await page.getByRole('button', { name: /도형 순서 기억하기, 난이도 상, 설정 열기/ }).click();
+  const nback = page.locator('section[data-game="nback"]');
+  const practice = nback.getByRole('button', { name: /^설명·연습 시작/ });
+  await nback.locator('.practice-advanced-settings > summary').press('Enter');
+  await nback.getByRole('radio', { name: /^응답 빠른 전환/ }).press('Space');
+  await expect(practice).toContainText('채점 20문항 · 준비 별도 · 응답 후 빠른 전환');
+  await nback.getByRole('checkbox', { name: /시간 제한 없이 연습/ }).press('Space');
+  await expect(practice).toContainText('채점 20문항 · 준비 별도 · 응답 제한 없음');
+  await expect(practice).not.toContainText('응답 후 빠른 전환');
+  await nback.getByRole('radiogroup', { name: '진행 방식', exact: true }).getByRole('radio', { name: /^실전형 연습/ }).press('Space');
+  await expect(practice).toContainText('응답 제한 없음');
+  await expect(nback.getByRole('button', { name: /^실전형 연습 시작/ })).toContainText('채점 47문항 · 준비 별도 · 도형 간격 3초');
+  await nback.screenshot({ path: testInfo.outputPath('start-summary-nback-guided.png') });
+  await nback.getByRole('radiogroup', { name: '진행 방식', exact: true }).getByRole('radio', { name: /^연습 모드/ }).press('Space');
+  await nback.getByRole('checkbox', { name: /시간 제한 없이 연습/ }).press('Space');
+  await expect(practice).toContainText('응답 후 빠른 전환');
+  await nback.getByRole('button', { name: '연습 닫기', exact: true }).click();
+  await page.getByRole('button', { name: /약속 정하기, 난이도 상, 설정 열기/ }).click();
+  const appointment = page.locator('section[data-game="appointment"]');
+  await appointment.getByRole('button', { name: '4라운드 미탑승 버스만 연습', exact: true }).press('Enter');
+  await appointment.getByRole('button', { name: '라운드당 문항 늘리기', exact: true }).press('Enter');
+  await expect(appointment.getByRole('button', { name: /^설명·연습 시작/ })).toContainText('선택: 미탑승 버스 · 총 4문항');
+  await appointment.getByRole('checkbox', { name: '요일 연습 포함', exact: true }).press('Space');
+  await expect(appointment.getByRole('button', { name: /^설명·연습 시작/ })).toContainText('선택: 요일 · 미탑승 버스 · 총 8문항');
+  await expect(appointment.getByRole('button', { name: /^실전형 연습 시작/ })).toContainText('4라운드 · 40문항 · 한 사람 제시 1초');
+  await appointment.screenshot({ path: testInfo.outputPath('start-summary-appointment-selection.png') });
+  expect(errors).toEqual([]);
+});
