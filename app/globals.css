@@ -516,7 +516,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 .glyph-card input:focus { outline: 3px solid #2c817b; outline-offset: 2px; }
 .glyph-legend-note { margin: 12px 0 0; color: #647474; font-size: 10px; line-height: 1.55; }
 .stage-panel[data-game="nback"] .intro-actions { margin-top: 18px; }
-.stage-panel[data-game="nback"] .intro-actions .stage-start { min-width: 210px; min-height: 50px; border-radius: 12px; background: var(--nback-accent); font-size: 14px; }
+.stage-panel[data-game="nback"] .intro-actions .stage-start { min-width: 210px; min-height: 50px; border-radius: 12px; font-size: 14px; }
 
 /* N-back setup controls */
 .stage-panel[data-game="nback"] .nback-practice-options { margin-top: 12px; padding: 18px; border-color: #c9dfdc; border-radius: 18px; background: linear-gradient(145deg, #f8fcfb, #f2f8f7); }
@@ -2675,7 +2675,7 @@ body {
   text-align: left;
 }
 .intro-start-options .stage-start > span { margin: 0; font-size: 12px; font-weight: 900; }
-.intro-start-options .stage-start > small { font-size: 9px; font-weight: 700; opacity: .76; }
+.intro-start-options .stage-start > small { color: inherit; font-size: 9px; font-weight: 700; opacity: 1; }
 .intro-start-options .stage-start { border: 1px solid #bfc7d4; color: #354259; background: #fff; box-shadow: none; }
 .intro-start-options .stage-start:hover { border-color: #8794aa; background: #f7f8fa; }
 .intro-start-options .stage-start.is-selected { border-color: var(--brand); color: #fff; background: var(--brand); box-shadow: 0 8px 18px rgba(79, 91, 213, .18); }

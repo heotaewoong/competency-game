@@ -1145,6 +1145,9 @@ for (const contrast of ['standard', 'high'] as const) {
       const before = await readSaved();
       const observe = async (stage: Locator, gameId: GameId, mode: 'practice' | 'simulation', interaction: string) => {
           const buttons = stage.locator('.intro-start-options button');
+          await expect(buttons).toHaveCount(2);
+          await expect(buttons.first()).toBeVisible();
+          await expect(buttons.nth(1)).toBeVisible();
           const snapshot = await buttons.evaluateAll(elements => elements.map(element => {
             const button = element as HTMLButtonElement;
             const computed = getComputedStyle(button);
@@ -1178,9 +1181,14 @@ for (const contrast of ['standard', 'high'] as const) {
       for (const game of games) {
         await page.getByRole('button', { name: new RegExp(`${game.title}, 난이도`) }).click();
         const stage = page.locator(`section[data-game="${game.id}"]`);
+        await expect(stage.getByRole('button', { name: '게임 바꾸기', exact: true })).toBeFocused();
         const buttons = stage.locator('.intro-start-options button');
         for (const mode of ['practice', 'simulation'] as const) {
-          if (mode === 'simulation') await stage.getByRole('radiogroup', { name: '진행 방식', exact: true }).getByRole('radio', { name: /^실전형 연습/ }).press('Space');
+          if (mode === 'simulation') {
+            const simulation = stage.getByRole('radiogroup', { name: '진행 방식', exact: true }).getByRole('radio', { name: /^실전형 연습/ });
+            await simulation.press('Space');
+            await expect(simulation).toHaveAttribute('aria-checked', 'true');
+          }
           await page.mouse.move(1, 1);
           observations.push(await observe(stage, game.id, mode, 'normal'));
           if (game.id === 'nback') {
