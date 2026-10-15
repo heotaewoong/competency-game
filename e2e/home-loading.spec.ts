@@ -50,10 +50,10 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
     const detail = review.locator('.review-attempt-detail');
     const observe = async (label: string) => {
       const view = await review.evaluate(element => {
-        const select = element.querySelector<HTMLSelectElement>('.review-attempt-filter select')!;
+        const select = element.querySelector<HTMLElement>('.review-attempt-filter select')!;
         const detail = element.querySelector<HTMLElement>('.review-attempt-detail')!;
         return {
-          value: select.value, options: Array.from(select.options, item => item.value), focused: document.activeElement === select,
+          value: select.querySelector('option:checked')?.getAttribute('value') ?? null, options: Array.from(select.querySelectorAll('option'), item => item.getAttribute('value')), focused: document.activeElement === select,
           ids: Array.from(element.querySelectorAll('[role="listbox"] [role="option"]'), item => item.getAttribute('data-review-attempt-id')),
           selected: element.querySelector('[role="listbox"] [aria-selected="true"]')?.getAttribute('data-review-attempt-id') ?? null,
           status: element.querySelector('.review-attempt-filter [role="status"]')?.textContent,
@@ -66,6 +66,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
       console.log('REVIEW_TYPE_FILTER', JSON.stringify({ label, viewport, ...view }));
       await testInfo.attach(`review-type-${label}.json`, { body: JSON.stringify({ label, viewport, ...view }, null, 2), contentType: 'application/json' });
       await page.screenshot({ path: testInfo.outputPath(`review-type-${label}.png`) });
+      expect(await filter.inputValue()).toBe(view.value);
       expect(await readSaved()).toEqual(saved);
       expect(view.height).toBeGreaterThanOrEqual(44);
       expect(view.font).toBeGreaterThanOrEqual(16);
