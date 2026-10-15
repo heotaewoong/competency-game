@@ -267,11 +267,11 @@ test('정상 백업의 예약된 오류 코드도 복습 안내·숫자 집계·
   expect(errors).toEqual([]);
 });
 
-test('정상 백업의 따옴표 문항 ID도 복습 선택·상세·키보드 초점과 저장값을 보존한다', async ({ page }, testInfo) => {
+test('정상 백업의 특수문자 문항 ID도 복습 선택·상세·키보드 초점과 저장값을 보존한다', async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
-  const ids = ['plain-control', 'a"b'];
+  const ids = ['plain-control', 'a"b', 'a\\b', 'a\nb', 'a\u0000b'];
   const attempts: GenericReviewAttempt[] = ids.map((id, index) => ({ kind: 'generic', id, index, status: 'error', errorCodes: ['rps-loss'], title: `문항 ${index + 1}`, prompt: `보관 문제 ${index + 1}`, expected: '기대 응답', selected: '저장된 응답', explanation: '정상 백업의 문항 식별자를 그대로 보존합니다.' }));
   const base = reviewFilterFixtures()[0];
   const results: SessionResult[] = [{ ...base, id: 'quoted-attempt-ids', completedAt: '2026-10-15T02:00:00.000Z', accuracy: 0, errors: ids.length, detail: { ...base.detail, quantity: ids.length }, review: { version: REVIEW_SCHEMA_VERSION, gameId: 'rps', attempts, summary: { attemptedCount: ids.length, correctCount: 0, neutralCount: 0, reviewPointCount: ids.length, errorCounts: { 'rps-loss': ids.length }, omittedDetailCount: 0, coverage: 'full' } } }];

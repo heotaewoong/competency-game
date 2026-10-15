@@ -44,6 +44,12 @@ function centerItemInScroller(
   });
 }
 
+function findAttemptElement(list: HTMLElement | null, id: string) {
+  // 백업에서 허용되는 ID를 CSS 문법으로 해석하지 않는다.
+  return Array.from(list?.querySelectorAll<HTMLElement>('[data-review-attempt-id]') ?? [])
+    .find((item) => item.getAttribute('data-review-attempt-id') === id) ?? null;
+}
+
 function formatDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '날짜 정보 없음';
@@ -323,7 +329,7 @@ export function ReviewDialog({ results, onClose, onPracticeGame, initialSessionI
   useEffect(() => {
     if (!selectedAttempt?.id) return;
     const attempts = attemptListRef.current;
-    const current = attempts?.querySelector<HTMLElement>(`[data-review-attempt-id="${selectedAttempt.id}"]`) ?? null;
+    const current = findAttemptElement(attempts, selectedAttempt.id);
     centerItemInScroller(attempts, current);
   }, [selectedAttempt?.id]);
 
@@ -351,7 +357,7 @@ export function ReviewDialog({ results, onClose, onPracticeGame, initialSessionI
     const next = visibleAttempts[nextIndex];
     if (!next) return;
     setSelectedAttemptId(next.id);
-    window.requestAnimationFrame(() => attemptListRef.current?.querySelector<HTMLElement>(`[data-review-attempt-id="${next.id}"]`)?.focus());
+    window.requestAnimationFrame(() => findAttemptElement(attemptListRef.current, next.id)?.focus());
   }
 
   useEffect(() => {
