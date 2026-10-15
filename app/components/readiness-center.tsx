@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { GameId } from '../lib/game-data';
 import { essentialAssetPathsFor } from '../lib/essential-assets';
+import { SupportGuide } from './support-guide';
 import {
   DEFAULT_ACCESSIBILITY_PREFERENCES,
   assessReadiness,
@@ -291,6 +292,7 @@ export function ReadinessCenter({
           {preferenceSaveFailed && <p role="status">설정을 저장하지 못해 현재 화면에만 적용했습니다. 새로고침하면 이전 설정으로 돌아갑니다. 브라우저의 저장 공간·권한을 확인한 뒤 원하는 설정을 다시 눌러 주세요.</p>}
           <p>접근성 설정은 이 연습 도구의 표시 방식만 바꿉니다. 실제 평가의 편의지원이나 대체 절차는 응시 기관에 별도로 확인하세요.</p>
         </section>
+        <SupportGuide />
       </div>
 
       <footer><span>{assetStatus === 'checking' || !checkedAt ? '자동 점검을 마치는 중입니다.' : `${readinessLabels[displayedOverall]} · ${formatCheckedAt(checkedAt)}`}</span><button type="button" onClick={onClose}>{preferenceSaveFailed ? '현재 설정으로 닫기' : '설정 저장하고 닫기'}</button></footer>
