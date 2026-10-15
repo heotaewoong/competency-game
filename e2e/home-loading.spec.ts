@@ -1,7 +1,8 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { games, type GameId, type SessionResult } from '../app/lib/game-data';
 import { createPracticeResultsBackup, PRACTICE_RESULTS_BACKUP_FORMAT, PRACTICE_RESULTS_BACKUP_VERSION } from '../app/lib/practice-backup';
 import { compactReviewPayload, REVIEW_SCHEMA_VERSION, type GenericReviewAttempt } from '../app/lib/review-data';
+import { contrastRatio } from './color-contrast';
 
 function reviewFilterFixtures(): SessionResult[] {
   const attempt = (id: string, index: number, errorCodes: string[]): GenericReviewAttempt => ({
@@ -1120,3 +1121,124 @@ test('시작 요약은 N-back 빠른 전환보다 무시간제를 우선하고 �
   await appointment.screenshot({ path: testInfo.outputPath('start-summary-appointment-selection.png') });
   expect(errors).toEqual([]);
 });
+
+for (const contrast of ['standard', 'high'] as const) {
+  for (const textScale of ['standard', 'large'] as const) {
+    test(`시작 버튼 대비 ${contrast}/${textScale}: 9게임의 선택 상태와 N-back hover·키보드 초점을 보존한다`, async ({ page }, testInfo) => {
+      const errors: string[] = [];
+      page.on('pageerror', error => errors.push(error.message));
+      page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+      expect(contrastRatio('rgb(0, 0, 0)', 'rgb(255, 255, 255)')).toBe(21);
+      expect(contrastRatio('rgb(53, 66, 89)', 'rgb(53, 66, 89)')).toBe(1);
+      await page.setViewportSize({ width: 320, height: 568 });
+      await page.goto('/');
+      await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+      await page.locator('.readiness-banner button').click();
+      const readiness = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+      await readiness.getByRole('button', { name: contrast === 'high' ? '고대비' : '기본 명암', exact: true }).press('Enter');
+      await readiness.getByRole('button', { name: textScale === 'large' ? '큰 글자' : '기본 크기', exact: true }).press('Enter');
+      await page.keyboard.press('Escape');
+      await expect(readiness).toHaveCount(0);
+      await expect(page.locator('html')).toHaveAttribute('data-contrast', contrast);
+      await expect(page.locator('html')).toHaveAttribute('data-text-scale', textScale);
+      const readSaved = () => page.evaluate(() => Object.fromEntries(Object.keys(localStorage).filter(key => key.startsWith('nineflow-practice-results')).sort().map(key => [key, localStorage.getItem(key)])));
+      const before = await readSaved();
+      const observe = async (stage: Locator, gameId: GameId, mode: 'practice' | 'simulation', interaction: string) => {
+          const buttons = stage.locator('.intro-start-options button');
+          await expect(buttons).toHaveCount(2);
+          await expect(buttons.first()).toBeVisible();
+          await expect(buttons.nth(1)).toBeVisible();
+          const snapshot = await buttons.evaluateAll(elements => elements.map(element => {
+            const button = element as HTMLButtonElement;
+            const computed = getComputedStyle(button);
+            const color = (value: string) => {
+              if (!/^rgba?\(/.test(value)) throw new Error(`지원하지 않는 실제 색상: ${value}`);
+              const parts = value.match(/[\d.]+/g)!.map(Number);
+              if ((parts.length !== 3 && parts.length !== 4) || parts.some(part => !Number.isFinite(part))) throw new Error(`실제 색상 채널 오류: ${value}`);
+              return { channels: parts.slice(0, 3), alpha: parts[3] ?? 1 };
+            };
+            const background = color(computed.backgroundColor);
+            if (background.alpha !== 1 || computed.backgroundImage !== 'none') throw new Error('시작 버튼 배경이 불투명 단색이 아닙니다.');
+            const texts = Array.from(button.querySelectorAll(':scope > span, :scope > small'), node => {
+              const style = getComputedStyle(node);
+              const foreground = color(style.color);
+              const opacity = Number(style.opacity);
+              const alpha = foreground.alpha * opacity;
+              const effective = foreground.channels.map((channel, index) => channel * alpha + background.channels[index] * (1 - alpha));
+              return { tag: node.tagName, text: node.textContent, color: style.color, opacity, ownBackground: style.backgroundColor, effectiveColor: `rgb(${effective.join(', ')})`, fontSize: Number.parseFloat(style.fontSize) };
+            });
+            const box = button.getBoundingClientRect();
+            return { title: button.querySelector(':scope > span')?.textContent, selected: button.classList.contains('is-selected'), disabled: button.disabled, background: computed.backgroundColor, opacity: Number(computed.opacity), focused: document.activeElement === button, focusVisible: button.matches(':focus-visible'), hovered: button.matches(':hover'), outlineStyle: computed.outlineStyle, outlineWidth: Number.parseFloat(computed.outlineWidth), box: { x: box.x, y: box.y, right: box.right, bottom: box.bottom, height: box.height }, texts };
+          }));
+          const sample = { game: gameId, mode, interaction, contrast, textScale, snapshot: snapshot.map(button => ({ ...button, texts: button.texts.map(text => ({ ...text, ratio: contrastRatio(text.effectiveColor, button.background) })) })) };
+          console.log('START_BUTTON_CONTRAST', JSON.stringify(sample));
+          await testInfo.attach(`start-contrast-${gameId}-${mode}-${interaction}.json`, { body: JSON.stringify(sample, null, 2), contentType: 'application/json' });
+          if (gameId === 'nback') await stage.screenshot({ path: testInfo.outputPath(`start-contrast-${mode}-${interaction}.png`) });
+          expect(await readSaved()).toEqual(before);
+          return sample;
+      };
+      const observations: Array<Awaited<ReturnType<typeof observe>>> = [];
+      for (const game of games) {
+        await page.getByRole('button', { name: new RegExp(`${game.title}, 난이도`) }).click();
+        const stage = page.locator(`section[data-game="${game.id}"]`);
+        await expect(stage.getByRole('button', { name: '게임 바꾸기', exact: true })).toBeFocused();
+        const buttons = stage.locator('.intro-start-options button');
+        for (const mode of ['practice', 'simulation'] as const) {
+          if (mode === 'simulation') {
+            const simulation = stage.getByRole('radiogroup', { name: '진행 방식', exact: true }).getByRole('radio', { name: /^실전형 연습/ });
+            await simulation.press('Space');
+            await expect(simulation).toHaveAttribute('aria-checked', 'true');
+          }
+          await page.mouse.move(1, 1);
+          observations.push(await observe(stage, game.id, mode, 'normal'));
+          if (game.id === 'nback') {
+            for (const [index, label] of ['practice', 'simulation'].entries()) {
+              await buttons.nth(index).hover();
+              observations.push(await observe(stage, game.id, mode, `hover-${label}`));
+              await page.mouse.move(1, 1);
+            }
+            const first = buttons.first();
+            const second = buttons.nth(1);
+            await first.focus();
+            await page.keyboard.press('Tab');
+            await expect(second).toBeFocused();
+            observations.push(await observe(stage, game.id, mode, 'keyboard-simulation'));
+            await page.keyboard.press('Shift+Tab');
+            await expect(first).toBeFocused();
+            observations.push(await observe(stage, game.id, mode, 'keyboard-practice'));
+          }
+        }
+        await stage.getByRole('button', { name: '실전형 연습 닫기', exact: true }).click();
+      }
+      // Capture every actual state before a contrast assertion can stop the test.
+      expect(observations).toHaveLength(26);
+      for (const sample of observations) {
+        expect(sample.snapshot.map(button => button.selected)).toEqual([sample.mode === 'practice', sample.mode === 'simulation']);
+        for (const [index, button] of sample.snapshot.entries()) {
+          expect(button.disabled).toBe(false);
+          expect(button.opacity).toBe(1);
+          expect(button.box.x).toBeGreaterThanOrEqual(0);
+          expect(button.box.y).toBeGreaterThanOrEqual(0);
+          expect(button.box.right).toBeLessThanOrEqual(320);
+          expect(button.box.bottom).toBeLessThanOrEqual(568);
+          expect(button.box.height).toBeGreaterThanOrEqual(44);
+          expect(button.texts).toHaveLength(2);
+          for (const text of button.texts) {
+            expect(text.ownBackground).toBe('rgba(0, 0, 0, 0)');
+            expect(text.fontSize).toBeGreaterThanOrEqual(text.tag === 'SMALL' && textScale === 'standard' ? 9 : text.tag === 'SMALL' ? 12 : 11);
+            expect(text.ratio, `${sample.game}/${sample.mode}/${sample.interaction}/${index}/${text.tag}: ${text.effectiveColor} on ${button.background}`).toBeGreaterThanOrEqual(4.5);
+          }
+          if (sample.interaction === `hover-${index ? 'simulation' : 'practice'}`) expect(button.hovered).toBe(true);
+          if (sample.interaction === `keyboard-${index ? 'simulation' : 'practice'}`) {
+            expect(button.focused).toBe(true);
+            expect(button.focusVisible).toBe(true);
+            expect(button.outlineStyle).not.toBe('none');
+            expect(button.outlineWidth).toBeGreaterThanOrEqual(3);
+          }
+        }
+      }
+      expect(await readSaved()).toEqual(before);
+      expect(errors).toEqual([]);
+    });
+  }
+}
