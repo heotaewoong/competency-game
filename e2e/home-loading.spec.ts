@@ -1,5 +1,199 @@
 import { expect, test, type Page } from '@playwright/test';
 import { games, type GameId, type SessionResult } from '../app/lib/game-data';
+import { createPracticeResultsBackup } from '../app/lib/practice-backup';
+import { compactReviewPayload, type GenericReviewAttempt } from '../app/lib/review-data';
+
+function reviewFilterFixtures(): SessionResult[] {
+  const attempt = (id: string, index: number, errorCodes: string[]): GenericReviewAttempt => ({
+    kind: 'generic', id, index, status: errorCodes.length ? 'error' : 'correct', errorCodes,
+    title: id, prompt: `${id} 보관 문제`, expected: '기대 응답', selected: '저장된 응답', explanation: '가져온 복습 기록의 필터 검증용 예제입니다.',
+  });
+  const full = compactReviewPayload('rps', [attempt('loss-1', 0, ['rps-loss']), attempt('tie-1', 1, ['rps-tie']), attempt('loss-2', 2, ['rps-loss']), attempt('correct-1', 3, [])]);
+  const sampled = compactReviewPayload('rps', [attempt('old-loss', 0, ['rps-loss']), attempt('old-correct', 4, [])]);
+  sampled.summary = { attemptedCount: 5, correctCount: 1, neutralCount: 0, reviewPointCount: 4, errorCounts: { 'rps-loss': 2, 'rps-tie': 2 }, omittedDetailCount: 3, coverage: 'sampled' };
+  const mouse = compactReviewPayload('mouse', [attempt('mouse-multiple', 0, ['mouse-miss', 'mouse-overconfidence']), attempt('mouse-correct', 1, []), { ...attempt('mouse-unscored', 2, []), status: 'neutral', scored: false }]);
+  const detail = { sessionMode: '연습 모드', quantity: 4, paceMs: 4500, practiceFocus: 'full', guidedPacing: '설정 제한시간 적용' };
+  return [
+    { id: 'filter-full', gameId: 'rps', completedAt: '2026-10-14T12:00:00.000Z', accuracy: 25, medianRt: 720, stability: 70, errors: 3, detail, review: full },
+    { id: 'filter-sampled', gameId: 'rps', completedAt: '2026-10-14T11:00:00.000Z', accuracy: 20, medianRt: 720, stability: 70, errors: 4, detail: { ...detail, quantity: 5 }, review: sampled },
+    { id: 'filter-mouse', gameId: 'mouse', completedAt: '2026-10-14T10:00:00.000Z', accuracy: 50, medianRt: 720, stability: 70, errors: 1, detail: { ...detail, quantity: 2 }, review: mouse },
+  ];
+}
+
+async function importReviewFilterRecords(page: Page, results: SessionResult[], expectedTotal: number) {
+  await page.locator('.records-data-button').click();
+  const data = page.getByRole('dialog', { name: '내 기록 백업·복원', exact: true });
+  const backup = createPracticeResultsBackup(results, new Date('2026-10-14T13:00:00.000Z'));
+  await data.locator('input[type="file"]').setInputFiles({ name: 'review-types.json', mimeType: 'application/json', buffer: Buffer.from(backup) });
+  await expect(data.locator('.data-import-preview')).toContainText(`${results.length}개 기록`);
+  await data.getByRole('button', { name: '기존 기록과 합치기', exact: true }).click();
+  await expect(data.locator('.data-dialog-notice')).toContainText(`현재 총 ${expectedTotal}개`);
+  await data.getByRole('button', { name: '닫기', exact: true }).click();
+}
+
+for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }, { width: 844, height: 360 }]) {
+  test(`복습 유형 ${viewport.width}x${viewport.height}: 가져온 상세만 분류하고 통계·저장·키보드 탐색을 보존한다`, async ({ page }, testInfo) => {
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+    await page.setViewportSize(viewport);
+    await page.goto('/');
+    await importReviewFilterRecords(page, reviewFilterFixtures(), 3);
+    const readSaved = () => page.evaluate(() => {
+      const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+      return { generation, raw: generation ? localStorage.getItem(`nineflow-practice-results-v4:${generation}`) : null };
+    });
+    const saved = await readSaved();
+    expect(JSON.parse(saved.raw!).results).toHaveLength(3);
+    const opener = page.locator('.home-review-ranking').getByRole('button', { name: /지는 관계 선택/ });
+    await opener.click();
+    const review = page.getByRole('dialog', { name: '내 실수 복습', exact: true });
+    const list = review.getByRole('listbox', { name: '저장된 시도 목록' });
+    const filter = review.getByRole('combobox', { name: '복습 유형', exact: true });
+    const session = review.getByRole('combobox', { name: '세션·비교 기준', exact: true });
+    const detail = review.locator('.review-attempt-detail');
+    const observe = async (label: string) => {
+      const view = await review.evaluate(element => {
+        const select = element.querySelector<HTMLElement>('.review-attempt-filter select')!;
+        const detail = element.querySelector<HTMLElement>('.review-attempt-detail')!;
+        return {
+          value: select.querySelector('option:checked')?.getAttribute('value') ?? null, options: Array.from(select.querySelectorAll('option'), item => item.getAttribute('value')), focused: document.activeElement === select,
+          ids: Array.from(element.querySelectorAll('[role="listbox"] [role="option"]'), item => item.getAttribute('data-review-attempt-id')),
+          selected: element.querySelector('[role="listbox"] [aria-selected="true"]')?.getAttribute('data-review-attempt-id') ?? null,
+          status: element.querySelector('.review-attempt-filter [role="status"]')?.textContent,
+          statistics: element.querySelector('.review-summary-list')?.textContent,
+          font: Number.parseFloat(getComputedStyle(select).fontSize), height: select.getBoundingClientRect().height,
+          selectWidth: select.getBoundingClientRect().width, detailWidth: detail.clientWidth, detailScrollWidth: detail.scrollWidth,
+          documentWidth: document.documentElement.clientWidth, documentScrollWidth: document.documentElement.scrollWidth,
+        };
+      });
+      console.log('REVIEW_TYPE_FILTER', JSON.stringify({ label, viewport, ...view }));
+      await testInfo.attach(`review-type-${label}.json`, { body: JSON.stringify({ label, viewport, ...view }, null, 2), contentType: 'application/json' });
+      await page.screenshot({ path: testInfo.outputPath(`review-type-${label}.png`) });
+      expect(await filter.inputValue()).toBe(view.value);
+      expect(await readSaved()).toEqual(saved);
+      expect(view.height).toBeGreaterThanOrEqual(44);
+      expect(view.font).toBeGreaterThanOrEqual(16);
+      expect(view.selectWidth).toBeLessThanOrEqual(view.detailWidth);
+      expect(view.detailScrollWidth).toBeLessThanOrEqual(view.detailWidth + 1);
+      expect(view.documentScrollWidth).toBeLessThanOrEqual(view.documentWidth + 1);
+      return view;
+    };
+    const initial = await observe('initial-loss');
+    expect(initial.value).toBe('rps-loss');
+    expect(initial.ids).toEqual(['loss-1', 'loss-2']);
+    expect(initial.status).toBe('현재 표시 2개 · 저장된 상세 4개');
+    await list.getByRole('option').first().press('ArrowDown');
+    await expect(list.getByRole('option', { selected: true })).toHaveAttribute('data-review-attempt-id', 'loss-2');
+    await expect(list.getByRole('option', { selected: true })).toBeFocused();
+    await list.getByRole('option', { selected: true }).press('Home');
+    await expect(list.getByRole('option', { selected: true })).toHaveAttribute('data-review-attempt-id', 'loss-1');
+    await expect(list.getByRole('option', { selected: true })).toBeFocused();
+    await list.getByRole('option', { selected: true }).press('End');
+    await expect(list.getByRole('option', { selected: true })).toHaveAttribute('data-review-attempt-id', 'loss-2');
+    await expect(list.getByRole('option', { selected: true })).toBeFocused();
+    await filter.focus();
+    await filter.selectOption('rps-tie');
+    const tie = await observe('tie');
+    expect(tie.ids).toEqual(['tie-1']);
+    expect(tie.focused).toBe(true);
+    expect(tie.statistics).toBe(initial.statistics);
+    await filter.selectOption('');
+    await expect(list.getByRole('option')).toHaveCount(3);
+    await filter.selectOption('rps-loss');
+    await review.getByRole('button', { name: '오류·점검만', exact: true }).click();
+    const all = await observe('all');
+    expect(all.value).toBe('');
+    expect(all.ids).toEqual(['loss-1', 'tie-1', 'loss-2', 'correct-1']);
+    await session.selectOption('filter-sampled');
+    await expect(filter).toHaveValue('');
+    await filter.selectOption('rps-tie');
+    const pruned = await observe('pruned-tie');
+    expect(pruned.ids).toEqual([]);
+    expect(pruned.status).toBe('현재 표시 0개 · 저장된 상세 2개 · 상세 3개가 정리되었습니다.');
+    await expect(list).toContainText('선택한 유형의 보관 상세가 없습니다.');
+    await expect(review.locator('.review-summary-list')).toContainText('2/5회');
+    await list.getByRole('button', { name: '전체 시도 보기', exact: true }).click();
+    await expect(filter).toHaveValue('');
+    await expect(list.getByRole('option')).toHaveCount(2);
+    await filter.selectOption('rps-loss');
+    await review.locator('[data-review-game-id="mouse"]').click();
+    const mouse = await observe('mouse-reset');
+    expect(mouse.value).toBe('');
+    expect(mouse.ids).toEqual(['mouse-multiple', 'mouse-unscored']);
+    for (const code of ['mouse-miss', 'mouse-overconfidence']) {
+      await filter.selectOption(code);
+      const multi = await observe(code);
+      expect(multi.ids).toEqual(['mouse-multiple']);
+      expect(multi.selected).toBe('mouse-multiple');
+    }
+    await review.getByRole('button', { name: '오류·점검만', exact: true }).click();
+    await expect(filter).toHaveValue('');
+    await expect(list.getByRole('option')).toHaveCount(3);
+    await detail.press('Escape');
+    await expect(review).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    expect(await readSaved()).toEqual(saved);
+    expect(errors).toEqual([]);
+  });
+}
+
+test('복습 유형은 다른 탭의 정상 가져오기로 선택 세션이 정리된 뒤에도 새 세션에서 선택할 수 있다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await importReviewFilterRecords(page, reviewFilterFixtures(), 3);
+  const readSaved = () => page.evaluate(() => {
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    return { generation, raw: generation ? localStorage.getItem(`nineflow-practice-results-v4:${generation}`) : null };
+  });
+  const initial = await readSaved();
+  await page.locator('.home-review-ranking').getByRole('button', { name: /지는 관계 선택/ }).click();
+  const review = page.getByRole('dialog', { name: '내 실수 복습', exact: true });
+  const session = review.getByRole('combobox', { name: '세션·비교 기준', exact: true });
+  const filter = review.getByRole('combobox', { name: '복습 유형', exact: true });
+  const list = review.getByRole('listbox', { name: '저장된 시도 목록' });
+  await expect(session).toHaveValue('filter-full');
+  await expect(filter).toHaveValue('rps-loss');
+  const peer = await page.context().newPage();
+  peer.on('pageerror', error => errors.push(error.message));
+  peer.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  try {
+    await peer.goto('/');
+    const prototype = reviewFilterFixtures()[0];
+    const replacements = Array.from({ length: 100 }, (_, index) => ({ ...prototype, id: `peer-filter-${index}`, completedAt: new Date(Date.UTC(2026, 9, 14, 13, 0, index)).toISOString() }));
+    await importReviewFilterRecords(peer, replacements, 100);
+    await expect(session).toHaveValue('peer-filter-99');
+    await expect(filter).toHaveValue('');
+    const afterImport = await readSaved();
+    const results = JSON.parse(afterImport.raw!).results as SessionResult[];
+    expect(results).toHaveLength(100);
+    expect(results.some(result => result.id === 'filter-full')).toBe(false);
+    expect(afterImport.generation).toBe(initial.generation);
+    await filter.selectOption('rps-tie');
+    const observed = {
+      session: await session.inputValue(), value: await filter.inputValue(),
+      ids: await list.getByRole('option').evaluateAll(items => items.map(item => item.getAttribute('data-review-attempt-id'))),
+      status: await review.locator('.review-attempt-filter [role="status"]').textContent(),
+      generation: (await readSaved()).generation, retained: results.length, removedOriginal: !results.some(result => result.id === 'filter-full'), errors,
+    };
+    console.log('REVIEW_TYPE_PEER_PRUNE', JSON.stringify(observed));
+    await testInfo.attach('review-type-peer-prune.json', { body: JSON.stringify(observed, null, 2), contentType: 'application/json' });
+    await page.screenshot({ path: testInfo.outputPath('review-type-peer-prune.png') });
+    expect(observed.session).toBe('peer-filter-99');
+    expect(observed.value).toBe('rps-tie');
+    expect(observed.ids).toEqual(['tie-1']);
+    expect(observed.status).toBe('현재 표시 1개 · 저장된 상세 4개');
+    expect(await readSaved()).toEqual(afterImport);
+    expect(errors).toEqual([]);
+    await review.getByRole('button', { name: '복습 센터 닫기', exact: true }).click();
+    await expect(review).toHaveCount(0);
+  } finally {
+    await peer.close();
+  }
+});
 
 for (const width of [390, 1280]) {
   test(`기록 찾기 ${width}px: 오래된 기록의 게임·모드 필터와 더 보기는 저장값을 바꾸지 않는다`, async ({ page }, testInfo) => {

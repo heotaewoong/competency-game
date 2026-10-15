@@ -5,13 +5,16 @@ import {
   MAX_REVIEW_BYTES,
   aggregateReviewErrors,
   compactReviewPayload,
+  getReviewAttemptFilter,
   getReviewAggregationContext,
   hasReviewData,
   replayRotationEvents,
+  reviewErrorCatalog,
   reviewPayloadBytes,
   rotationActionLabel,
   sanitizeReviewPayload,
   type GenericReviewAttempt,
+  type GameReviewPayload,
   type RotationReviewAttempt,
 } from './review-data.ts';
 import { SIMULATION_PRESET_VERSION } from './result-comparison.ts';
@@ -46,6 +49,44 @@ function generic(index: number, errorCodes: string[]): GenericReviewAttempt {
 
 const simulationDetail = { sessionMode: '실전형 연습', quantity: 40, paceMs: 1000, simulationPresetVersion: SIMULATION_PRESET_VERSION } as const;
 const nbackSimulationDetail = { ...simulationDetail, nbackTask: '2-back → 2·3-back', nbackGroupSetting: 'simulation-preset', nbackProgression: '고정' } as const;
+
+for (const gameId of Object.keys(reviewErrorCatalog) as GameReviewPayload['gameId'][]) {
+  test(`${gameId}: 복습 유형은 일치하는 보관 문항만 한 번씩 보여 주며 원본을 바꾸지 않는다`, () => {
+    const [first, second] = Object.keys(reviewErrorCatalog[gameId]);
+    const review: GameReviewPayload = { ...compactReviewPayload('rps', [generic(0, [first]), generic(1, [second]), generic(2, [first, second]), generic(3, [])]), gameId };
+    const before = JSON.stringify(review);
+    const filtered = getReviewAttemptFilter(review, true, first);
+    assert.equal(filtered.activeErrorCode, first);
+    assert.deepEqual(filtered.errorCodes, [first, second]);
+    assert.deepEqual(filtered.attempts.map((attempt) => attempt.index), [0, 2]);
+    assert.deepEqual(getReviewAttemptFilter(review, true).attempts.map((attempt) => attempt.index), [0, 1, 2]);
+    assert.equal(getReviewAttemptFilter(review, false).attempts.length, 4);
+    assert.equal(JSON.stringify(review), before);
+  });
+}
+
+test('통계에만 남은 유형은 선택할 수 있지만 보관 상세가 없음을 구분한다', () => {
+  const review = compactReviewPayload('rps', [generic(0, ['rps-loss']), generic(1, [])]);
+  review.summary = { attemptedCount: 5, correctCount: 1, neutralCount: 0, reviewPointCount: 4, errorCounts: { 'rps-loss': 2, 'rps-tie': 2, timeout: 0 }, omittedDetailCount: 3, coverage: 'sampled' };
+  const before = JSON.stringify(review);
+  const filtered = getReviewAttemptFilter(review, true, 'rps-tie');
+  assert.deepEqual(filtered.errorCodes, ['rps-loss', 'rps-tie']);
+  assert.equal(filtered.activeErrorCode, 'rps-tie');
+  assert.deepEqual(filtered.attempts, []);
+  assert.equal(JSON.stringify(review), before);
+});
+
+test('빈 유형은 전체 선택과 충돌하지 않으며 알 수 없는 코드와 점검 시도는 보존한다', () => {
+  const review = compactReviewPayload('rps', [generic(0, ['', '  ']), generic(1, [' unknown ']), { ...generic(2, []), status: 'neutral', scored: false }, generic(3, [])]);
+  const before = JSON.stringify(review);
+  assert.deepEqual(getReviewAttemptFilter(review, false).errorCodes, [' unknown ']);
+  assert.deepEqual(getReviewAttemptFilter(review, true).attempts.map((attempt) => attempt.index), [0, 1, 2]);
+  assert.deepEqual(getReviewAttemptFilter(review, false, ' unknown ').attempts.map((attempt) => attempt.index), [1]);
+  assert.equal(getReviewAttemptFilter(review, false, 'unknown').activeErrorCode, '');
+  assert.equal(getReviewAttemptFilter(review, false, 'unknown').attempts.length, 4);
+  assert.equal(JSON.stringify(review), before);
+  assert.deepEqual(getReviewAttemptFilter(undefined, true, 'timeout'), { errorCodes: [], activeErrorCode: '', attempts: [] });
+});
 
 test('구버전·손상된 복습 데이터는 조용히 무시한다', () => {
   assert.equal(sanitizeReviewPayload(undefined), undefined);
