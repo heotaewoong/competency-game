@@ -302,12 +302,13 @@ for (const nested of [false, true]) {
       await page.screenshot({ path: testInfo.outputPath(`feedback-writing-${phase}.png`) });
       return sample;
     };
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('#feedback-public-notice')).toBeFocused();
     const initial = await capture('initial');
     expect(initial.category).toBe(nested ? 'bug' : 'feature');
     expect(initial.value).toBe('');
     expect(initial.counter).toBe('0 / 1000');
     expect(initial.guide?.text ?? null).toBe(nested ? guideText : null);
-    await expect(dialog.locator('#feedback-public-notice')).toBeFocused();
     await category.selectOption('bug');
     const emptyBug = await capture('bug-empty');
     expect(emptyBug.value).toBe('');
@@ -370,6 +371,8 @@ for (const nested of [false, true]) {
     await expect(opener).toBeFocused();
     if (nested) await expect(stage.locator('.stage-content')).not.toHaveAttribute('inert', '');
     await opener.click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('#feedback-public-notice')).toBeFocused();
     const reopened = await capture('reopened');
     expect(reopened.value).toBe('');
     expect(reopened.counter).toBe('0 / 1000');
