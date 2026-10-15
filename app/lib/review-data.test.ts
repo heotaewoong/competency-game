@@ -6,6 +6,7 @@ import {
   aggregateReviewErrors,
   compactReviewPayload,
   getReviewAttemptFilter,
+  getReviewErrorMeta,
   getReviewAggregationContext,
   hasReviewData,
   replayRotationEvents,
@@ -46,6 +47,38 @@ function generic(index: number, errorCodes: string[]): GenericReviewAttempt {
     explanation: '판정 근거',
   };
 }
+
+const reservedReviewCodes = ['constructor', '__proto__', 'toString'];
+
+for (const gameId of Object.keys(reviewErrorCatalog) as GameReviewPayload['gameId'][]) {
+  test(`${gameId}: 객체 예약 이름인 복습 코드는 상속 속성이 아닌 기본 안내를 사용한다`, () => {
+    const before = JSON.stringify(reviewErrorCatalog[gameId]);
+    const fallback = getReviewErrorMeta(gameId, 'unknown-review-code');
+    for (const code of reservedReviewCodes) assert.equal(getReviewErrorMeta(gameId, code), fallback);
+    const [knownCode] = Object.keys(reviewErrorCatalog[gameId]);
+    assert.equal(getReviewErrorMeta(gameId, knownCode), reviewErrorCatalog[gameId][knownCode]);
+    assert.equal(JSON.stringify(reviewErrorCatalog[gameId]), before);
+  });
+}
+
+test('예약된 복습 코드는 중복·미채점 문맥을 구분하며 일반 객체의 숫자 집계로 보존한다', () => {
+  const attempts = [generic(0, [...reservedReviewCodes, 'constructor']), generic(1, ['constructor', 'rps-loss']), { ...generic(2, ['__proto__']), scored: false as const }, generic(3, [])];
+  const before = JSON.stringify(attempts);
+  const payload = compactReviewPayload('rps', attempts);
+  const expected = Object.fromEntries([['constructor', 2], ['__proto__', 1], ['toString', 1], ['rps-loss', 1]]);
+  assert.deepEqual(payload.summary.errorCounts, expected);
+  assert.equal(Object.getPrototypeOf(payload.summary.errorCounts), Object.prototype);
+  assert.equal(Object.hasOwn(payload.summary.errorCounts, '__proto__'), true);
+  assert.equal(payload.summary.attemptedCount, 3);
+  assert.equal(payload.summary.correctCount, 1);
+  assert.equal(payload.summary.reviewPointCount, 2);
+  const restored = sanitizeReviewPayload(JSON.parse(JSON.stringify(payload)));
+  assert.deepEqual(restored?.summary.errorCounts, expected);
+  const summaries = aggregateReviewErrors([{ id: 'reserved-full', gameId: 'rps', completedAt: '2026-10-15T01:00:00.000Z', review: restored }]);
+  assert.deepEqual(Object.fromEntries(summaries.map(({ errorCode, count }) => [errorCode, count])), expected);
+  assert.deepEqual(getReviewAttemptFilter(payload, true, '__proto__').attempts.map(({ id }) => id), ['attempt-0', 'attempt-2']);
+  assert.equal(JSON.stringify(attempts), before);
+});
 
 const simulationDetail = { sessionMode: '실전형 연습', quantity: 40, paceMs: 1000, simulationPresetVersion: SIMULATION_PRESET_VERSION } as const;
 const nbackSimulationDetail = { ...simulationDetail, nbackTask: '2-back → 2·3-back', nbackGroupSetting: 'simulation-preset', nbackProgression: '고정' } as const;

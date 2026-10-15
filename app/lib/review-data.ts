@@ -294,7 +294,7 @@ function sanitizeRotationAttempt(value: Record<string, unknown>, fallbackIndex: 
 
 function summarizeAttempts(attempts: readonly ReviewAttempt[], omittedDetailCount = 0, coverage: ReviewSummary['coverage'] = 'full'): ReviewSummary {
   const scoredAttempts = attempts.filter((attempt) => attempt.scored !== false);
-  const errorCounts: Record<string, number> = {};
+  const errorCounts: Record<string, number> = Object.create(null);
   scoredAttempts.forEach((attempt) => {
     new Set(attempt.errorCodes).forEach((code) => { errorCounts[code] = (errorCounts[code] ?? 0) + 1; });
   });
@@ -303,7 +303,7 @@ function summarizeAttempts(attempts: readonly ReviewAttempt[], omittedDetailCoun
     correctCount: scoredAttempts.filter((attempt) => attempt.status === 'correct').length,
     neutralCount: scoredAttempts.filter((attempt) => attempt.status === 'neutral').length,
     reviewPointCount: scoredAttempts.filter((attempt) => attempt.status !== 'correct' || attempt.errorCodes.length > 0).length,
-    errorCounts,
+    errorCounts: { ...errorCounts },
     omittedDetailCount,
     coverage,
   };
@@ -418,7 +418,8 @@ export function replayRotationEvents(events: readonly RotationReviewEvent[]) {
 }
 
 export function getReviewErrorMeta(gameId: GameId, errorCode: string) {
-  return reviewErrorCatalog[gameId][errorCode] ?? fallbackError;
+  const catalog = reviewErrorCatalog[gameId];
+  return Object.hasOwn(catalog, errorCode) ? catalog[errorCode] : fallbackError;
 }
 
 export function rotationActionLabel(action: RotationReviewAction) {

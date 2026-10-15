@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SessionResult } from './game-data.ts';
-import { MAX_REVIEW_BYTES, MAX_ROTATION_EVENTS, REVIEW_SCHEMA_VERSION } from './review-data.ts';
+import { MAX_REVIEW_BYTES, MAX_ROTATION_EVENTS, REVIEW_SCHEMA_VERSION, aggregateReviewErrors } from './review-data.ts';
 import {
   MAX_PRACTICE_RESULTS_BACKUP_BYTES,
   PRACTICE_RESULTS_BACKUP_FORMAT,
@@ -113,6 +113,28 @@ function expectReviewRejected(review: unknown, gameId: SessionResult['gameId'] =
   const parsed = parsePracticeResultsBackup(rawBackup([{ ...session({ gameId }), review }]));
   assert.equal(parsed.ok, false);
   if (!parsed.ok) assert.equal(parsed.code, '기록_항목_오류');
+}
+
+for (const coverage of ['full', 'sampled'] as const) {
+  test(`예약된 오류 코드의 ${coverage} 백업은 검증·복원·재내보내기·통계 정렬에서 숫자와 안내를 보존한다`, () => {
+    const codes = ['constructor', '__proto__', 'toString'];
+    const errorCounts = Object.fromEntries(codes.map((code) => [code, 1]));
+    const attempts = codes.map((code, index) => genericAttempt({ id: `reserved-${index}`, index, errorCodes: [code] }));
+    const summary = { attemptedCount: coverage === 'sampled' ? 4 : 3, correctCount: coverage === 'sampled' ? 1 : 0, neutralCount: 0, reviewPointCount: 3, errorCounts, omittedDetailCount: coverage === 'sampled' ? 1 : 0, coverage };
+    const review = reviewPayload(attempts, 'rps', { summary });
+    assert.equal(isReviewPayloadStructurallyValid(review, 'rps'), true);
+    const raw = rawBackup([{ ...session(), review }]);
+    const restored = expectSuccess(parsePracticeResultsBackup(raw));
+    const restoredReview = restored.results[0].review!;
+    assert.deepEqual(restoredReview.summary, summary);
+    assert.equal(Object.getPrototypeOf(restoredReview.summary.errorCounts), Object.prototype);
+    const summaries = aggregateReviewErrors(restored.results);
+    assert.deepEqual(new Set(summaries.map(({ errorCode }) => errorCode)), new Set(codes));
+    assert.ok(summaries.every(({ count, label, tip }) => count === 1 && typeof label === 'string' && label.length > 0 && typeof tip === 'string' && tip.length > 0));
+    const exported = createPracticeResultsBackup(restored.results, new Date(exportedAt));
+    assert.deepEqual(expectSuccess(parsePracticeResultsBackup(exported)).results, restored.results);
+    assert.equal(raw, rawBackup([{ ...session(), review }]));
+  });
 }
 
 test('백업은 고정된 키 순서와 ISO 시각을 사용해 안정적인 JSON을 만든다', () => {
