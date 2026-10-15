@@ -2509,3 +2509,192 @@ test('고양이 실전형 정오 신호는 제시·색상 전환 경계와 표�
   await expect(page.locator('.record-summary')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
+
+test('도형 순서 실전형 마지막 오답은 라운드 전환과 새 기억 준비에서 지우고 첫 정답을 받는다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  const origin = Date.UTC(2030, 0, 14);
+  await page.clock.install({ time: origin });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  await page.getByRole('button', { name: /도형 순서 기억하기, 난이도 상, 설정 열기/ }).click();
+  const stage = page.locator('section[data-game="nback"]');
+  await expect(stage).toBeVisible();
+  await stage.getByRole('radio', { name: /실전형 연습/ }).click();
+  await expect(stage.locator('.nback-simulation-preset em')).toHaveText('훈련용 47문항');
+  const readSnapshot = () => page.evaluate(() => {
+    const workspace = document.querySelector('.game-workspace.game-nback');
+    const actions = Array.from(workspace?.querySelectorAll('.nback-actions button') ?? []);
+    const countdown = workspace?.querySelector('.nback-countdown');
+    const active = document.activeElement;
+    const signals = (selector: string) => Array.from(workspace?.querySelectorAll(selector) ?? [], signal => ({ label: signal.textContent, tone: signal.getAttribute('data-feedback-tone'), aria: signal.getAttribute('aria-label') }));
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    let savedCount: number | null = null;
+    let storageError: string | null = null;
+    try {
+      if (!generation || !/^[A-Za-z0-9_-]{1,128}$/.test(generation)) throw new Error('활성 저장 세대가 올바르지 않습니다.');
+      const raw = localStorage.getItem(`nineflow-practice-results-v4:${generation}`);
+      if (raw === null) savedCount = 0;
+      else {
+        const envelope = JSON.parse(raw) as { version: number; generation: string; results: unknown[] };
+        if (envelope.version !== 4 || envelope.generation !== generation || !Array.isArray(envelope.results)) throw new Error('결과 저장 형식이 올바르지 않습니다.');
+        savedCount = envelope.results.length;
+      }
+    } catch (error) { storageError = String(error); }
+    return {
+      wall: Date.now(), ticks: performance.now(), generation, savedCount, storageError,
+      mode: workspace?.getAttribute('data-mode') ?? null,
+      progress: workspace?.querySelector('.workspace-progress i')?.getAttribute('aria-valuenow') ?? null,
+      glyph: workspace?.querySelector('.nback-stimulus [role="img"]')?.getAttribute('aria-label') ?? null,
+      round: workspace?.querySelector('.nback-status > div > span')?.textContent ?? countdown?.querySelector(':scope > span')?.textContent ?? null,
+      status: workspace?.querySelector('.nback-status > div > b')?.textContent ?? countdown?.querySelector('strong')?.textContent ?? null,
+      lag: workspace?.querySelector('.nback-lag-map')?.getAttribute('aria-label') ?? null,
+      countdown: countdown ? { second: countdown.querySelector(':scope > b')?.textContent, label: countdown.getAttribute('aria-label') } : null,
+      actionLabels: actions.map(action => action.querySelector('b')?.textContent),
+      enabled: actions.filter(action => !action.hasAttribute('disabled')).length,
+      selected: actions.filter(action => action.getAttribute('aria-pressed') === 'true').map(action => action.querySelector('b')?.textContent),
+      currentSignals: signals('.workspace-title-row .answer-signal'),
+      previousSignals: signals('.nback-status > .answer-signal'),
+      live: workspace?.querySelector(':scope > .sr-only[aria-live="polite"]')?.textContent ?? null,
+      footer: workspace?.querySelector('.workspace-foot > b')?.textContent ?? null,
+      active: { tag: active?.tagName, className: active?.getAttribute('class'), text: active?.textContent?.slice(0, 160), connected: active?.isConnected, inert: Boolean(active?.closest('[inert], [aria-hidden="true"]')) },
+      resultCount: document.querySelectorAll('.stage-result').length,
+    };
+  });
+  const initial = await readSnapshot();
+  expect(initial.generation).toBeTruthy();
+  expect(initial.savedCount).toBe(0);
+  expect(initial.storageError).toBeNull();
+  await page.clock.pauseAt(origin + 60_000);
+  const clockStart = await page.evaluate(() => ({ wall: Date.now(), ticks: performance.now() }));
+  let advancedMs = 0;
+  const expectClock = async () => {
+    expect(await page.evaluate(() => ({ wall: Date.now(), ticks: performance.now() }))).toEqual({ wall: clockStart.wall + advancedMs, ticks: clockStart.ticks + advancedMs });
+  };
+  const advanceClock = async (milliseconds: number) => {
+    await expectClock();
+    await page.clock.runFor(milliseconds);
+    advancedMs += milliseconds;
+    await expectClock();
+  };
+  let glyphHistory: string[] = [];
+  const round1Readings: Array<{ position: number; wall: number; ticks: number; glyph: string | null; progress: string | null; round: string | null; lag: string | null; enabled: number }> = [];
+  const capture = async (phase: string) => {
+    const sample = { phase, ...(await readSnapshot()), ariaHistory: [...glyphHistory], round1Readings: [...round1Readings], errors: [...errors] };
+    console.log('NBACK_ROUND_WRONG_CLEAR', JSON.stringify(sample));
+    await testInfo.attach(`nback-round-wrong-${phase}.json`, { body: JSON.stringify(sample, null, 2), contentType: 'application/json' });
+    await page.screenshot({ path: testInfo.outputPath(`nback-round-wrong-${phase}.png`) });
+    return sample;
+  };
+  const expectUnstored = (snapshot: Awaited<ReturnType<typeof readSnapshot>>) => {
+    expect(snapshot).toMatchObject({ generation: initial.generation, savedCount: 0, storageError: null, resultCount: 0 });
+  };
+  await stage.getByRole('button', { name: /^실전형 연습 시작/ }).click();
+  await expectClock();
+  const workspace = page.locator('.game-workspace.game-nback');
+  await expect(workspace).toBeVisible();
+  for (const second of ['3', '2', '1']) {
+    await expect(workspace.locator('.nback-countdown > b')).toHaveText(second);
+    await expect(workspace.locator('.nback-countdown > span')).toHaveText('ROUND 1 · 2-back');
+    await expect(workspace.locator('.answer-signal')).toHaveCount(0);
+    await expect(workspace.locator('.workspace-foot > b')).toHaveText('');
+    await advanceClock(1000);
+  }
+  for (let position = 0; position < 24; position += 1) {
+    const observed = await readSnapshot();
+    round1Readings.push({ position, wall: observed.wall, ticks: observed.ticks, glyph: observed.glyph, progress: observed.progress, round: observed.round, lag: observed.lag, enabled: observed.enabled });
+    glyphHistory.push(observed.glyph ?? '');
+    expect(observed.glyph).toBeTruthy();
+    expect(observed.mode).toBe('simulation');
+    expect(observed.round).toMatch(/^ROUND 1 · 묶음 \d+$/);
+    expect(observed.progress).toBe(String(Math.max(0, position - 1)));
+    expect(observed.enabled).toBe(position < 2 ? 0 : 2);
+    expect(observed.actionLabels).toEqual(position < 2 ? [] : ['2번째 전과 같음', '2번째 전과 다름']);
+    expect(observed.selected).toEqual([]);
+    expect(observed.currentSignals).toEqual([]);
+    if (position < 2) expect(observed.lag).toBe(`기억 채우기 ${position + 1}/2`);
+    else expect(observed.lag).toBe('현재 N을 N-2와 비교');
+    expectUnstored(observed);
+    await advanceClock(3000);
+  }
+  const lastGlyph = (await readSnapshot()).glyph;
+  glyphHistory.push(lastGlyph ?? '');
+  const before = await capture('round1-last-before');
+  expect(advancedMs).toBe(75000);
+  expect(glyphHistory).toHaveLength(25);
+  expect(before.glyph).toBeTruthy();
+  expect(before).toMatchObject({ mode: 'simulation', progress: '23', enabled: 2, selected: [], actionLabels: ['2번째 전과 같음', '2번째 전과 다름'], currentSignals: [], previousSignals: [{ label: '이전 문항: 시간 초과', tone: 'error', aria: '이전 문항 결과: 시간 초과' }], countdown: null });
+  expect(before.round).toMatch(/^ROUND 1 · 묶음 \d+$/);
+  expect(before.status).toBe('2-back · 비교 판단');
+  expect(before.live).toBe(`47문항 중 23번째. 이전 문항: 시간 초과 · 현재 도형 ${before.glyph}. 지금 분류하세요.`);
+  expect(before.footer).toBe(`이전 문항: 시간 초과 · 현재 도형 ${before.glyph}. 지금 분류하세요.`);
+  expectUnstored(before);
+  // The last 2-back response is derived from the actual 25th and 23rd glyphs.
+  const wrongDecision = glyphHistory[24] === glyphHistory[22] ? '2번째 전과 다름' : '2번째 전과 같음';
+  await workspace.locator('.nback-actions button').filter({ hasText: wrongDecision }).click();
+  const accepted = await capture('round1-last-wrong-accepted');
+  expect(accepted).toMatchObject({ wall: clockStart.wall + 75000, ticks: clockStart.ticks + 75000, progress: '23', glyph: before.glyph, enabled: 0, selected: [wrongDecision], currentSignals: [{ label: '오답', tone: 'error', aria: '응답 결과: 오답' }], previousSignals: [], countdown: null });
+  expect(accepted.live).toBe(`47문항 중 23번째. 오답 · 현재 도형 ${before.glyph}. 응답 저장됨. 고정 간격이 끝나면 다음 도형으로 이동합니다.`);
+  expect(accepted.footer).toBe(`오답 · 현재 도형 ${before.glyph}. 응답 저장됨. 고정 간격이 끝나면 다음 도형으로 이동합니다.`);
+  expectUnstored(accepted);
+  await advanceClock(2999);
+  const held = await capture('round1-last-before-deadline');
+  // The existing next-frame focus may move to the workspace; response state must not change.
+  expect(held).toEqual({ ...accepted, phase: held.phase, wall: clockStart.wall + 77999, ticks: clockStart.ticks + 77999, active: held.active });
+  expect(held.active.connected).toBe(true);
+  expect(held.active.inert).toBe(false);
+  await advanceClock(1);
+  for (const second of ['3', '2', '1']) {
+    const transition = await capture(`round2-countdown-${second}`);
+    expect(transition).toMatchObject({ progress: '23', glyph: null, round: 'ROUND 2 · 2·3-back', status: '2라운드 전환', enabled: 0, selected: [], currentSignals: [], previousSignals: [], countdown: { second, label: `2라운드 전환 · ${second}초 뒤 도형 순서 게임 시작` }, actionLabels: [], lag: null });
+    expect(transition.wall).toBe(clockStart.wall + 78000 + (3 - Number(second)) * 1000);
+    expect(transition.ticks).toBe(clockStart.ticks + 78000 + (3 - Number(second)) * 1000);
+    expect(transition.live).toBe(`47문항 중 23번째. 2라운드 전환. ${second}초 뒤 시작합니다.`);
+    expect(transition.footer).toBe('');
+    expectUnstored(transition);
+    await advanceClock(1000);
+  }
+  glyphHistory = [];
+  for (let position = 0; position < 3; position += 1) {
+    const glyph = (await readSnapshot()).glyph;
+    glyphHistory.push(glyph ?? '');
+    const warmup = await capture(`round2-warmup-${position + 1}`);
+    expect(warmup).toMatchObject({ progress: '23', glyph, status: '2·3-back · 기억 준비', lag: `기억 채우기 ${position + 1}/3`, countdown: null, enabled: 0, selected: [], currentSignals: [], previousSignals: [], actionLabels: [] });
+    expect(warmup.glyph).toBeTruthy();
+    expect(warmup.round).toMatch(/^ROUND 2 · 묶음 \d+$/);
+    expect(warmup.wall).toBe(clockStart.wall + 81000 + position * 3000);
+    expect(warmup.ticks).toBe(clockStart.ticks + 81000 + position * 3000);
+    expect(warmup.live).toBe(`47문항 중 23번째. 현재 도형 ${glyph}. 입력 없이 기억하세요.`);
+    expect(warmup.footer).toBe('');
+    expectUnstored(warmup);
+    await advanceClock(3000);
+  }
+  const firstGlyph = (await readSnapshot()).glyph;
+  glyphHistory.push(firstGlyph ?? '');
+  const first = await capture('round2-first-before-response');
+  expect(advancedMs).toBe(90000);
+  expect(glyphHistory).toHaveLength(4);
+  expect(first.glyph).toBeTruthy();
+  expect(first).toMatchObject({ wall: clockStart.wall + 90000, ticks: clockStart.ticks + 90000, progress: '24', status: '2·3-back · 비교 판단', lag: '현재 N을 N-2·N-3과 비교', countdown: null, enabled: 3, selected: [], currentSignals: [], previousSignals: [], actionLabels: ['2번째 전과 같음', '3번째 전과 같음', '둘 다 다름'] });
+  expect(first.live).toBe(`47문항 중 24번째. 현재 도형 ${firstGlyph}. 지금 분류하세요.`);
+  expect(first.footer).toBe('');
+  expectUnstored(first);
+  const correctDecision = glyphHistory[3] === glyphHistory[1] ? '2번째 전과 같음' : glyphHistory[3] === glyphHistory[0] ? '3번째 전과 같음' : '둘 다 다름';
+  await workspace.locator('.nback-actions button').filter({ hasText: correctDecision }).click();
+  const correct = await capture('round2-first-correct');
+  expect(correct).toMatchObject({ wall: clockStart.wall + 90000, ticks: clockStart.ticks + 90000, progress: '24', glyph: firstGlyph, enabled: 0, selected: [correctDecision], currentSignals: [{ label: '정답', tone: 'success', aria: '응답 결과: 정답' }], previousSignals: [], countdown: null });
+  expect(correct.live).toBe(`47문항 중 24번째. 정답 · 현재 도형 ${firstGlyph}. 응답 저장됨. 고정 간격이 끝나면 다음 도형으로 이동합니다.`);
+  expect(correct.footer).toBe(`정답 · 현재 도형 ${firstGlyph}. 응답 저장됨. 고정 간격이 끝나면 다음 도형으로 이동합니다.`);
+  expectUnstored(correct);
+  await workspace.getByRole('button', { name: '실전형 연습 닫기', exact: true }).click();
+  await expectClock();
+  const confirmation = page.locator('.session-confirm[role="alertdialog"]');
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole('button', { name: '연습창 닫기', exact: true }).click();
+  const closed = await capture('closed-without-save');
+  expect(closed).toMatchObject({ wall: clockStart.wall + 90000, ticks: clockStart.ticks + 90000, mode: null, progress: null, glyph: null, enabled: 0, selected: [], currentSignals: [], previousSignals: [] });
+  expectUnstored(closed);
+  await expect(page.locator('.stage-panel')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
