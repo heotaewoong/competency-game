@@ -186,13 +186,13 @@ export function DataManagementDialog({
         if (event.repeat && event.key === 'Enter' && event.target instanceof Element && event.target.closest('button')) event.preventDefault();
       }}
       onCancel={(event) => { event.preventDefault(); onClose(); }}>
-      <header><div><span>LOCAL DATA</span><h2 id="data-dialog-title">내 기록 백업·복원</h2><p>로그인 없이 브라우저에 저장된 연습 기록을 직접 관리합니다.</p></div><button ref={closeRef} type="button" aria-label="내 기록 백업·복원 닫기" onClick={onClose}>×</button></header>
+      <header><div><span>LOCAL DATA</span><h2 id="data-dialog-title">내 기록 백업·복원</h2><p>로그인 없이 이 브라우저에서 현재 확인한 연습 기록을 직접 관리합니다.</p></div><button ref={closeRef} type="button" aria-label="내 기록 백업·복원 닫기" onClick={onClose}>×</button></header>
       <div className="data-dialog-scroll">
         <aside className="data-privacy-note"><span aria-hidden="true">i</span><div><b>서버로 전송하지 않습니다.</b><p>내보내기와 가져오기는 이 기기 안에서 처리됩니다. 브라우저 데이터 삭제 전에는 JSON 백업을 받아두세요.</p></div></aside>
 
         <section className="data-action-card" aria-labelledby="export-title">
           <div className="data-action-number">01</div>
-          <div><h3 id="export-title">기록 내보내기</h3><p>현재 저장된 점수·세부 설정·문항별 복습을 버전이 있는 JSON 한 파일로 저장합니다.</p><small>현재 기록 {results.length}개 · 개인 식별정보는 별도로 수집하지 않습니다.</small></div>
+          <div><h3 id="export-title">기록 내보내기</h3><p>현재 화면의 점수·세부 설정·문항별 복습을 버전이 있는 JSON 한 파일로 저장합니다. 브라우저 저장에 실패해 현재 화면에만 남은 기록도 포함합니다.</p><small>현재 기록 {results.length}개 · 개인 식별정보는 별도로 수집하지 않습니다.</small></div>
           <button type="button" disabled={!results.length} onClick={() => exportResults('json')}>{results.length ? 'JSON 백업 받기' : '내보낼 기록 없음'}</button>
         </section>
 

@@ -645,7 +645,7 @@ function progressUnitForGame(gameId: GameId, mode: SessionMode) {
   return '문제';
 }
 
-export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecked }: { gameId: GameId; onClose: () => void; onSwitch: (gameId: GameId) => void; onSave: (result: SessionResult) => string; onReadinessChecked?: (summary: SavedReadinessSummary) => void }) {
+export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecked, onOpenBackup }: { gameId: GameId; onClose: () => void; onSwitch: (gameId: GameId) => void; onSave: (result: SessionResult) => string; onReadinessChecked?: (summary: SavedReadinessSummary) => void; onOpenBackup: (signal: AbortSignal) => Promise<void> }) {
   const [phase, setPhase] = useState<'intro' | 'play' | 'result'>('intro');
   const [result, setResult] = useState<SessionResult | null>(null);
   const [run, setRun] = useState(0);
@@ -1215,7 +1215,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
           </>
         )}
         {phase === 'play' && <GamePauseContext.Provider value={sessionPaused}><SessionModeContext.Provider value={{ mode: sessionMode, showGlyphNames }}><GuidedPacingContext.Provider value={sessionMode === 'practice' && guidedPacing}><FocusedPracticeContext.Provider value={sessionMode === 'practice' ? focusedPractice : DEFAULT_FOCUSED_PRACTICE}><StageActionsContext.Provider value={{ openGameSwitcher, openFeedback }}>{prepCountdown !== null ? <GamePreparation gameId={gameId} countdown={prepCountdown} total={gameId === 'rotation' && sessionMode === 'simulation' ? 2 : gameId === 'appointment' ? (sessionMode === 'simulation' ? APPOINTMENT_SIMULATION_TOTAL_QUESTIONS : practiceConfig.quantity * appointmentPreferences.selectedRounds.length) : (sessionMode === 'practice' ? practiceConfig : simulationConfig(gameId)).quantity} onClose={requestClose} /> : <GameRouter key={`${gameId}-${run}`} gameId={gameId} config={sessionMode === 'practice' ? practiceConfig : simulationConfig(gameId)} glyphMnemonics={glyphMnemonics} nbackPreferences={nbackPreferences} rotationPreferences={rotationPreferences} appointmentPreferences={appointmentPreferences} onRotationPreviewChange={(showPreview) => saveRotationPreferences({ ...rotationPreferences, showPreview })} onFinish={finish} onClose={requestClose} />}</StageActionsContext.Provider></FocusedPracticeContext.Provider></GuidedPacingContext.Provider></SessionModeContext.Provider></GamePauseContext.Provider>}
-        {phase === 'result' && result && <ResultView result={result} mode={sessionMode} storageNotice={saveNotice} onClose={requestClose} onRestart={() => restart()} onOpenGuide={() => setStrategyGuideOpen(true)} onReview={(opener) => { overlayReturnFocusRef.current = opener; setReviewOpen(true); }} />}
+        {phase === 'result' && result && <ResultView result={result} mode={sessionMode} storageNotice={saveNotice} onClose={requestClose} onRestart={() => restart()} onOpenGuide={() => setStrategyGuideOpen(true)} onReview={(opener) => { overlayReturnFocusRef.current = opener; setReviewOpen(true); }} onOpenBackup={onOpenBackup} />}
         </div>
         {switcherOpen && <GameSwitcher currentGameId={gameId} sessionWasStopped={switcherEndedSession} onClose={() => setSwitcherOpen(false)} onSelect={(nextGameId) => { setSwitcherOpen(false); if (nextGameId !== gameId) onSwitchRef.current(nextGameId); }} />}
         {feedbackOpen && <FeedbackDialog initialGameId={gameId} sessionMode={sessionMode === 'practice' ? '연습 모드' : '실전형 연습'} nested onClose={() => setFeedbackOpen(false)} />}
@@ -1805,7 +1805,28 @@ function GamePreparation({ gameId, countdown, total, onClose }: { gameId: GameId
   );
 }
 
-function ResultView({ result, mode, storageNotice, onClose, onRestart, onOpenGuide, onReview }: { result: SessionResult; mode: SessionMode; storageNotice?: string; onClose: () => void; onRestart: () => void; onOpenGuide: () => void; onReview: (opener: HTMLButtonElement) => void }) {
+function ResultView({ result, mode, storageNotice, onClose, onRestart, onOpenGuide, onReview, onOpenBackup }: { result: SessionResult; mode: SessionMode; storageNotice?: string; onClose: () => void; onRestart: () => void; onOpenGuide: () => void; onReview: (opener: HTMLButtonElement) => void; onOpenBackup: (signal: AbortSignal) => Promise<void> }) {
+  const [backupStatus, setBackupStatus] = useState<'idle' | 'opening' | 'error'>('idle');
+  const backupRequestRef = useRef<AbortController | null>(null);
+  useEffect(() => () => { backupRequestRef.current?.abort(); }, []);
+  function cancelBackup() {
+    backupRequestRef.current?.abort();
+    backupRequestRef.current = null;
+    setBackupStatus('idle');
+  }
+  async function openBackup() {
+    if (backupRequestRef.current) return;
+    const request = new AbortController();
+    backupRequestRef.current = request;
+    setBackupStatus('opening');
+    try {
+      await onOpenBackup(request.signal);
+    } catch {
+      if (!request.signal.aborted) setBackupStatus('error');
+    } finally {
+      if (backupRequestRef.current === request) backupRequestRef.current = null;
+    }
+  }
   const game = getGame(result.gameId);
   const visibilityPauses = typeof result.detail?.visibilityPauses === 'number' ? result.detail.visibilityPauses : 0;
   const trialCount = typeof result.detail?.trialCount === 'number' ? result.detail.trialCount : 0;
@@ -1888,15 +1909,15 @@ function ResultView({ result, mode, storageNotice, onClose, onRestart, onOpenGui
         <article><span>일관성</span><b>{responseCount >= 2 ? `${result.stability}%` : '—'}</b></article>
         <article><span>{errorLabel}</span><b>{result.errors}</b></article>
       </div>
+      {storageNotice && <aside className="result-storage-notice" role="status"><b>기록 저장 안내</b><p>{storageNotice}</p><p id="result-backup-description">결과 화면을 닫고 현재 기록의 JSON 백업·복원 창을 엽니다.</p><button type="button" aria-describedby="result-backup-description" aria-disabled={backupStatus === 'opening'} aria-busy={backupStatus === 'opening'} onClick={() => void openBackup()}>목록으로 이동해 백업하기</button>{backupStatus !== 'idle' && <p>{backupStatus === 'opening' ? '백업 창을 불러오고 있습니다. 결과 화면은 유지됩니다.' : '백업 창을 불러오지 못했습니다. 결과는 그대로입니다. 다시 눌러 주세요.'}</p>}</aside>}
       {rotationDetail.length > 0 && <aside className="rotation-result-detail" aria-label="도형 회전 상세 결과"><b>도형 회전 상세</b><dl>{rotationDetail.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><p>조작 효율은 정답 문제의 최소 단계 수를 회전·반전·지움·초기화에 실제 사용한 조작 수로 나눈 연습 지표입니다.</p></aside>}
       {nbackDetail.length > 0 && <aside className="rotation-result-detail nback-result-detail" aria-label="도형 순서 상세 결과"><b>도형 순서 상세</b><dl>{nbackDetail.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><p>정확도는 선택한 기억 간격과 응답 유형별 채점 문항을 기준으로 계산합니다.</p></aside>}
       {potionDetail.length > 0 && <aside className="rotation-result-detail potion-result-detail" aria-label="마법약 판단 상세 결과"><b>판단 품질과 실제 결과를 분리했습니다</b><dl>{potionDetail.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><p>낮은 확률의 결과가 나온 것은 판단 오류가 아닙니다. 복습에서는 선택 당시 누적 관찰과 일치했는지를 따로 확인합니다.</p></aside>}
       {pathDetail.length > 0 && <aside className="rotation-result-detail path-result-detail" aria-label="길 만들기 상세 결과"><b>첫 제출과 최종 해결을 분리했습니다</b><dl>{pathDetail.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><p>첫 제출 최대득점률은 첫 확인에서 모든 차량이 도착하고 목표 울타리 수도 맞은 문제만 계산합니다. 연습에서 고쳐 푼 문제는 경로 연결 완료와 수정 후 최대득점에 따로 남깁니다.</p></aside>}
       {mouseDetail.length > 0 && <aside className="rotation-result-detail mouse-result-detail" aria-label="고양이 술래잡기 상세 결과"><b>판단과 확신을 함께 확인하세요</b><dl>{mouseDetail.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><p>확신도가 높은 것 자체는 점수가 아닙니다. 고확신 오답이 있다면 복습에서 해당 위치 판단을 먼저 확인하세요.</p></aside>}
       {visibilityPauses > 0 && <aside className="result-storage-notice result-comparison-notice" role="status"><b>탭 이탈 {visibilityPauses}회 · 참고용 기록</b><p>다른 탭에 있던 시간은 제외했으며, 공정한 비교를 위해 이 결과는 동일 설정 최고 기록 계산에 포함하지 않습니다.</p></aside>}
-      {storageNotice && <aside className="result-storage-notice" role="status"><b>기록 저장 안내</b><p>{storageNotice}</p></aside>}
       {hasActionableReview && <aside className="result-review"><b>이번 세션 복습 포인트</b><p>{reviewAdvice[result.gameId]}</p></aside>}
-      <div className="result-actions"><button onClick={onRestart}>{mode === 'practice' ? '다시 연습' : '실전형으로 다시 하기'}</button>{hasReview && <button className="result-review-button" onClick={(event) => onReview(event.currentTarget)}>문항별 복습</button>}<button className="result-guide" onClick={onOpenGuide}>공략 복습</button><button className="stage-start" onClick={onClose}>게임 목록 <span>→</span></button></div>
+      <div className="result-actions"><button onClick={() => { cancelBackup(); onRestart(); }}>{mode === 'practice' ? '다시 연습' : '실전형으로 다시 하기'}</button>{hasReview && <button className="result-review-button" onClick={(event) => { cancelBackup(); onReview(event.currentTarget); }}>문항별 복습</button>}<button className="result-guide" onClick={() => { cancelBackup(); onOpenGuide(); }}>공략 복습</button><button className="stage-start" onClick={() => { cancelBackup(); onClose(); }}>게임 목록 <span>→</span></button></div>
       <small>개인 연습 기록이며 실제 역량검사 점수나 채용 결과가 아닙니다.</small>
     </section>
   );

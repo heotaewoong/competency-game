@@ -1,8 +1,257 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { games, type GameId, type SessionResult } from '../app/lib/game-data';
-import { createPracticeResultsBackup, PRACTICE_RESULTS_BACKUP_FORMAT, PRACTICE_RESULTS_BACKUP_VERSION } from '../app/lib/practice-backup';
+import { createPracticeResultsBackup, parsePracticeResultsBackup, PRACTICE_RESULTS_BACKUP_FORMAT, PRACTICE_RESULTS_BACKUP_VERSION } from '../app/lib/practice-backup';
 import { compactReviewPayload, REVIEW_SCHEMA_VERSION, type GenericReviewAttempt } from '../app/lib/review-data';
 import { contrastRatio } from './color-contrast';
+
+function readRecoveryStorage(page: Page) {
+  return page.evaluate(() => {
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    const key = generation ? `nineflow-practice-results-v4:${generation}` : null;
+    return { generation, key, raw: key ? localStorage.getItem(key) : null };
+  });
+}
+
+async function completeUnsavedRotation(page: Page) {
+  await page.addInitScript(() => {
+    localStorage.setItem('nineflow-practice-config-v1', JSON.stringify({ rotation: { quantity: 1, paceMs: 90000 } }));
+    localStorage.setItem('nineflow-rotation-preferences-v1', JSON.stringify({ contentMode: 'letters', selectedLetters: ['F'], selectedTransforms: ['turn-left-45'], showPreview: false }));
+  });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  const opener = page.getByRole('button', { name: /도형 회전하기, 난이도 중, 설정 열기/ });
+  await opener.click();
+  const stage = page.locator('section[data-game="rotation"]');
+  await expect(stage.getByLabel('문제 수 현재 값')).toHaveText('1');
+  await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
+  await expect(stage.locator('.game-workspace.game-rotation')).toBeVisible();
+  const saved = await readRecoveryStorage(page);
+  expect(saved.generation).toBeTruthy();
+  expect(JSON.parse(saved.raw!).results).toEqual([]);
+  // Only this document's active results write fails. A real reload restores native Storage.
+  await page.evaluate(key => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function setItem(name: string, value: string) {
+      if (name === key) throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      return original.call(this, name, value);
+    };
+  }, saved.key);
+  await stage.getByRole('button', { name: '1번 왼쪽 45° 회전', exact: true }).click();
+  await stage.getByRole('button', { name: /답안 제출/ }).click();
+  await stage.getByRole('button', { name: /결과 보기/ }).click();
+  await expect(stage.getByRole('heading', { name: '도형 회전하기 결과', exact: true })).toBeVisible();
+  const notice = stage.locator('.result-storage-notice:not(.result-comparison-notice)');
+  await expect(notice).toContainText('브라우저 저장 공간을 사용할 수 없습니다');
+  expect(await readRecoveryStorage(page)).toEqual(saved);
+  return { stage, opener, notice, saved, backup: notice.getByRole('button', { name: '목록으로 이동해 백업하기', exact: true }) };
+}
+
+test('저장 실패 복구: 실제 내려받은 JSON을 새로고침 뒤 가져와 결과와 문항별 복습을 복원한다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  await page.setViewportSize({ width: 320, height: 568 });
+  const { stage, opener, notice, saved, backup } = await completeUnsavedRotation(page);
+  await backup.scrollIntoViewIfNeeded();
+  const before = await backup.evaluate(element => ({ height: element.getBoundingClientRect().height, label: element.textContent, documentWidth: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth }));
+  console.log('RESULT_BACKUP_RECOVERY', JSON.stringify({ phase: 'unsaved', before, saved }));
+  await testInfo.attach('result-backup-unsaved.json', { body: JSON.stringify({ before, saved }, null, 2), contentType: 'application/json' });
+  await page.screenshot({ path: testInfo.outputPath('result-backup-unsaved.png') });
+  expect(before.height).toBeGreaterThanOrEqual(44);
+  expect(before.scrollWidth).toBeLessThanOrEqual(before.documentWidth + 1);
+  await expect(notice).toContainText('새로고침하면 사라질 수 있습니다');
+  const data = page.getByRole('dialog', { name: '내 기록 백업·복원', exact: true });
+  let downloads = 0;
+  page.on('download', () => { downloads += 1; });
+  await backup.focus();
+  try {
+    await page.keyboard.down('Enter');
+    await expect(data).toBeVisible();
+    await expect(data.getByRole('button', { name: '내 기록 백업·복원 닫기', exact: true })).toBeFocused();
+    await page.keyboard.down('Enter');
+    await expect(data).toBeVisible();
+    expect(downloads).toBe(0);
+  } finally { await page.keyboard.up('Enter'); }
+  await expect(stage).toHaveCount(0);
+  await expect(data).toContainText('현재 기록 1개');
+  const pendingDownload = page.waitForEvent('download');
+  await data.getByRole('button', { name: 'JSON 백업 받기', exact: true }).click();
+  const download = await pendingDownload;
+  const stream = await download.createReadStream();
+  if (!stream) throw new Error('실제 JSON 다운로드 스트림이 없습니다.');
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  const bytes = Buffer.concat(chunks);
+  expect(await download.failure()).toBeNull();
+  expect(download.suggestedFilename()).toMatch(/^nineflow-practice-backup-\d{4}-\d{2}-\d{2}\.json$/);
+  const parsed = parsePracticeResultsBackup(bytes.toString('utf8'));
+  if (!parsed.ok) throw new Error(`실제 백업 검증 실패: ${parsed.message}`);
+  expect(parsed.results).toHaveLength(1);
+  const result = parsed.results[0];
+  expect(result.gameId).toBe('rotation');
+  expect(result.accuracy).toBe(100);
+  expect(result.review?.summary).toMatchObject({ attemptedCount: 1, correctCount: 1 });
+  expect(result.review?.attempts).toHaveLength(1);
+  expect(await readRecoveryStorage(page)).toEqual(saved);
+  await data.getByRole('button', { name: '닫기', exact: true }).click();
+  await expect(opener).toBeFocused();
+  await page.reload();
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  await expect(page.locator('.header-status')).toHaveAccessibleName('완료한 연습 0회, 기록으로 이동');
+  expect(await readRecoveryStorage(page)).toEqual(saved);
+  await page.locator('.records-data-button').click();
+  await data.locator('input[type="file"]').setInputFiles({ name: download.suggestedFilename(), mimeType: 'application/json', buffer: bytes });
+  await expect(data.locator('.data-import-preview')).toContainText('1개 기록');
+  await data.getByRole('button', { name: '기존 기록과 합치기', exact: true }).click();
+  await expect(data.locator('.data-dialog-notice')).toContainText('현재 총 1개');
+  await data.getByRole('button', { name: '닫기', exact: true }).click();
+  await page.reload();
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  const restored = await readRecoveryStorage(page);
+  expect(restored.generation).toBe(saved.generation);
+  expect(JSON.parse(restored.raw!).results).toEqual(parsed.results);
+  await expect(page.locator('.header-status')).toHaveAccessibleName('완료한 연습 1회, 기록으로 이동');
+  const reviewOpener = page.getByRole('button', { name: '도형 회전하기 최근 세션 복습', exact: true });
+  await reviewOpener.click();
+  const review = page.getByRole('dialog', { name: '내 실수 복습', exact: true });
+  await expect(review.locator('.rotation-session-review')).toBeVisible();
+  await expect(review.getByRole('listbox', { name: '저장된 시도 목록' }).getByRole('option', { selected: true })).toHaveAttribute('data-review-attempt-id', result.review!.attempts[0].id);
+  console.log('RESULT_BACKUP_RECOVERY', JSON.stringify({ phase: 'restored', downloadBytes: bytes.length, result, restored, errors }));
+  await testInfo.attach('result-backup-restored.json', { body: JSON.stringify({ downloadBytes: bytes.length, result, restored, errors }, null, 2), contentType: 'application/json' });
+  await page.screenshot({ path: testInfo.outputPath('result-backup-restored.png') });
+  await review.getByRole('button', { name: '복습 센터 닫기', exact: true }).click();
+  await expect(reviewOpener).toBeFocused();
+  expect(errors).toEqual([]);
+});
+
+for (const action of ['load', 'retry', 'close', 'review', 'guide', 'restart'] as const) {
+  test(`결과 백업 창 로딩: ${action} 동안 결과를 보존하고 취소된 이동을 되살리지 않는다`, async ({ page }, testInfo) => {
+    const errors: string[] = [];
+    const resourceErrors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => { if (message.type() === 'error') resourceErrors.push(message.text()); });
+    const { stage, opener, notice, saved, backup } = await completeUnsavedRotation(page);
+    let releaseScripts!: () => void;
+    const scriptsReady = new Promise<void>(resolve => { releaseScripts = resolve; });
+    let delayedRequests = 0;
+    let backupScriptUrl = '';
+    let completedRequests = 0;
+    let rejectBackup = action === 'retry';
+    const failedRequests: string[] = [];
+    page.on('requestfinished', request => { if (request.url() === backupScriptUrl) completedRequests += 1; });
+    await page.route('**/_next/static/**/*.js', async route => {
+      const response = await route.fetch();
+      const body = await response.body();
+      // Identify the actual backup module; other overlay modules remain loadable.
+      if (Buffer.from(body).toString('utf8').includes('data-dialog-title')) {
+        backupScriptUrl = route.request().url();
+        delayedRequests += 1;
+        if (rejectBackup) {
+          failedRequests.push(route.request().url());
+          await route.abort('failed');
+          return;
+        }
+        await scriptsReady;
+      }
+      await route.fulfill({ response });
+    });
+    const data = page.getByRole('dialog', { name: '내 기록 백업·복원', exact: true });
+    try {
+      await backup.click();
+      await expect.poll(() => delayedRequests).toBeGreaterThan(0);
+      if (action === 'retry') {
+        await expect(notice).toContainText('백업 창을 불러오지 못했습니다. 결과는 그대로입니다. 다시 눌러 주세요.');
+        await expect(backup).toHaveAttribute('aria-disabled', 'false');
+        await expect(data).toHaveCount(0);
+        await page.screenshot({ path: testInfo.outputPath('result-backup-load-failed.png') });
+        rejectBackup = false;
+        const failedAttemptCount = delayedRequests;
+        await backup.click();
+        await expect.poll(() => delayedRequests).toBeGreaterThan(failedAttemptCount);
+      }
+      const pendingRequestCount = delayedRequests;
+      await expect(backup).toHaveAttribute('aria-busy', 'true');
+      await expect(backup).toHaveAttribute('aria-disabled', 'true');
+      await expect(notice).toContainText('브라우저 저장 공간을 사용할 수 없습니다');
+      await expect(notice).toContainText('백업 창을 불러오고 있습니다. 결과 화면은 유지됩니다.');
+      await expect(stage.getByRole('heading', { name: '도형 회전하기 결과', exact: true })).toBeVisible();
+      await expect(data).toHaveCount(0);
+      await backup.focus();
+      await page.keyboard.press('Enter');
+      expect(delayedRequests).toBe(pendingRequestCount);
+      const pending = { action, delayedRequests, failedRequests, saved, notice: await notice.textContent() };
+      console.log('RESULT_BACKUP_LOADING', JSON.stringify({ phase: 'pending', ...pending }));
+      await testInfo.attach('result-backup-pending.json', { body: JSON.stringify(pending, null, 2), contentType: 'application/json' });
+      await page.screenshot({ path: testInfo.outputPath('result-backup-pending.png') });
+      if (action === 'close') {
+        await stage.getByRole('button', { name: /^게임 목록/ }).click();
+        await expect(stage).toHaveCount(0);
+        await expect(opener).toBeFocused();
+      } else if (action === 'review') {
+        await stage.getByRole('button', { name: '문항별 복습', exact: true }).click();
+        await expect(page.getByRole('dialog', { name: '내 실수 복습', exact: true })).toBeVisible();
+      } else if (action === 'guide') {
+        await stage.getByRole('button', { name: '공략 복습', exact: true }).click();
+        await expect(page.locator('.strategy-guide-dialog')).toBeVisible();
+      } else if (action === 'restart') {
+        await stage.getByRole('button', { name: '다시 연습', exact: true }).click();
+        await expect(stage.locator('.game-workspace.game-rotation')).toBeVisible();
+      }
+      releaseScripts();
+      await page.unrouteAll({ behavior: 'wait' });
+      // Observe the actual browser transfer, independent of the framework's script loader.
+      await expect.poll(() => completedRequests, { timeout: 15_000 }).toBeGreaterThan(0);
+      if (action === 'load' || action === 'retry') {
+        await expect(data).toBeVisible();
+        await expect(stage).toHaveCount(0);
+        await expect(data).toContainText('현재 기록 1개');
+        await data.getByRole('button', { name: '닫기', exact: true }).click();
+        await expect(opener).toBeFocused();
+      } else {
+        await expect(data).toHaveCount(0);
+        if (action === 'close') {
+          await expect(stage).toHaveCount(0);
+          await opener.press('Enter');
+          await expect(stage.getByRole('button', { name: '게임 바꾸기', exact: true })).toBeFocused();
+          await page.keyboard.press('Escape');
+          await expect(opener).toBeFocused();
+          await expect(data).toHaveCount(0);
+        } else if (action === 'restart') {
+          await expect(stage.locator('.game-workspace.game-rotation')).toBeVisible();
+          await stage.getByRole('button', { name: '1번 왼쪽 45° 회전', exact: true }).click();
+          await expect(stage.getByRole('list', { name: '입력한 변환 순서', exact: true }).locator('li.filled')).toHaveCount(1);
+          await expect(data).toHaveCount(0);
+        }
+        else {
+          const overlay = action === 'review' ? page.getByRole('dialog', { name: '내 실수 복습', exact: true }) : page.locator('.strategy-guide-dialog');
+          await expect(overlay).toBeVisible();
+          await overlay.getByRole('button', { name: action === 'review' ? '복습 센터 닫기' : '전략게임 가이드 닫기', exact: true }).click();
+          await expect(backup).toHaveAttribute('aria-disabled', 'false');
+          await expect(notice).toContainText('브라우저 저장 공간을 사용할 수 없습니다');
+          await backup.click();
+          await expect(data).toBeVisible();
+          await expect(data).toContainText('현재 기록 1개');
+          await data.getByRole('button', { name: '닫기', exact: true }).click();
+        }
+      }
+      const final = { action, delayedRequests, completedRequests, failedRequests, errors, resourceErrors, saved: await readRecoveryStorage(page) };
+      console.log('RESULT_BACKUP_LOADING', JSON.stringify({ phase: 'settled', ...final }));
+      await testInfo.attach('result-backup-settled.json', { body: JSON.stringify(final, null, 2), contentType: 'application/json' });
+      await page.screenshot({ path: testInfo.outputPath('result-backup-settled.png') });
+      expect(final.saved).toEqual(saved);
+      expect(errors).toEqual([]);
+      if (action !== 'retry') expect(resourceErrors).toEqual([]);
+      else {
+        expect(failedRequests.length).toBeGreaterThanOrEqual(1);
+        // Deliberate resource failure is preserved separately, not hidden as a clean console.
+        expect(resourceErrors.every(error => /Failed to load resource|Load failed|Failed to fetch|loading chunk|load chunk/i.test(error))).toBe(true);
+      }
+    } finally {
+      releaseScripts();
+      await page.unrouteAll({ behavior: 'wait' });
+    }
+  });
+}
 
 function reviewFilterFixtures(): SessionResult[] {
   const attempt = (id: string, index: number, errorCodes: string[]): GenericReviewAttempt => ({
