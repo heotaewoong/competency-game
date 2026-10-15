@@ -91,6 +91,21 @@ export function hasReviewData(review: GameReviewPayload | null | undefined) {
   return Boolean(review && (review.attempts.length > 0 || review.summary.attemptedCount > 0));
 }
 
+export function getReviewAttemptFilter(review: GameReviewPayload | undefined, errorsOnly: boolean, errorCode = '') {
+  const stored = review?.attempts ?? [];
+  const errorCodes = [...new Set([
+    ...Object.entries(review?.summary.errorCounts ?? {}).filter(([, count]) => count > 0).map(([code]) => code),
+    ...stored.flatMap((attempt) => attempt.errorCodes),
+  ])].filter((code) => code.trim().length > 0);
+  const activeErrorCode = errorCodes.includes(errorCode) ? errorCode : '';
+  return {
+    errorCodes,
+    activeErrorCode,
+    attempts: stored.filter((attempt) => (!errorsOnly || attempt.status !== 'correct' || attempt.errorCodes.length > 0)
+      && (!activeErrorCode || attempt.errorCodes.includes(activeErrorCode))),
+  };
+}
+
 export type ReviewErrorMeta = {
   label: string;
   tip: string;

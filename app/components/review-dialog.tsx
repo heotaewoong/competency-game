@@ -7,6 +7,7 @@ import { CatMarker, MouseMarker, type CatTone } from './mouse-visuals';
 import { CognitiveGlyph, glyphShapeNames } from './cognitive-glyph';
 import {
   aggregateReviewErrors,
+  getReviewAttemptFilter,
   getReviewAggregationContext,
   getReviewErrorMeta,
   hasReviewData,
@@ -265,6 +266,7 @@ export function ReviewDialog({ results, onClose, onPracticeGame, initialSessionI
   const [selectedSessionId, setSelectedSessionId] = useState(initialSession?.id ?? '');
   const [selectedAttemptId, setSelectedAttemptId] = useState(initialAttempt?.id ?? '');
   const [errorsOnly, setErrorsOnly] = useState(() => (initialSession?.review.summary.reviewPointCount ?? 0) > 0);
+  const [errorCode, setErrorCode] = useState(initialErrorCode ?? '');
   const backdropRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -281,10 +283,9 @@ export function ReviewDialog({ results, onClose, onPracticeGame, initialSessionI
     ? sessionsByGame.filter((session) => getReviewAggregationContext(session).key === selectedContext.key)
     : [], [selectedContext, sessionsByGame]);
   const selectedReviewSummary = selectedSession?.review?.summary;
-  const visibleAttempts = useMemo(() => {
-    const attempts = selectedSession?.review?.attempts ?? [];
-    return errorsOnly ? attempts.filter((attempt) => attempt.status !== 'correct' || attempt.errorCodes.length > 0) : attempts;
-  }, [errorsOnly, selectedSession]);
+  const attemptFilter = useMemo(() => getReviewAttemptFilter(selectedSession?.review, errorsOnly,
+    selectedSession?.id === selectedSessionId ? errorCode : ''), [errorCode, errorsOnly, selectedSession, selectedSessionId]);
+  const visibleAttempts = attemptFilter.attempts;
   const selectedAttempt = visibleAttempts.find((attempt) => attempt.id === selectedAttemptId) ?? visibleAttempts[0];
   const selectedSummaries = useMemo(() => aggregateReviewErrors(sessions, selectedGameId, selectedContext?.key), [selectedContext?.key, selectedGameId, sessions]);
   const allSummaries = useMemo(() => aggregateReviewErrors(sessions), [sessions]);
@@ -336,6 +337,7 @@ export function ReviewDialog({ results, onClose, onPracticeGame, initialSessionI
     setSelectedSessionId(session?.id ?? '');
     setSelectedAttemptId(attempt?.id ?? '');
     setErrorsOnly(true);
+    setErrorCode(summary.errorCode);
   }
 
   function navigateAttempt(event: React.KeyboardEvent<HTMLButtonElement>, index: number) {
@@ -419,14 +421,14 @@ export function ReviewDialog({ results, onClose, onPracticeGame, initialSessionI
             {games.map((game) => {
               const gameSessions = sessions.filter((session) => session.gameId === game.id);
               const count = gameSessions.reduce((sum, session) => sum + (session.review?.summary.reviewPointCount ?? 0), 0);
-              return <button type="button" key={game.id} data-review-game-id={game.id} disabled={!gameSessions.length} aria-current={selectedGameId === game.id ? 'page' : undefined} onClick={() => { const nextSession = gameSessions[0]; setSelectedGameId(game.id); setSelectedSessionId(nextSession?.id ?? ''); setSelectedAttemptId(''); setErrorsOnly((nextSession?.review.summary.reviewPointCount ?? 0) > 0); }}><span>{game.no}</span><b>{game.shortTitle}</b><small>{gameSessions.length ? `${count}개 점검` : '기록 없음'}</small></button>;
+              return <button type="button" key={game.id} data-review-game-id={game.id} disabled={!gameSessions.length} aria-current={selectedGameId === game.id ? 'page' : undefined} onClick={() => { const nextSession = gameSessions[0]; setSelectedGameId(game.id); setSelectedSessionId(nextSession?.id ?? ''); setSelectedAttemptId(''); setErrorCode(''); setErrorsOnly((nextSession?.review.summary.reviewPointCount ?? 0) > 0); }}><span>{game.no}</span><b>{game.shortTitle}</b><small>{gameSessions.length ? `${count}개 점검` : '기록 없음'}</small></button>;
             })}
           </nav>
 
           <div className="review-workspace">
             <header className={`review-game-head tone-${selectedGame.tone}`}>
               <div><span>{selectedGame.no} · {selectedGame.skill}</span><h3>{selectedGame.title}</h3><p>{selectedSummaries[0] ? `${selectedSummaries[0].contextLabel} 기준 · ${selectedSummaries[0].label} ${selectedSummaries[0].count}회` : `${selectedContext?.label ?? '선택 세션'} 기준 · 반복 오류가 아직 없습니다.`}</p></div>
-              <div><label>세션·비교 기준<select value={selectedSession?.id ?? ''} onChange={(event) => { const nextSession = sessionsByGame.find((session) => session.id === event.target.value); setSelectedSessionId(event.target.value); setSelectedAttemptId(''); setErrorsOnly((nextSession?.review.summary.reviewPointCount ?? 0) > 0); }}>{sessionsByGame.map((session) => <option key={session.id} value={session.id}>{formatDate(session.completedAt)} · {resultScoreLabel(session)} {formatResultScore(session)} · {getReviewAggregationContext(session).label}</option>)}</select></label><button type="button" aria-pressed={errorsOnly} onClick={() => { setErrorsOnly((value) => !value); setSelectedAttemptId(''); }}>{errorsOnly ? '오류·점검만' : '전체 시도'}</button>{onPracticeGame && <button type="button" className="review-compact-practice-button" aria-label={`${selectedGame.title} 다시 연습`} onClick={() => onPracticeGame(selectedGameId)}>연습</button>}</div>
+              <div><label>세션·비교 기준<select value={selectedSession?.id ?? ''} onChange={(event) => { const nextSession = sessionsByGame.find((session) => session.id === event.target.value); setSelectedSessionId(event.target.value); setSelectedAttemptId(''); setErrorCode(''); setErrorsOnly((nextSession?.review.summary.reviewPointCount ?? 0) > 0); }}>{sessionsByGame.map((session) => <option key={session.id} value={session.id}>{formatDate(session.completedAt)} · {resultScoreLabel(session)} {formatResultScore(session)} · {getReviewAggregationContext(session).label}</option>)}</select></label><button type="button" aria-pressed={errorsOnly} onClick={() => { setErrorsOnly((value) => !value); setSelectedAttemptId(''); setErrorCode(''); }}>{errorsOnly ? '오류·점검만' : '전체 시도'}</button>{onPracticeGame && <button type="button" className="review-compact-practice-button" aria-label={`${selectedGame.title} 다시 연습`} onClick={() => onPracticeGame(selectedGameId)}>연습</button>}</div>
             </header>
 
             {(selectedSummaries.length > 0 || (selectedGameId === 'rotation' && rotationTransformSummaries.length > 0)) && <div className="review-analysis-strips">
@@ -441,10 +443,14 @@ export function ReviewDialog({ results, onClose, onPracticeGame, initialSessionI
 
             <div className="review-attempt-layout">
               <aside ref={attemptListRef} className="review-attempt-list" role="listbox" aria-label="저장된 시도 목록">
-                {visibleAttempts.length ? visibleAttempts.map((attempt, index) => <button type="button" role="option" aria-selected={attempt.id === selectedAttempt?.id} tabIndex={attempt.id === selectedAttempt?.id ? 0 : -1} data-review-attempt-id={attempt.id} key={attempt.id} className={attempt.id === selectedAttempt?.id ? 'is-current' : ''} onKeyDown={(event) => navigateAttempt(event, index)} onClick={() => setSelectedAttemptId(attempt.id)}><span>{attempt.index + 1}</span><div><b>{attempt.title}</b><small>{attempt.kind === 'rotation' && attempt.phaseEnded ? '구간 종료 · 미제출' : attempt.status === 'correct' ? '정확' : attempt.status === 'neutral' ? '판단 점검' : attempt.errorCodes.length ? getReviewErrorMeta(selectedGameId, attempt.errorCodes[0]).label : '오류'}</small></div>{attempt.rtMs !== undefined && <em>{(attempt.rtMs / 1000).toFixed(1)}초</em>}</button>) : <div className="review-list-empty"><b>{selectedReviewSummary?.attemptedCount && !selectedSession?.review?.attempts.length ? '오래된 세션의 통계만 보관되어 있습니다.' : '이 필터에 해당하는 시도가 없습니다.'}</b>{selectedSession?.review?.attempts.length ? <button type="button" onClick={() => setErrorsOnly(false)}>전체 시도 보기</button> : <span>점수와 오류 횟수는 유지되지만 클릭별 화면은 저장 용량을 위해 정리되었습니다.</span>}</div>}
+                {visibleAttempts.length ? visibleAttempts.map((attempt, index) => <button type="button" role="option" aria-selected={attempt.id === selectedAttempt?.id} tabIndex={attempt.id === selectedAttempt?.id ? 0 : -1} data-review-attempt-id={attempt.id} key={attempt.id} className={attempt.id === selectedAttempt?.id ? 'is-current' : ''} onKeyDown={(event) => navigateAttempt(event, index)} onClick={() => setSelectedAttemptId(attempt.id)}><span>{attempt.index + 1}</span><div><b>{attempt.title}</b><small>{attempt.kind === 'rotation' && attempt.phaseEnded ? '구간 종료 · 미제출' : attempt.status === 'correct' ? '정확' : attempt.status === 'neutral' ? '판단 점검' : attempt.errorCodes.length ? getReviewErrorMeta(selectedGameId, attempt.errorCodes[0]).label : '오류'}</small></div>{attempt.rtMs !== undefined && <em>{(attempt.rtMs / 1000).toFixed(1)}초</em>}</button>) : <div className="review-list-empty"><b>{selectedReviewSummary?.attemptedCount && !selectedSession?.review?.attempts.length ? '오래된 세션의 통계만 보관되어 있습니다.' : attemptFilter.activeErrorCode ? '선택한 유형의 보관 상세가 없습니다.' : '이 필터에 해당하는 시도가 없습니다.'}</b>{selectedSession?.review?.attempts.length ? <button type="button" onClick={() => { setErrorsOnly(false); setErrorCode(''); setSelectedAttemptId(''); }}>전체 시도 보기</button> : <span>점수와 오류 횟수는 유지되지만 클릭별 화면은 저장 용량을 위해 정리되었습니다.</span>}</div>}
               </aside>
 
               <div className="review-attempt-detail" role="region" aria-label="선택한 시도 상세. 방향키나 Page Up, Page Down으로 내용을 스크롤할 수 있습니다." tabIndex={0}>
+                <div className="review-attempt-filter">
+                  <label>복습 유형<select value={attemptFilter.activeErrorCode} onChange={(event) => { setErrorCode(event.target.value); setSelectedAttemptId(''); }}><option value="">전체 유형</option>{attemptFilter.errorCodes.map((code) => <option key={code} value={code}>{getReviewErrorMeta(selectedGameId, code).label}</option>)}</select></label>
+                  <p role="status">현재 표시 {visibleAttempts.length}개 · 저장된 상세 {selectedSession?.review.attempts.length ?? 0}개{(selectedReviewSummary?.omittedDetailCount ?? 0) > 0 ? ` · 상세 ${selectedReviewSummary!.omittedDetailCount}개가 정리되었습니다.` : ''}</p>
+                </div>
                 <p className="sr-only" aria-live="polite">{selectedAttempt ? `${selectedAttempt.index + 1}번 시도 상세를 표시합니다.` : '표시할 시도가 없습니다.'}</p>
                 {selectedAttempt?.kind === 'rotation' ? <RotationAttemptPanel key={`${selectedSession?.id ?? 'session'}-${selectedAttempt.id}`} attempt={selectedAttempt} /> : selectedAttempt ? <GenericAttemptPanel attempt={selectedAttempt} gameId={selectedGameId} /> : <p className="review-empty-copy">왼쪽에서 복습할 시도를 선택하세요.</p>}
               </div>
