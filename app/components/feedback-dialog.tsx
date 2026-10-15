@@ -148,7 +148,8 @@ export function FeedbackDialog({ onClose, initialGameId = 'site', sessionMode, n
 
         <fieldset className="feedback-rating"><legend>현재 사용 만족도 <small>선택 사항</small></legend><div>{[1, 2, 3, 4, 5].map((value) => <label key={value}><input type="radio" name="feedback-rating" value={value} checked={rating === value} onChange={() => setRating(value)} onKeyDown={(event) => navigateRating(event, value)} /><b>{value}</b><span>{value === 1 ? '불편' : value === 3 ? '보통' : value === 5 ? '만족' : ''}</span></label>)}</div></fieldset>
 
-        <label className="feedback-message"><span>의견 내용 <small>{trimmedLength} / {FEEDBACK_MESSAGE_MAX}</small></span><textarea ref={messageRef} aria-describedby="feedback-public-notice" value={message} minLength={FEEDBACK_MESSAGE_MIN} maxLength={FEEDBACK_MESSAGE_MAX} rows={7} placeholder="어떤 화면에서 무엇이 달랐는지, 기대한 동작은 무엇인지 적어주세요." onChange={(event) => { setMessage(event.target.value); setStatus(''); }} /></label>
+        <label className="feedback-message"><span>의견 내용 <small>{trimmedLength} / {FEEDBACK_MESSAGE_MAX}</small></span><textarea ref={messageRef} aria-describedby={category === 'bug' ? 'feedback-public-notice feedback-writing-guide' : 'feedback-public-notice'} value={message} minLength={FEEDBACK_MESSAGE_MIN} maxLength={FEEDBACK_MESSAGE_MAX} rows={7} placeholder="어떤 화면에서 무엇이 달랐는지, 기대한 동작은 무엇인지 적어주세요." onChange={(event) => { setMessage(event.target.value); setStatus(''); }} /></label>
+        {category === 'bug' && <p id="feedback-writing-guide" className="feedback-footnote feedback-writing-guide">오류 제보는 시작 후 대략 언제 · 어느 단계(설정·진행·결과) · 기대한 동작 · 실제 현상 순서로 적어 주세요. 모르는 항목은 생략해도 됩니다. 점수·답안·개인정보는 적지 마세요.</p>}
 
         <label className="feedback-environment"><input type="checkbox" checked={includeEnvironment} onChange={(event) => setIncludeEnvironment(event.target.checked)} /><span><b>비식별 환경정보 함께 보내기</b><small>현재 게임·모드·화면 크기·페이지 주소만 포함하며 점수와 응답 내용은 보내지 않습니다.</small></span></label>
 
