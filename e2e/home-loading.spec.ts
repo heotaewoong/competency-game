@@ -147,7 +147,7 @@ for (const action of ['load', 'retry', 'close', 'review', 'guide', 'restart'] as
       const response = await route.fetch();
       const body = await response.body();
       // Identify the actual backup module; other overlay modules remain loadable.
-      if (body.toString('utf8').includes('data-dialog-title')) {
+      if (Buffer.from(body).toString('utf8').includes('data-dialog-title')) {
         backupScriptUrl = route.request().url();
         delayedRequests += 1;
         if (action === 'retry' && failedRequests.length === 0) {
