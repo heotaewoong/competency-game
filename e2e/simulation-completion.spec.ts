@@ -514,6 +514,10 @@ test('개수 비교하기 실전형은 준비·1초 제시·3초 응답 46문항
   }
 
   await expectSimulationResult(page, game, '오류', 46, pageErrors);
+  const timeMetric = page.locator('.stage-result .result-metrics article').filter({ hasText: '중앙 반응' });
+  await expect(timeMetric.locator('b')).toHaveText('—');
+  await expect(timeMetric).not.toHaveAttribute('aria-describedby');
+  await expect(page.locator('#result-time-note')).toHaveCount(0);
   await expect(workspace).toHaveCount(0);
   await expectClock();
   const readResults = () => page.evaluate(() => {
