@@ -23,6 +23,7 @@ import { formatResultScore, resultScoreLabel } from '../lib/result-display';
 type ReviewDialogProps = {
   results: SessionResult[];
   onClose: () => void;
+  onMissingOpener?: () => void;
   onPracticeGame?: (gameId: GameId) => void;
   initialSessionId?: string;
   initialErrorCode?: string;
@@ -261,7 +262,7 @@ function GenericAttemptPanel({ attempt, gameId }: { attempt: GenericReviewAttemp
   );
 }
 
-export function ReviewDialog({ results, onClose, onPracticeGame, initialSessionId, initialErrorCode, nested = false }: ReviewDialogProps) {
+export function ReviewDialog({ results, onClose, onMissingOpener, onPracticeGame, initialSessionId, initialErrorCode, nested = false }: ReviewDialogProps) {
   const sessions = useMemo(() => results.flatMap((result) => {
     const review = sanitizeReviewPayload(result.review);
     return review?.gameId === result.gameId && hasReviewData(review) ? [{ ...result, review }] : [];
@@ -389,9 +390,10 @@ export function ReviewDialog({ results, onClose, onPracticeGame, initialSessionI
       window.removeEventListener('keydown', onKey, true);
       releaseScrollLock();
       siblingState.forEach(({ element, inert, ariaHidden }) => { element.inert = inert; if (ariaHidden === null) element.removeAttribute('aria-hidden'); else element.setAttribute('aria-hidden', ariaHidden); });
-      previousFocus?.focus();
+      if (previousFocus?.isConnected) previousFocus.focus();
+      else onMissingOpener?.();
     };
-  }, [nested]);
+  }, [nested, onMissingOpener]);
 
   if (!sessions.length) {
     return (

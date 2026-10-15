@@ -1,4 +1,5 @@
 import type { GameId, SessionResult } from './game-data';
+import type { ReviewErrorSummary } from './review-data';
 
 export const onboardingGameOrder: readonly GameId[] = [
   'rps', 'number', 'count', 'rotation', 'potion', 'mouse', 'appointment', 'path', 'nback',
@@ -6,12 +7,8 @@ export const onboardingGameOrder: readonly GameId[] = [
 
 export type RecommendationReason = 'first-session' | 'unpracticed' | 'recurring-error' | 'least-recent';
 
-export type RecommendationError = {
-  gameId: GameId;
-  label: string;
-  count: number;
-  sessionCount: number;
-};
+export type RecommendationError = Pick<ReviewErrorSummary,
+  'gameId' | 'label' | 'count' | 'sessionCount' | 'errorCode' | 'representativeSessionId'>;
 
 export type TrainingRecommendation = {
   gameId: GameId;
