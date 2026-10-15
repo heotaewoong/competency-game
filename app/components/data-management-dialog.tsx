@@ -211,7 +211,7 @@ export function DataManagementDialog({
 
         <section className="data-action-card data-clear-card" aria-labelledby="clear-title">
           <div className="data-action-number">04</div>
-          <div><h3 id="clear-title">이 브라우저 기록 삭제</h3><p>연습 결과와 문항별 복습만 삭제합니다. 게임 설정과 접근성 설정은 유지합니다.</p><small>삭제 후에는 JSON 백업이 없으면 복구할 수 없습니다.</small></div>
+          <div><h3 id="clear-title">이 브라우저 기록 삭제</h3><p>연습 결과와 문항별 복습만 삭제합니다. 게임·접근성 설정과 활동 목표는 유지합니다.</p><small>삭제 후에는 JSON 백업이 없으면 복구할 수 없습니다.</small></div>
           {!confirmClear
             ? <button ref={clearTriggerRef} type="button" className="data-clear-trigger" disabled={!hasClearableData} onClick={showClearConfirmation}>{results.length ? '전체 기록 삭제' : storedArtifactsPresent ? '저장 데이터 삭제' : '삭제할 기록 없음'}</button>
             : <div className="data-clear-confirm" role="alert"><b>{results.length ? `${results.length}개 기록을 삭제할까요?` : '저장된 복구·호환 기록을 삭제할까요?'}</b><span><button ref={clearCancelRef} type="button" onClick={cancelClear}>취소</button><button type="button" onClick={clearResults}>삭제 확정</button></span></div>}

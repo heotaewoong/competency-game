@@ -1,5 +1,12 @@
 import type { SessionResult } from './game-data.ts';
 
+export const TRAINING_ACTIVITY_GOAL_KEY = 'nineflow-training-activity-goal-v1';
+
+export function parseTrainingActivityGoal(raw: string | null): number | null {
+  if (raw === null || raw.length !== 1 || raw < '1' || raw > '7') return null;
+  return Number(raw);
+}
+
 function localDateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
