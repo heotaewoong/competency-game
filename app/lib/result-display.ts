@@ -1,14 +1,29 @@
 import type { GameId, SessionResult } from './game-data.ts';
 import { getResultMode, type ResultMode } from './result-comparison.ts';
+import { localDateKey } from './training-activity.ts';
+
+export function getResultLocalDateKey(result: Pick<SessionResult, 'completedAt'>): string {
+  const timestamp = Date.parse(result.completedAt);
+  return Number.isFinite(timestamp) ? localDateKey(new Date(timestamp)) : '';
+}
+
+export function getResultHistoryDates(results: readonly Pick<SessionResult, 'completedAt'>[]): string[] {
+  return [...new Set(results.map(result => Date.parse(result.completedAt))
+    .filter(Number.isFinite)
+    .sort((left, right) => right - left)
+    .map(timestamp => localDateKey(new Date(timestamp))))];
+}
 
 /** Filters the saved history without changing its order or comparison context. */
 export function filterResultHistory(
   results: readonly SessionResult[],
   gameId: GameId | 'all',
   mode: ResultMode | 'all',
+  completedDate = '',
 ) {
   return results.filter((result) => (gameId === 'all' || result.gameId === gameId)
-    && (mode === 'all' || getResultMode(result) === mode));
+    && (mode === 'all' || getResultMode(result) === mode)
+    && (!completedDate || getResultLocalDateKey(result) === completedDate));
 }
 
 export function usesPotionEvidenceScore(result: SessionResult) {
