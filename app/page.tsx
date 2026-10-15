@@ -24,7 +24,7 @@ import { filterResultHistory, formatResultScore, resultErrorLabel, resultScoreLa
 import { isReviewPayloadStructurallyValid } from './lib/practice-backup';
 import { resolveReadinessOverall } from './lib/readiness';
 import { chooseTrainingRecommendation, type RecommendationReason } from './lib/training-recommendation';
-import { summarizeTrainingActivity } from './lib/training-activity';
+import { TRAINING_ACTIVITY_GOAL_KEY, parseTrainingActivityGoal, summarizeTrainingActivity } from './lib/training-activity';
 import { AccessibilityBootstrap, ReadinessCenter, READINESS_STORAGE_KEY, captureCurrentReadinessAssessment, parseSavedReadinessSummary, type SavedReadinessSummary } from './components/readiness-center';
 import type { DataManagementActionResult } from './components/data-management-dialog';
 import { lockDocumentScroll } from './lib/scroll-lock';
@@ -297,6 +297,9 @@ export default function Home() {
   const [historyMode, setHistoryMode] = useState<ResultMode | 'all'>('all');
   const [historyLimit, setHistoryLimit] = useState(8);
   const [activityDate, setActivityDate] = useState(() => new Date());
+  const [activityGoal, setActivityGoal] = useState<number | null>(null);
+  const [activityGoalStatus, setActivityGoalStatus] = useState<'loading' | 'ready' | 'load-error' | 'save-error'>('loading');
+  const activityGoalSelectRef = useRef<HTMLSelectElement>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [dataManagementOpen, setDataManagementOpen] = useState(false);
   const [readinessOpen, setReadinessOpen] = useState(false);
@@ -310,6 +313,28 @@ export default function Home() {
   const resultsGenerationRef = useRef<string | null>(null);
 
   useEffect(() => { resultsRef.current = results; }, [results]);
+
+  const restoreActivityGoal = useCallback(() => {
+    try {
+      setActivityGoal(parseTrainingActivityGoal(window.localStorage.getItem(TRAINING_ACTIVITY_GOAL_KEY)));
+      setActivityGoalStatus('ready');
+    } catch {
+      setActivityGoalStatus('load-error');
+    }
+  }, []);
+
+  function saveActivityGoal(next: number | null) {
+    setActivityGoal(next);
+    try {
+      if (next === null) window.localStorage.removeItem(TRAINING_ACTIVITY_GOAL_KEY);
+      else window.localStorage.setItem(TRAINING_ACTIVITY_GOAL_KEY, String(next));
+      setActivityGoalStatus('ready');
+      return true;
+    } catch {
+      setActivityGoalStatus('save-error');
+      return false;
+    }
+  }
 
   useEffect(() => {
     let restored: SavedReadinessSummary | null = null;
@@ -484,6 +509,7 @@ export default function Home() {
     }
     const restoreFrame = window.requestAnimationFrame(() => {
       // Finish even when storage is blocked or another tab replaced the snapshot.
+      restoreActivityGoal();
       setResultsLoaded(true);
       if (restoredOrder) setGameOrder(restoredOrder);
       try {
@@ -498,11 +524,15 @@ export default function Home() {
       if (restoredNotice) setStorageNotice(restoredNotice);
     });
     return () => window.cancelAnimationFrame(restoreFrame);
-  }, []);
+  }, [restoreActivityGoal]);
 
   useEffect(() => {
     const syncResultsFromAnotherTab = (event: StorageEvent) => {
       if (event.storageArea !== window.localStorage) return;
+      if (event.key === TRAINING_ACTIVITY_GOAL_KEY || event.key === null) {
+        restoreActivityGoal();
+        return;
+      }
       if (event.key === RESULTS_GENERATION_KEY) {
         try {
           // Storage events can arrive after a newer pointer event. Only the
@@ -588,7 +618,7 @@ export default function Home() {
     };
     window.addEventListener('storage', syncResultsFromAnotherTab);
     return () => window.removeEventListener('storage', syncResultsFromAnotherTab);
-  }, []);
+  }, [restoreActivityGoal]);
 
   function saveResult(result: SessionResult) {
     const keepInMemory = (message: string) => {
@@ -989,19 +1019,26 @@ export default function Home() {
 
       <section className="records-section" id="records" aria-busy={!resultsLoaded} aria-labelledby="records-title">
         <div className="records-heading"><div><span>나의 훈련 기록</span><h2 id="records-title">내 연습 기록</h2></div><p>최근 기록과 모드·분량·속도·집중·접근성 표시 설정이 같은 세션끼리만 최고 점수를 비교합니다.</p><button type="button" className="records-data-button" disabled={!resultsLoaded} onPointerEnter={preloadDataManagementDialog} onPointerDown={preloadDataManagementDialog} onFocus={preloadDataManagementDialog} onClick={() => setDataManagementOpen(true)}>백업·복원</button></div>
+        <section className="training-activity" aria-labelledby="training-activity-title" aria-busy={!resultsLoaded}>
+          <div className="training-activity-heading"><div><h3 id="training-activity-title">최근 7일 훈련 활동</h3><p aria-live="polite" aria-atomic="true">{resultsLoaded ? `${activity.period} · 브라우저 현지 날짜 기준` : '보관된 기록을 확인하고 있습니다.'}</p></div><button type="button" disabled={!resultsLoaded} onClick={() => { setActivityDate(new Date()); restoreActivityGoal(); }}>오늘 기준으로 새로고침</button></div>
+          <div className="history-controls">
+            <label>최근 7일 활동 목표(선택)<select ref={activityGoalSelectRef} id="training-activity-goal" value={activityGoal ?? ''} disabled={!resultsLoaded || activityGoalStatus === 'loading' || activityGoalStatus === 'load-error'} aria-describedby={`training-activity-goal-note${activityGoalStatus.endsWith('error') ? ' training-activity-goal-error' : ''}`} onChange={(event) => saveActivityGoal(parseTrainingActivityGoal(event.target.value))}><option value="">설정 안 함</option>{[1, 2, 3, 4, 5, 6, 7].map(days => <option key={days} value={days}>{days}일</option>)}</select></label>
+            {activityGoalStatus === 'save-error' && <button type="button" onClick={() => { if (saveActivityGoal(activityGoal)) activityGoalSelectRef.current?.focus({ preventScroll: true }); }}>목표 다시 저장</button>}
+            <p id="training-activity-goal-note">이 브라우저에만 저장합니다. 전체 기록 삭제 뒤에도 유지되며 JSON 백업에는 포함되지 않습니다.</p>
+            {activityGoalStatus === 'load-error' && <p id="training-activity-goal-error" role="alert">활동 목표를 불러오지 못했습니다. 새로고침으로 다시 확인해 주세요.</p>}
+            {activityGoalStatus === 'save-error' && <p id="training-activity-goal-error" role="alert">활동 목표를 이 화면에만 적용했습니다. 새로고침하면 이전 설정으로 돌아갈 수 있습니다.</p>}
+          </div>
+          <p className="training-activity-summary" role="status" aria-atomic="true">{resultsLoaded ? <>완료 세션 {activity.sessionCount}회 · 기록이 있는 날 {activity.activeDayCount}일 / 7일{activityGoal !== null && <> · 내 목표 {activityGoal}일 · {activity.activeDayCount >= activityGoal ? '달성' : `${activityGoal - activity.activeDayCount}일 더 활동하면 달성`}</>}</> : '완료 기록을 확인하고 있습니다.'}</p>
+          {resultsLoaded && <><ol className="training-activity-days" role="list">{activity.days.map(day => <li key={day.key} data-date={day.key} data-active={day.sessions > 0}><time dateTime={day.key}>{day.label}<span>{day.weekday}</span></time><b>{day.sessions}회</b></li>)}</ol>
+          {!activity.sessionCount && <p>이 기간에는 완료 기록이 없습니다. 게임 하나를 끝내면 활동이 표시됩니다.</p>}</>}
+          <small>이 브라우저에 남아 있는 완료 기록만 집계합니다. 점수·실력 향상 지표가 아닙니다.</small>
+        </section>
         {recentResults.length ? <>
           <section className="home-review-center" aria-labelledby="home-review-title">
             <div className="home-review-heading"><div><span>틀린 이유 복습</span><h3 id="home-review-title">무엇을 반복해서 틀리는지 확인하세요.</h3><p>{scoredReviewResults.length ? `게임별 가장 최근 비교 문맥에서만 반복 횟수와 오류율을 계산합니다.${reviewableResults.length > scoredReviewResults.length ? ` 무응답 구간이 남은 세션 ${reviewableResults.length - scoredReviewResults.length}개도 문항별로 열 수 있습니다.` : scoredReviewResults.length < 5 ? ' 아직 표본이 적어 약점으로 단정하지 않습니다.' : ''}` : reviewableResults.length ? `${reviewableResults.length}개 세션의 무응답 구간이 복습에 남아 있습니다. 제출 전 놓친 문제부터 확인하세요.` : '이전 기록에는 문항별 데이터가 없습니다. 새 연습부터 자동으로 쌓입니다.'}</p></div><button type="button" onClick={(event) => openReview(event.currentTarget)}>복습 센터 열기 <span>→</span></button></div>
             {recurringErrors.length > 0 ? <div className="home-review-ranking">{recurringErrors.slice(0, 3).map((summary, index) => { const game = games.find((item) => item.id === summary.gameId)!; return <button type="button" key={`${summary.gameId}-${summary.contextKey}-${summary.errorCode}`} onClick={(event) => openReview(event.currentTarget, summary.representativeSessionId, summary.errorCode)}><span>{index + 1}</span><div><small>{game.title} · {summary.contextLabel} · {summary.count}/{summary.attemptedCount}회 · {summary.sessionCount}개 세션</small><b>{summary.label}</b><p>{summary.tip}</p></div><em>{summary.rate}%</em></button>; })}</div> : <div className="home-review-empty"><b>반복 오류가 아직 없습니다.</b><span>게임을 완료하면 오답뿐 아니라 비효율 조작과 확률 판단도 분리해 기록합니다.</span></div>}
           </section>
           <div className="record-summary"><article><span>저장된 최근 연습</span><b>{results.length}회</b></article><article><span>최근 기록 게임</span><b>{practicedGames.length}<small>/ 9종</small></b></article><article><span>{lastResultModeLabel} 마지막 {resultScoreLabel(lastResult)}</span><b>{formatResultScore(lastResult)}</b></article></div>
-          <section className="training-activity" aria-labelledby="training-activity-title">
-            <div className="training-activity-heading"><div><h3 id="training-activity-title">최근 7일 훈련 활동</h3><p aria-live="polite" aria-atomic="true">{activity.period} · 브라우저 현지 날짜 기준</p></div><button type="button" onClick={() => setActivityDate(new Date())}>오늘 기준으로 새로고침</button></div>
-            <p className="training-activity-summary" role="status" aria-atomic="true">완료 세션 {activity.sessionCount}회 · 기록이 있는 날 {activity.activeDayCount}일 / 7일</p>
-            <ol className="training-activity-days" role="list">{activity.days.map(day => <li key={day.key} data-date={day.key} data-active={day.sessions > 0}><time dateTime={day.key}>{day.label}<span>{day.weekday}</span></time><b>{day.sessions}회</b></li>)}</ol>
-            {!activity.sessionCount && <p>이 기간에는 완료 기록이 없습니다. 게임 하나를 끝내면 활동이 표시됩니다.</p>}
-            <small>이 브라우저에 남아 있는 완료 기록만 집계합니다. 점수·실력 향상 지표가 아닙니다.</small>
-          </section>
           <div className="game-record-grid" aria-label="게임별 기록">
             {practicedGames.map(({ game, latest, mode, comparisonAvailable, comparableSessions, best, progress }) => <article key={game.id} className={`tone-${game.tone}`}>
               <div><span>{game.no}</span><div><small>{game.skill}</small><b>{game.title}</b></div></div>

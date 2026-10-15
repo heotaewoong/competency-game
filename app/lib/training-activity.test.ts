@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { summarizeTrainingActivity } from './training-activity.ts';
+import { parseTrainingActivityGoal, summarizeTrainingActivity } from './training-activity.ts';
 
 test('최근 7일 완료 횟수와 활동일을 세고 원본·기간 밖 기록을 변경하지 않는다', () => {
   const reference = new Date(2026, 9, 14, 12);
@@ -63,4 +63,24 @@ test('완료 기록이 없는 기간도 빈 날짜 7개와 0회를 반환한다'
 
 test('잘못된 기준 날짜는 임의 날짜로 대체하지 않는다', () => {
   assert.throws(() => summarizeTrainingActivity([], new Date('invalid')), RangeError);
+});
+
+test('활동 목표는 1~7일의 정수 문자열만 허용한다', () => {
+  for (let days = 1; days <= 7; days += 1) {
+    assert.equal(parseTrainingActivityGoal(String(days)), days);
+  }
+});
+
+test('활동 목표가 없거나 저장값이 올바르지 않으면 설정 안 함으로 읽는다', () => {
+  for (const raw of [null, '', '0', '8', '-1', '1.5', ' 1', '1 ', '\t1', '1\n', '1\r\n', '1e0', '01', '+1', 'NaN', 'Infinity', 'null', 'undefined', 'true', '[]', '[3]', '{"days":3}', '목표 3일', '７']) {
+    assert.equal(parseTrainingActivityGoal(raw), null, `거절해야 하는 저장값: ${JSON.stringify(raw)}`);
+  }
+});
+
+test('같은 날 여러 세션을 완료해도 활동일은 하루로 센다', () => {
+  const results = [0, 12, 23].map(hour => ({ completedAt: new Date(2026, 9, 14, hour).toISOString() }));
+  const activity = summarizeTrainingActivity(results, new Date(2026, 9, 14, 12));
+  assert.equal(activity.sessionCount, 3);
+  assert.equal(activity.activeDayCount, 1);
+  assert.equal(activity.days[6].sessions, 3);
 });

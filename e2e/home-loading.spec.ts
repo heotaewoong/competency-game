@@ -1,8 +1,127 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { games, type GameId, type SessionResult } from '../app/lib/game-data';
 import { createPracticeResultsBackup, parsePracticeResultsBackup, PRACTICE_RESULTS_BACKUP_FORMAT, PRACTICE_RESULTS_BACKUP_VERSION } from '../app/lib/practice-backup';
 import { compactReviewPayload, REVIEW_SCHEMA_VERSION, type GenericReviewAttempt } from '../app/lib/review-data';
 import { contrastRatio } from './color-contrast';
+
+const activityGoalKey = 'nineflow-training-activity-goal-v1';
+
+async function installActivityGoalFixture(page: Page, { offsets = [], rawGoal = null, fault = null }: { offsets?: number[]; rawGoal?: string | null; fault?: 'get' | 'set' | 'remove' | null } = {}) {
+  await page.addInitScript(({ key, dates, initialGoal, initialFault }) => {
+    const generationKey = 'nineflow-practice-results-generation-v1';
+    // Reload must read the user's changed goal, not reinstall the fixture.
+    if (localStorage.getItem(generationKey) === null) {
+      const now = new Date();
+      const generation = 'activity-goal-regression';
+      const results = dates.map((offset, index) => ({ id: `goal-record-${index}`, gameId: 'rps', completedAt: new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, offset === 0 ? 0 : 12).toISOString(), accuracy: 80, medianRt: 720, stability: 74, errors: 2 }));
+      localStorage.setItem(generationKey, generation);
+      localStorage.setItem(`nineflow-practice-results-v4:${generation}`, JSON.stringify({ version: 4, generation, results }));
+      localStorage.setItem('nineflow-practice-config-v1', JSON.stringify({ rps: { quantity: 9, paceMs: 4500 } }));
+      localStorage.setItem('nineflow-game-order-v2', 'perceived');
+      if (initialGoal !== null) localStorage.setItem(key, initialGoal);
+    }
+    const originalGet = Storage.prototype.getItem;
+    const originalSet = Storage.prototype.setItem;
+    const originalRemove = Storage.prototype.removeItem;
+    const writes: Array<{ method: 'set' | 'remove'; value: string | null }> = [];
+    let failure = initialFault;
+    Object.defineProperty(window, '__activityGoalProbe', { configurable: true, value: { writes, readGoal: () => originalGet.call(localStorage, key), setFault: (next: 'get' | 'set' | 'remove' | null) => { failure = next; } } });
+    Storage.prototype.getItem = function getItem(name: string) {
+      if (name === key && failure === 'get') throw new DOMException('Goal read blocked', 'SecurityError');
+      return originalGet.call(this, name);
+    };
+    Storage.prototype.setItem = function setItem(name: string, value: string) {
+      if (name === key) {
+        writes.push({ method: 'set', value });
+        if (failure === 'set') throw new DOMException('Goal write blocked', 'QuotaExceededError');
+      }
+      return originalSet.call(this, name, value);
+    };
+    Storage.prototype.removeItem = function removeItem(name: string) {
+      if (name === key) {
+        writes.push({ method: 'remove', value: null });
+        if (failure === 'remove') throw new DOMException('Goal removal blocked', 'SecurityError');
+      }
+      return originalRemove.call(this, name);
+    };
+  }, { key: activityGoalKey, dates: offsets, initialGoal: rawGoal, initialFault: fault });
+}
+
+function watchActivityGoalErrors(page: Page) {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  return errors;
+}
+
+function setActivityGoalFault(page: Page, failure: 'get' | 'set' | 'remove' | null) {
+  return page.evaluate(next => {
+    const probe = Reflect.get(window, '__activityGoalProbe');
+    if (typeof probe?.setFault !== 'function') throw new Error('활동 목표 Storage 관찰자가 없습니다.');
+    probe.setFault(next);
+  }, failure);
+}
+
+function readActivityGoalStorage(page: Page) {
+  return page.evaluate(key => {
+    const probe = Reflect.get(window, '__activityGoalProbe');
+    return {
+      // The saved value is read with the original getter during a read fault;
+      // the application still sees the real injected SecurityError.
+      goal: typeof probe?.readGoal === 'function' ? probe.readGoal() : localStorage.getItem(key),
+      writes: probe?.writes ?? [],
+      accessibility: localStorage.getItem('nineflow-accessibility-v1'),
+      protected: Object.fromEntries(Object.keys(localStorage).filter(name => name.startsWith('nineflow-practice-results') || name === 'nineflow-practice-config-v1' || name === 'nineflow-game-order-v2').sort().map(name => [name, localStorage.getItem(name)])),
+    };
+  }, activityGoalKey);
+}
+
+async function captureActivityGoal(page: Page, testInfo: TestInfo, phase: string, errors: string[], extra: Record<string, unknown> = {}) {
+  await page.locator('#training-activity-goal').scrollIntoViewIfNeeded();
+  const view = await page.locator('.training-activity').evaluate(element => {
+    const goal = element.querySelector('#training-activity-goal');
+    const active = document.activeElement;
+    const rgba = (value: string) => {
+      if (!/^rgba?\(/.test(value)) throw new Error(`지원하지 않는 실제 색상: ${value}`);
+      const parts = value.match(/[\d.]+/g)!.map(Number);
+      if ((parts.length !== 3 && parts.length !== 4) || parts.some(part => !Number.isFinite(part))) throw new Error(`실제 색상 채널 오류: ${value}`);
+      return { channels: parts.slice(0, 3), alpha: parts[3] ?? 1 };
+    };
+    const control = (node: Element) => {
+      const computed = getComputedStyle(node);
+      const layers: ReturnType<typeof rgba>[] = [];
+      const opacities: number[] = [];
+      const images: string[] = [];
+      for (let parent: Element | null = node; parent; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        const layer = rgba(style.backgroundColor);
+        layers.push(layer);
+        images.push(style.backgroundImage);
+        if (layer.alpha === 1) break;
+      }
+      for (let parent: Element | null = node; parent; parent = parent.parentElement) opacities.push(Number(getComputedStyle(parent).opacity));
+      let background = [255, 255, 255];
+      for (const layer of layers.reverse()) background = layer.channels.map((channel, index) => channel * layer.alpha + background[index] * (1 - layer.alpha));
+      const foreground = rgba(computed.color);
+      const effective = foreground.channels.map((channel, index) => channel * foreground.alpha + background[index] * (1 - foreground.alpha));
+      const box = node.getBoundingClientRect();
+      return { tag: node.tagName, text: node.textContent, focused: active === node, focusVisible: node.matches(':focus-visible'), outlineStyle: computed.outlineStyle, outlineWidth: Number.parseFloat(computed.outlineWidth), color: computed.color, background: computed.backgroundColor, effectiveColor: `rgb(${effective.join(', ')})`, effectiveBackground: `rgb(${background.join(', ')})`, images, opacities, fontSize: Number.parseFloat(computed.fontSize), box: { x: box.x, y: box.y, right: box.right, bottom: box.bottom, width: box.width, height: box.height } };
+    };
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    const raw = generation ? localStorage.getItem(`nineflow-practice-results-v4:${generation}`) : null;
+    const results: Array<{ completedAt: string }> = raw ? JSON.parse(raw).results : [];
+    const dateKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    const dates = Array.from(element.querySelectorAll('time'), node => node.getAttribute('datetime'));
+    const expectedCounts = dates.map(date => results.filter(result => dateKey(new Date(result.completedAt)) === date).length);
+    const now = new Date();
+    return { viewport: { width: innerWidth, height: innerHeight, clientWidth: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth }, panel: { clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }, contrast: document.documentElement.dataset.contrast, textScale: document.documentElement.dataset.textScale, status: element.querySelector('[role="status"]')?.textContent, statusCount: element.querySelectorAll('[role="status"]').length, period: element.querySelector('.training-activity-heading p')?.textContent, dates, counts: Array.from(element.querySelectorAll('.training-activity-days li > b'), node => node.textContent), expectedCounts, expectedActiveDays: expectedCounts.filter(count => count > 0).length, today: dateKey(now), goal: goal ? { value: goal.querySelector('option:checked')?.getAttribute('value'), disabled: goal.hasAttribute('disabled'), describedBy: goal.getAttribute('aria-describedby'), options: Array.from(goal.querySelectorAll('option'), option => ({ value: option.getAttribute('value'), text: option.textContent })), ...control(goal) } : null, controls: Array.from(element.querySelectorAll('button, select'), control), alert: element.querySelector('#training-activity-goal-error')?.textContent, note: element.querySelector('#training-activity-goal-note')?.textContent, active: { tag: active?.tagName, id: active?.id, text: active?.textContent, connected: active?.isConnected, inert: Boolean(active?.closest('[inert], [aria-hidden="true"]')) } };
+  });
+  const sample = { phase, ...view, goal: view.goal ? { ...view.goal, ratio: contrastRatio(view.goal.effectiveColor, view.goal.effectiveBackground) } : null, saved: await readActivityGoalStorage(page), errors: [...errors], ...extra };
+  console.log('ACTIVITY_GOAL', JSON.stringify(sample));
+  await testInfo.attach(`activity-goal-${phase}.json`, { body: JSON.stringify(sample, null, 2), contentType: 'application/json' });
+  await page.screenshot({ path: testInfo.outputPath(`activity-goal-${phase}.png`) });
+  return sample;
+}
 
 function readRecoveryStorage(page: Page) {
   return page.evaluate(() => {
@@ -1630,3 +1749,304 @@ for (const contrast of ['standard', 'high'] as const) {
     });
   }
 }
+
+test('활동 목표는 기록 0건에도 키보드로 설정·복원·해제하고 좁은 화면과 고대비 큰 글자를 보존한다', async ({ page }, testInfo) => {
+  const errors = watchActivityGoalErrors(page);
+  await installActivityGoalFixture(page);
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  const activity = page.getByRole('region', { name: '최근 7일 훈련 활동', exact: true });
+  const goal = activity.getByRole('combobox', { name: '최근 7일 활동 목표(선택)', exact: true });
+  await expect(goal).toBeEnabled();
+  const initial = await captureActivityGoal(page, testInfo, 'empty-initial', errors);
+  expect(initial.goal?.value).toBe('');
+  expect(initial.goal?.options).toEqual([{ value: '', text: '설정 안 함' }, ...[1, 2, 3, 4, 5, 6, 7].map(day => ({ value: String(day), text: `${day}일` }))]);
+  expect(initial.status).toBe('완료 세션 0회 · 기록이 있는 날 0일 / 7일');
+  expect(initial.statusCount).toBe(1);
+  expect(initial.dates).toHaveLength(7);
+  expect(initial.saved.goal).toBeNull();
+  expect(initial.saved.writes).toEqual([]);
+  expect(JSON.parse(initial.saved.protected['nineflow-practice-results-v4:activity-goal-regression']!).results).toEqual([]);
+  await expect(page.getByText('첫 기록을 만들어 볼까요?', { exact: true })).toBeVisible();
+  await goal.focus();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Tab');
+  const keyboard = await captureActivityGoal(page, testInfo, 'empty-keyboard-selected', errors);
+  expect(keyboard.goal?.value).toBe('1');
+  expect(keyboard.saved.goal).toBe('1');
+  expect(keyboard.status).toBe('완료 세션 0회 · 기록이 있는 날 0일 / 7일 · 내 목표 1일 · 1일 더 활동하면 달성');
+  expect(keyboard.saved.protected).toEqual(initial.saved.protected);
+  await page.reload();
+  await expect(goal).toBeEnabled();
+  const restored = await captureActivityGoal(page, testInfo, 'empty-reloaded', errors);
+  expect(restored.goal?.value).toBe('1');
+  expect(restored.saved.goal).toBe('1');
+  expect(restored.saved.writes).toEqual([]);
+  expect(restored.saved.protected).toEqual(initial.saved.protected);
+
+  for (const profile of ['standard', 'high-large'] as const) {
+    if (profile === 'high-large') {
+      await page.locator('.readiness-banner button').press('Enter');
+      const readiness = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+      await readiness.getByRole('button', { name: '고대비', exact: true }).press('Enter');
+      await readiness.getByRole('button', { name: '큰 글자', exact: true }).press('Enter');
+      await page.keyboard.press('Escape');
+      await expect(readiness).toHaveCount(0);
+      await expect(page.locator('html')).toHaveAttribute('data-contrast', 'high');
+      await expect(page.locator('html')).toHaveAttribute('data-text-scale', 'large');
+    }
+    for (const viewport of [{ width: 320, height: 568 }, { width: 844, height: 360 }]) {
+      await page.setViewportSize(viewport);
+      await activity.getByRole('button', { name: '오늘 기준으로 새로고침', exact: true }).focus();
+      await page.keyboard.press('Tab');
+      const layout = await captureActivityGoal(page, testInfo, `layout-${profile}-${viewport.width}`, errors);
+      expect(layout.goal?.focused).toBe(true);
+      expect(layout.goal?.focusVisible).toBe(true);
+      expect(layout.goal?.outlineStyle).not.toBe('none');
+      expect(layout.goal!.outlineWidth).toBeGreaterThanOrEqual(3);
+      expect(layout.goal!.box.width).toBeGreaterThanOrEqual(44);
+      expect(layout.goal!.box.height).toBeGreaterThanOrEqual(44);
+      expect(layout.goal!.box.x).toBeGreaterThanOrEqual(0);
+      expect(layout.goal!.box.y).toBeGreaterThanOrEqual(0);
+      expect(layout.goal!.box.right).toBeLessThanOrEqual(viewport.width);
+      expect(layout.goal!.box.bottom).toBeLessThanOrEqual(viewport.height);
+      expect(layout.goal!.ratio).toBeGreaterThanOrEqual(4.5);
+      expect(layout.goal!.images.every(image => image === 'none')).toBe(true);
+      expect(layout.goal!.opacities.every(opacity => opacity === 1)).toBe(true);
+      expect(layout.goal!.fontSize).toBeGreaterThanOrEqual(profile === 'high-large' ? 13 : 12);
+      expect(layout.panel.scrollWidth).toBeLessThanOrEqual(layout.panel.clientWidth);
+      expect(layout.viewport.scrollWidth).toBeLessThanOrEqual(layout.viewport.clientWidth);
+      expect(layout.saved.protected).toEqual(initial.saved.protected);
+      if (profile === 'high-large') expect([layout.contrast, layout.textScale]).toEqual(['high', 'large']);
+    }
+  }
+  const accessibility = (await readActivityGoalStorage(page)).accessibility;
+  await goal.selectOption('');
+  const cleared = await captureActivityGoal(page, testInfo, 'empty-unset', errors);
+  expect(cleared.goal?.value).toBe('');
+  expect(cleared.saved.goal).toBeNull();
+  expect(cleared.status).toBe('완료 세션 0회 · 기록이 있는 날 0일 / 7일');
+  expect(cleared.saved.protected).toEqual(initial.saved.protected);
+  expect(cleared.saved.accessibility).toBe(accessibility);
+  await page.reload();
+  await expect(goal).toBeEnabled();
+  const clearedReload = await captureActivityGoal(page, testInfo, 'empty-unset-reloaded', errors);
+  expect(clearedReload.goal?.value).toBe('');
+  expect(clearedReload.saved.goal).toBeNull();
+  expect(clearedReload.saved.writes).toEqual([]);
+  expect(clearedReload.saved.protected).toEqual(initial.saved.protected);
+  expect(clearedReload.saved.accessibility).toBe(accessibility);
+  expect(errors).toEqual([]);
+});
+
+test('활동 목표는 같은 날 여러 보관 세션을 하루로 세고 미달·달성·초과와 날짜 새로고침을 구분한다', async ({ page }, testInfo) => {
+  const errors = watchActivityGoalErrors(page);
+  // These are retained record fixtures, not four games completed by this test.
+  await installActivityGoalFixture(page, { offsets: [0, 0, -1, -2] });
+  await page.goto('/');
+  const activity = page.getByRole('region', { name: '최근 7일 훈련 활동', exact: true });
+  const goal = activity.getByRole('combobox', { name: '최근 7일 활동 목표(선택)', exact: true });
+  await expect(goal).toBeEnabled();
+  const initial = await captureActivityGoal(page, testInfo, 'records-before-goal', errors);
+  expect(initial.expectedActiveDays).toBe(3);
+  expect(initial.expectedCounts.reduce((sum, count) => sum + count, 0)).toBe(4);
+  expect(initial.counts).toEqual(initial.expectedCounts.map(count => `${count}회`));
+  expect(initial.status).toBe('완료 세션 4회 · 기록이 있는 날 3일 / 7일');
+  for (const days of [4, 3, 2]) {
+    await goal.selectOption(String(days));
+    const selected = await captureActivityGoal(page, testInfo, `records-goal-${days}`, errors);
+    expect(selected.goal?.value).toBe(String(days));
+    expect(selected.saved.goal).toBe(String(days));
+    expect(selected.expectedActiveDays).toBe(3);
+    expect(selected.status).toBe(`완료 세션 4회 · 기록이 있는 날 3일 / 7일 · 내 목표 ${days}일 · ${days > 3 ? '1일 더 활동하면 달성' : '달성'}`);
+    expect(selected.saved.protected).toEqual(initial.saved.protected);
+  }
+  // Native same-document storage writes emit no storage event: refresh must
+  // reread the saved preference, not merely repeat the current React value.
+  await page.evaluate(key => localStorage.setItem(key, '6'), activityGoalKey);
+  const changedStore = await captureActivityGoal(page, testInfo, 'records-storage-before-refresh', errors);
+  expect(changedStore.goal?.value).toBe('2');
+  expect(changedStore.saved.goal).toBe('6');
+  const beforeRefresh = await readActivityGoalStorage(page);
+  const refresh = activity.getByRole('button', { name: '오늘 기준으로 새로고침', exact: true });
+  await refresh.press('Enter');
+  const refreshed = await captureActivityGoal(page, testInfo, 'records-refreshed', errors);
+  expect(refreshed.dates).toHaveLength(7);
+  expect(refreshed.dates.at(-1)).toBe(refreshed.today);
+  expect(refreshed.counts).toEqual(refreshed.expectedCounts.map(count => `${count}회`));
+  expect(refreshed.goal?.value).toBe('6');
+  expect(refreshed.status).toBe('완료 세션 4회 · 기록이 있는 날 3일 / 7일 · 내 목표 6일 · 3일 더 활동하면 달성');
+  expect(refreshed.active.text).toBe('오늘 기준으로 새로고침');
+  expect(refreshed.saved).toEqual(beforeRefresh);
+  expect(errors).toEqual([]);
+});
+
+test('활동 목표는 실제 다른 탭의 설정·해제를 반영하고 기록 전체삭제 뒤 목표를 유지한다', async ({ page, context }, testInfo) => {
+  const errors = watchActivityGoalErrors(page);
+  await installActivityGoalFixture(page, { offsets: [0, -1], rawGoal: '3' });
+  await page.goto('/');
+  const activity = page.getByRole('region', { name: '최근 7일 훈련 활동', exact: true });
+  const goal = activity.getByRole('combobox', { name: '최근 7일 활동 목표(선택)', exact: true });
+  await expect(goal).toBeEnabled();
+  const initial = await captureActivityGoal(page, testInfo, 'peer-initial', errors);
+  expect(initial.goal?.value).toBe('3');
+  expect(initial.saved.writes).toEqual([]);
+  const peer = await context.newPage();
+  const peerErrors = watchActivityGoalErrors(peer);
+  await peer.goto('/');
+  const peerGoal = peer.getByRole('combobox', { name: '최근 7일 활동 목표(선택)', exact: true });
+  await expect(peerGoal).toBeEnabled();
+  for (const value of ['5', '', '3']) {
+    await peerGoal.selectOption(value);
+    await captureActivityGoal(page, testInfo, `peer-${value || 'unset'}-requested`, errors);
+    await expect(goal).toHaveValue(value);
+    const synced = await captureActivityGoal(page, testInfo, `peer-${value || 'unset'}-settled`, errors);
+    expect(synced.goal?.value).toBe(value);
+    expect(synced.saved.goal).toBe(value || null);
+    expect(synced.saved.writes).toEqual([]);
+    expect(synced.saved.protected).toEqual(initial.saved.protected);
+  }
+  await peer.locator('.records-data-button').click();
+  const data = peer.getByRole('dialog', { name: '내 기록 백업·복원', exact: true });
+  await data.getByRole('button', { name: '전체 기록 삭제', exact: true }).click();
+  await expect(data).toContainText('2개 기록을 삭제할까요?');
+  await expect(data.getByRole('button', { name: '취소', exact: true })).toBeFocused();
+  await data.getByRole('button', { name: '삭제 확정', exact: true }).click();
+  await expect(data).toContainText('모두 삭제했습니다');
+  await captureActivityGoal(page, testInfo, 'peer-record-clear-requested', errors, { peerNotice: await data.textContent() });
+  await expect(page.locator('.header-status b')).toHaveText('0');
+  const deleted = await captureActivityGoal(page, testInfo, 'peer-record-clear-settled', errors);
+  expect(deleted.goal?.value).toBe('3');
+  expect(deleted.saved.goal).toBe('3');
+  expect(deleted.status).toBe('완료 세션 0회 · 기록이 있는 날 0일 / 7일 · 내 목표 3일 · 3일 더 활동하면 달성');
+  expect(deleted.counts).toEqual(Array(7).fill('0회'));
+  expect(deleted.saved.writes).toEqual([]);
+  expect(deleted.saved.protected['nineflow-practice-config-v1']).toBe(initial.saved.protected['nineflow-practice-config-v1']);
+  expect(deleted.saved.protected['nineflow-game-order-v2']).toBe(initial.saved.protected['nineflow-game-order-v2']);
+  const generation = deleted.saved.protected['nineflow-practice-results-generation-v1'];
+  expect(JSON.parse(deleted.saved.protected[`nineflow-practice-results-v4:${generation}`]!)).toEqual({ version: 4, generation, results: [] });
+  // A native clear in the disposable peer context emits key=null naturally.
+  await peer.evaluate(() => localStorage.clear());
+  await captureActivityGoal(page, testInfo, 'peer-site-clear-requested', errors);
+  await expect(goal).toHaveValue('');
+  const cleared = await captureActivityGoal(page, testInfo, 'peer-site-clear-settled', errors);
+  expect(cleared.saved.goal).toBeNull();
+  expect(cleared.saved.protected).toEqual({});
+  expect(cleared.saved.writes).toEqual([]);
+  expect(cleared.status).toBe('완료 세션 0회 · 기록이 있는 날 0일 / 7일');
+  await peer.close();
+  expect(errors).toEqual([]);
+  expect(peerErrors).toEqual([]);
+});
+
+test('활동 목표의 저장·해제 실패는 현재 선택과 원문을 보존하고 같은 값 재시도로 복구한다', async ({ page }, testInfo) => {
+  const errors = watchActivityGoalErrors(page);
+  await installActivityGoalFixture(page, { offsets: [0], rawGoal: '3' });
+  await page.goto('/');
+  const activity = page.getByRole('region', { name: '최근 7일 훈련 활동', exact: true });
+  const goal = activity.getByRole('combobox', { name: '최근 7일 활동 목표(선택)', exact: true });
+  await expect(goal).toBeEnabled();
+  const before = await readActivityGoalStorage(page);
+  const retry = activity.getByRole('button', { name: '목표 다시 저장', exact: true });
+  const warning = '활동 목표를 이 화면에만 적용했습니다. 새로고침하면 이전 설정으로 돌아갈 수 있습니다.';
+  await setActivityGoalFault(page, 'set');
+  await goal.selectOption('5');
+  const failedSet = await captureActivityGoal(page, testInfo, 'set-failed', errors);
+  expect(failedSet.goal?.value).toBe('5');
+  expect(failedSet.goal?.disabled).toBe(false);
+  expect(failedSet.saved.goal).toBe('3');
+  expect(failedSet.alert).toBe(warning);
+  expect(failedSet.saved.protected).toEqual(before.protected);
+  await expect(retry).toBeEnabled();
+  await setActivityGoalFault(page, null);
+  await retry.press('Enter');
+  const saved = await captureActivityGoal(page, testInfo, 'set-retried', errors);
+  expect(saved.goal?.value).toBe('5');
+  expect(saved.saved.goal).toBe('5');
+  expect(saved.alert).toBeUndefined();
+  expect(saved.goal?.focused).toBe(true);
+  await expect(retry).toHaveCount(0);
+  expect(saved.saved.protected).toEqual(before.protected);
+  await setActivityGoalFault(page, 'remove');
+  await goal.selectOption('');
+  const failedRemove = await captureActivityGoal(page, testInfo, 'remove-failed', errors);
+  expect(failedRemove.goal?.value).toBe('');
+  expect(failedRemove.goal?.disabled).toBe(false);
+  expect(failedRemove.saved.goal).toBe('5');
+  expect(failedRemove.alert).toBe(warning);
+  expect(failedRemove.saved.protected).toEqual(before.protected);
+  await expect(retry).toBeEnabled();
+  await setActivityGoalFault(page, null);
+  await retry.press('Space');
+  const removed = await captureActivityGoal(page, testInfo, 'remove-retried', errors);
+  expect(removed.goal?.value).toBe('');
+  expect(removed.saved.goal).toBeNull();
+  expect(removed.alert).toBeUndefined();
+  expect(removed.goal?.focused).toBe(true);
+  expect(removed.saved.writes).toEqual([{ method: 'set', value: '5' }, { method: 'set', value: '5' }, { method: 'remove', value: null }, { method: 'remove', value: null }]);
+  await expect(retry).toHaveCount(0);
+  expect(removed.saved.protected).toEqual(before.protected);
+  expect(errors).toEqual([]);
+});
+
+test('활동 목표 읽기만 실패해도 기록은 유지하고 기존 새로고침으로 복구하며 초점을 보존한다', async ({ page }, testInfo) => {
+  const errors = watchActivityGoalErrors(page);
+  await installActivityGoalFixture(page, { offsets: [0], rawGoal: '3', fault: 'get' });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  const activity = page.getByRole('region', { name: '최근 7일 훈련 활동', exact: true });
+  const goal = activity.getByRole('combobox', { name: '최근 7일 활동 목표(선택)', exact: true });
+  const failed = await captureActivityGoal(page, testInfo, 'read-failed', errors);
+  expect(failed.goal?.disabled).toBe(true);
+  expect(failed.alert).toBe('활동 목표를 불러오지 못했습니다. 새로고침으로 다시 확인해 주세요.');
+  expect(failed.saved.goal).toBe('3');
+  expect(failed.saved.writes).toEqual([]);
+  await expect(page.locator('.header-status b')).toHaveText('1');
+  await expect(page.locator('.hero-primary')).toBeEnabled();
+  await setActivityGoalFault(page, null);
+  const refresh = activity.getByRole('button', { name: '오늘 기준으로 새로고침', exact: true });
+  await refresh.press('Enter');
+  const restored = await captureActivityGoal(page, testInfo, 'read-refreshed', errors);
+  expect(restored.goal?.value).toBe('3');
+  expect(restored.goal?.disabled).toBe(false);
+  expect(restored.alert).toBeUndefined();
+  expect(restored.saved.goal).toBe('3');
+  expect(restored.saved.writes).toEqual([]);
+  expect(restored.saved.protected).toEqual(failed.saved.protected);
+  await expect(goal).toBeEnabled();
+  await expect(refresh).toBeFocused();
+  expect(errors).toEqual([]);
+});
+
+test('올바르지 않은 활동 목표 원문은 설정 안 함으로 읽고 새로고침·날짜 갱신에도 덮어쓰지 않는다', async ({ page }, testInfo) => {
+  const errors = watchActivityGoalErrors(page);
+  const invalid = ['0', '8', '3.5', ' 3', '{"days":3}'];
+  await installActivityGoalFixture(page, { rawGoal: invalid[0] });
+  await page.goto('/');
+  const activity = page.getByRole('region', { name: '최근 7일 훈련 활동', exact: true });
+  const goal = activity.getByRole('combobox', { name: '최근 7일 활동 목표(선택)', exact: true });
+  await expect(goal).toBeEnabled();
+  const before = (await readActivityGoalStorage(page)).protected;
+  for (const [index, raw] of invalid.entries()) {
+    if (index > 0) {
+      await page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: activityGoalKey, value: raw });
+      await page.reload();
+      await expect(goal).toBeEnabled();
+    }
+    const loaded = await captureActivityGoal(page, testInfo, `invalid-${index}-loaded`, errors, { invalidRaw: raw });
+    expect(loaded.goal?.value).toBe('');
+    expect(loaded.saved.goal).toBe(raw);
+    expect(loaded.saved.writes).toEqual([]);
+    expect(loaded.saved.protected).toEqual(before);
+    expect(loaded.status).toBe('완료 세션 0회 · 기록이 있는 날 0일 / 7일');
+    await activity.getByRole('button', { name: '오늘 기준으로 새로고침', exact: true }).press('Enter');
+    const refreshed = await captureActivityGoal(page, testInfo, `invalid-${index}-refreshed`, errors, { invalidRaw: raw });
+    expect(refreshed.goal?.value).toBe('');
+    expect(refreshed.saved.goal).toBe(raw);
+    expect(refreshed.saved.writes).toEqual([]);
+    expect(refreshed.saved.protected).toEqual(before);
+    expect(refreshed.status).toBe('완료 세션 0회 · 기록이 있는 날 0일 / 7일');
+  }
+  expect(errors).toEqual([]);
+});
