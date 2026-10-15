@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { games, type GameId, type SessionResult } from '../app/lib/game-data';
-import { createPracticeResultsBackup } from '../app/lib/practice-backup';
-import { compactReviewPayload, type GenericReviewAttempt } from '../app/lib/review-data';
+import { createPracticeResultsBackup, PRACTICE_RESULTS_BACKUP_FORMAT, PRACTICE_RESULTS_BACKUP_VERSION } from '../app/lib/practice-backup';
+import { compactReviewPayload, REVIEW_SCHEMA_VERSION, type GenericReviewAttempt } from '../app/lib/review-data';
 
 function reviewFilterFixtures(): SessionResult[] {
   const attempt = (id: string, index: number, errorCodes: string[]): GenericReviewAttempt => ({
@@ -193,6 +193,78 @@ test('복습 유형은 다른 탭의 정상 가져오기로 선택 세션이 정
   } finally {
     await peer.close();
   }
+});
+
+test('정상 백업의 예약된 오류 코드도 복습 안내·숫자 집계·유형 선택을 보존한다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  const codes = ['constructor', '__proto__', 'toString'];
+  const attempts: GenericReviewAttempt[] = codes.map((code, index) => ({ kind: 'generic', id: `reserved-${index}`, index, status: 'error', errorCodes: [code], title: `가져온 문항 ${index + 1}`, prompt: '예약 코드 복습 예제', expected: '기대 응답', selected: '저장된 응답', explanation: '검증을 통과한 백업의 코드와 안내를 확인합니다.' }));
+  const errorCounts = Object.fromEntries(codes.map(code => [code, 1]));
+  const base = reviewFilterFixtures()[0];
+  const results: SessionResult[] = [
+    { ...base, id: 'reserved-full', completedAt: '2026-10-15T01:02:00.000Z', accuracy: 0, errors: 3, detail: { ...base.detail, quantity: 3 }, review: { version: REVIEW_SCHEMA_VERSION, gameId: 'rps', attempts, summary: { attemptedCount: 3, correctCount: 0, neutralCount: 0, reviewPointCount: 3, errorCounts, omittedDetailCount: 0, coverage: 'full' } } },
+    { ...base, id: 'reserved-sampled', completedAt: '2026-10-15T01:01:00.000Z', accuracy: 25, errors: 3, review: { version: REVIEW_SCHEMA_VERSION, gameId: 'rps', attempts: [attempts[1]], summary: { attemptedCount: 4, correctCount: 1, neutralCount: 0, reviewPointCount: 3, errorCounts, omittedDetailCount: 3, coverage: 'sampled' } } },
+  ];
+  const raw = JSON.stringify({ format: PRACTICE_RESULTS_BACKUP_FORMAT, version: PRACTICE_RESULTS_BACKUP_VERSION, exportedAt: '2026-10-15T01:03:00.000Z', results });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.locator('.records-data-button').click();
+  const data = page.getByRole('dialog', { name: '내 기록 백업·복원', exact: true });
+  await data.locator('input[type="file"]').setInputFiles({ name: 'reserved-review-codes.json', mimeType: 'application/json', buffer: Buffer.from(raw) });
+  await expect(data.locator('.data-import-preview')).toContainText('2개 기록');
+  await data.getByRole('button', { name: '기존 기록과 합치기', exact: true }).click();
+  await expect(data.locator('.data-dialog-notice')).toContainText('현재 총 2개');
+  await data.getByRole('button', { name: '닫기', exact: true }).click();
+  const readSaved = () => page.evaluate(() => {
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    return { generation, raw: generation ? localStorage.getItem(`nineflow-practice-results-v4:${generation}`) : null };
+  });
+  const saved = await readSaved();
+  const restored = JSON.parse(saved.raw!).results as SessionResult[];
+  expect(restored).toHaveLength(2);
+  for (const result of restored) expect(result.review?.summary.errorCounts).toEqual(errorCounts);
+  const opener = page.locator('.home-review-ranking').getByRole('button', { name: /추가 확인이 필요한 응답/ }).first();
+  await opener.click();
+  const review = page.getByRole('dialog', { name: '내 실수 복습', exact: true });
+  const filter = review.getByRole('combobox', { name: '복습 유형', exact: true });
+  const session = review.getByRole('combobox', { name: '세션·비교 기준', exact: true });
+  const list = review.getByRole('listbox', { name: '저장된 시도 목록' });
+  const observe = async (label: string) => {
+    const snapshot = { label, session: await session.inputValue(), value: await filter.inputValue(), ids: await list.getByRole('option').evaluateAll(items => items.map(item => item.getAttribute('data-review-attempt-id'))), status: await review.locator('.review-attempt-filter [role="status"]').textContent(), labels: await review.locator('.review-error-tips b').allTextContents(), errors };
+    console.log('REVIEW_RESERVED_CODES', JSON.stringify(snapshot));
+    await testInfo.attach(`review-reserved-${label}.json`, { body: JSON.stringify(snapshot, null, 2), contentType: 'application/json' });
+    await page.screenshot({ path: testInfo.outputPath(`review-reserved-${label}.png`) });
+    return snapshot;
+  };
+  await expect(session).toHaveValue('reserved-full');
+  await expect(filter.locator('option')).toHaveCount(4);
+  for (const [index, code] of codes.entries()) {
+    await filter.selectOption(code);
+    const current = await observe(`full-${index}`);
+    expect(current.value).toBe(code);
+    expect(current.ids).toEqual([`reserved-${index}`]);
+    expect(current.labels).toEqual(['추가 확인이 필요한 응답']);
+    expect(current.status).toBe('현재 표시 1개 · 저장된 상세 3개');
+  }
+  await session.selectOption('reserved-sampled');
+  await filter.selectOption('constructor');
+  const omitted = await observe('sampled-omitted');
+  expect(omitted.value).toBe('constructor');
+  expect(omitted.ids).toEqual([]);
+  expect(omitted.status).toBe('현재 표시 0개 · 저장된 상세 1개 · 상세 3개가 정리되었습니다.');
+  await expect(list).toContainText('선택한 유형의 보관 상세가 없습니다.');
+  await filter.selectOption('__proto__');
+  const retained = await observe('sampled-retained');
+  expect(retained.value).toBe('__proto__');
+  expect(retained.ids).toEqual(['reserved-1']);
+  expect(retained.labels).toEqual(['추가 확인이 필요한 응답']);
+  expect(await readSaved()).toEqual(saved);
+  await review.getByRole('button', { name: '복습 센터 닫기', exact: true }).click();
+  await expect(review).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  expect(errors).toEqual([]);
 });
 
 for (const width of [390, 1280]) {
