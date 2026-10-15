@@ -1132,7 +1132,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
     ? `채점 ${config.quantity}문항 · 준비 별도`
     : `${config.quantity}${progressUnitForGame(gameId, mode)}`;
   const practiceTimingSummary = guidedPacing ? '응답 제한 없음'
-    : gameId === 'nback' && nbackPreferences.progression === 'fast' ? '응답 후 빠른 전환'
+    : gameId === 'nback' && nbackPreferences.progression === 'fast' ? `응답 후 빠른 전환 · 무응답 제한 ${formatPace(practiceConfig.paceMs)}`
       : `${gameId === 'nback' ? '고정 간격' : practiceSpecs[gameId].paceLabel} ${formatPace(practiceConfig.paceMs)}`;
   const practiceStartSummary = gameId === 'appointment' ? practiceTimingSummary
     : `${quantitySummary(practiceConfig, 'practice')} · ${practiceTimingSummary}`;

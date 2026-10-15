@@ -1095,7 +1095,9 @@ test('시작 요약은 N-back 빠른 전환보다 무시간제를 우선하고 �
   const practice = nback.getByRole('button', { name: /^설명·연습 시작/ });
   await nback.locator('.practice-advanced-settings > summary').press('Enter');
   await nback.getByRole('radio', { name: /^응답 빠른 전환/ }).press('Space');
-  await expect(practice).toContainText('채점 20문항 · 준비 별도 · 응답 후 빠른 전환');
+  await expect(practice).toContainText('채점 20문항 · 준비 별도 · 응답 후 빠른 전환 · 무응답 제한 3초');
+  await nback.getByRole('button', { name: '문제 간격 늘리기', exact: true }).press('Enter');
+  await expect(practice).toContainText('응답 후 빠른 전환 · 무응답 제한 3.5초');
   await nback.getByRole('checkbox', { name: /시간 제한 없이 연습/ }).press('Space');
   await expect(practice).toContainText('채점 20문항 · 준비 별도 · 응답 제한 없음');
   await expect(practice).not.toContainText('응답 후 빠른 전환');
@@ -1105,7 +1107,7 @@ test('시작 요약은 N-back 빠른 전환보다 무시간제를 우선하고 �
   await nback.screenshot({ path: testInfo.outputPath('start-summary-nback-guided.png') });
   await nback.getByRole('radiogroup', { name: '진행 방식', exact: true }).getByRole('radio', { name: /^연습 모드/ }).press('Space');
   await nback.getByRole('checkbox', { name: /시간 제한 없이 연습/ }).press('Space');
-  await expect(practice).toContainText('응답 후 빠른 전환');
+  await expect(practice).toContainText('응답 후 빠른 전환 · 무응답 제한 3.5초');
   await nback.getByRole('button', { name: '연습 닫기', exact: true }).click();
   await page.getByRole('button', { name: /약속 정하기, 난이도 상, 설정 열기/ }).click();
   const appointment = page.locator('section[data-game="appointment"]');
