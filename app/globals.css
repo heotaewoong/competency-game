@@ -3132,6 +3132,7 @@ html[data-motion="reduce"] *, html[data-motion="reduce"] *::before, html[data-mo
    and the fixed start row. Tighten only that gap so the shortcut stays fully
    visible and clickable instead of slipping beneath the action surface. */
 @media (min-width: 621px) and (max-height: 420px) {
+  .stage-content:has(> .stage-intro) > .stage-intro { padding-top: 16px; }
   .intro-settings-shortcut { margin-top: 8px; }
 }
 
