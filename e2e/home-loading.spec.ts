@@ -2247,7 +2247,7 @@ for (const timezone of ['Asia/Seoul', 'America/New_York']) {
       const chunks: Buffer[] = [];
       for await (const chunk of stream) chunks.push(Buffer.from(chunk));
       const bytes = Buffer.concat(chunks);
-      const csv = bytes.toString('utf8');
+      const csv: string = bytes.toString('utf8');
       const csvRows = csv.slice(1, -2).split('\r\n').map(line => Array.from(line.matchAll(/"((?:[^"]|"")*)"(?:,|$)/g), match => match[1].replaceAll('""', '"')));
       const exported = await captureHistoryDate(page, testInfo, 'full-csv', errors, { filename: download.suggestedFilename(), downloadBytes: bytes.length, csvRows });
       expect(await download.failure()).toBeNull();
