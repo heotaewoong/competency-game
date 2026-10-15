@@ -681,6 +681,13 @@ export default function Home() {
   }
 
   const closeActiveGame = useCallback(() => setActiveGame(null), []);
+  const openResultBackup = useCallback(async (signal: AbortSignal) => {
+    if (signal.aborted) return;
+    await loadDataManagementDialog();
+    if (signal.aborted) return;
+    setActiveGame(null);
+    setDataManagementOpen(true);
+  }, []);
   const openGame = useCallback((gameId: GameId, opener?: HTMLButtonElement) => {
     // Safari pointer clicks do not focus buttons; preserve the actual home trigger.
     opener?.focus({ preventScroll: true });
@@ -1062,7 +1069,7 @@ export default function Home() {
       {reviewSessionId !== null && <ReviewDialog results={results} initialSessionId={reviewSessionId || undefined} initialErrorCode={reviewErrorCode || undefined} onClose={closeReview} onPracticeGame={(gameId) => { closeReview(); openGame(gameId); }} />}
       {activeGame && (
         <Suspense fallback={<StageLoading onClose={closeActiveGame} />}>
-          <GameStage key={activeGame} gameId={activeGame} onClose={closeActiveGame} onSwitch={switchActiveGame} onSave={saveResult} onReadinessChecked={handleReadinessChecked} />
+          <GameStage key={activeGame} gameId={activeGame} onClose={closeActiveGame} onSwitch={switchActiveGame} onSave={saveResult} onReadinessChecked={handleReadinessChecked} onOpenBackup={openResultBackup} />
         </Suspense>
       )}
     </main>
