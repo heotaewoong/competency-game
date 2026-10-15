@@ -6,6 +6,94 @@ import { contrastRatio } from './color-contrast';
 
 const activityGoalKey = 'nineflow-training-activity-goal-v1';
 
+async function installHistoryDateFixture(page: Page) {
+  await page.addInitScript(() => {
+    const generationKey = 'nineflow-practice-results-generation-v1';
+    if (localStorage.getItem(generationKey) !== null) return;
+    const now = new Date();
+    const generation = 'history-date-regression';
+    const offsetText = (timestamp: number, minutes: number, suffix: string) => new Date(timestamp + minutes * 60_000).toISOString().slice(0, -1) + suffix;
+    const results = [0, -1, -20].flatMap((offset, group) => Array.from({ length: group < 2 ? 10 : 4 }, (_, index) => {
+      const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, index < 2 ? (now.getTimezoneOffset() < 0 ? 0 : 23) : 11, index < 2 ? 30 : 60 - index);
+      const completedAt = group === 0 && index < 2 ? offsetText(date.getTime(), index === 0 ? 540 : -240, index === 0 ? '+09:00' : '-04:00') : date.toISOString();
+      return { id: `date-record-${group}-${String(index).padStart(2, '0')}`, gameId: index % 2 ? 'number' : 'rps', completedAt, accuracy: 30 + group * 10 + index, medianRt: 720, stability: 74, errors: 2, detail: { sessionMode: index % 4 < 2 ? 'practice' : 'simulation', quantity: 20, paceMs: 3000, practiceFocus: 'full', guidedPacing: '설정 제한시간 적용', accessibilityProfile: 'standard|standard|system', simulationPresetVersion: 'public-rules-training-v4-2026-09' } };
+    }));
+    localStorage.setItem(generationKey, generation);
+    localStorage.setItem(`nineflow-practice-results-v4:${generation}`, JSON.stringify({ version: 4, generation, results }));
+    localStorage.setItem('nineflow-practice-config-v1', JSON.stringify({ rps: { quantity: 9, paceMs: 4500 } }));
+    localStorage.setItem('nineflow-game-order-v2', 'perceived');
+    localStorage.setItem('nineflow-training-activity-goal-v1', '3');
+  });
+}
+
+async function readHistoryDateOracle(page: Page) {
+  return page.evaluate(() => {
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    const raw = generation ? localStorage.getItem(`nineflow-practice-results-v4:${generation}`) : null;
+    const results: Array<{ id: string; gameId: string; completedAt: string; accuracy: number; medianRt: number; stability: number; errors: number; detail: Record<string, string | number> }> = raw ? JSON.parse(raw).results : [];
+    const dateKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    const formatter = new Intl.DateTimeFormat('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const records = [...results].sort((left, right) => Date.parse(right.completedAt) - Date.parse(left.completedAt) || left.id.localeCompare(right.id)).map(record => ({ ...record, date: dateKey(new Date(record.completedAt)), when: formatter.format(new Date(record.completedAt)), utc: new Date(record.completedAt).toISOString() }));
+    return { generation, records, dates: [...new Set(records.map(record => record.date))], offsetPair: records.filter(record => record.id === 'date-record-0-00' || record.id === 'date-record-0-01').map(record => ({ id: record.id, raw: record.completedAt, timestamp: Date.parse(record.completedAt), date: record.date, utcDate: new Date(record.completedAt).toISOString().slice(0, 10) })) };
+  });
+}
+
+async function captureHistoryDate(page: Page, testInfo: TestInfo, phase: string, errors: string[], extra: Record<string, unknown> = {}) {
+  const dateControl = page.locator('#history-completed-date');
+  if (await dateControl.count()) await dateControl.scrollIntoViewIfNeeded();
+  else await page.locator('#records-title').scrollIntoViewIfNeeded();
+  const view = await page.evaluate(() => {
+    const history = document.querySelector('.history-panel');
+    const date = history?.querySelector('#history-completed-date');
+    const active = document.activeElement;
+    const rgba = (value: string) => {
+      if (!/^rgba?\(/.test(value)) throw new Error(`지원하지 않는 실제 색상: ${value}`);
+      const parts = value.match(/[\d.]+/g)!.map(Number);
+      if ((parts.length !== 3 && parts.length !== 4) || parts.some(part => !Number.isFinite(part))) throw new Error(`실제 색상 채널 오류: ${value}`);
+      return { channels: parts.slice(0, 3), alpha: parts[3] ?? 1 };
+    };
+    const control = (node: Element) => {
+      const style = getComputedStyle(node);
+      const layers: ReturnType<typeof rgba>[] = [];
+      const images: string[] = [];
+      const opacities: number[] = [];
+      for (let parent: Element | null = node; parent; parent = parent.parentElement) {
+        const computed = getComputedStyle(parent);
+        const layer = rgba(computed.backgroundColor);
+        layers.push(layer);
+        images.push(computed.backgroundImage);
+        if (layer.alpha === 1) break;
+      }
+      for (let parent: Element | null = node; parent; parent = parent.parentElement) opacities.push(Number(getComputedStyle(parent).opacity));
+      let background = [255, 255, 255];
+      for (const layer of layers.reverse()) background = layer.channels.map((channel, index) => channel * layer.alpha + background[index] * (1 - layer.alpha));
+      const foreground = rgba(style.color);
+      const effective = foreground.channels.map((channel, index) => channel * foreground.alpha + background[index] * (1 - foreground.alpha));
+      const box = node.getBoundingClientRect();
+      return { tag: node.tagName, focused: active === node, focusVisible: node.matches(':focus-visible'), outlineStyle: style.outlineStyle, outlineWidth: Number.parseFloat(style.outlineWidth), fontSize: Number.parseFloat(style.fontSize), effectiveColor: `rgb(${effective.join(', ')})`, effectiveBackground: `rgb(${background.join(', ')})`, images, opacities, box: { x: box.x, y: box.y, width: box.width, height: box.height, right: box.right, bottom: box.bottom } };
+    };
+    return {
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      contrast: document.documentElement.dataset.contrast, textScale: document.documentElement.dataset.textScale,
+      viewport: { width: innerWidth, height: innerHeight, clientWidth: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth },
+      panel: history ? { clientWidth: history.clientWidth, scrollWidth: history.scrollWidth } : null,
+      filters: Array.from(history?.querySelectorAll('select') ?? [], select => ({ id: select.id, label: select.closest('label')?.childNodes[0]?.textContent, value: select.querySelector('option:checked')?.getAttribute('value'), options: Array.from(select.querySelectorAll('option'), option => ({ value: option.getAttribute('value'), text: option.textContent })) })),
+      date: date ? { value: date.querySelector('option:checked')?.getAttribute('value'), describedBy: date.getAttribute('aria-describedby'), ...control(date) } : null,
+      note: history?.querySelector('#history-date-note')?.textContent,
+      rows: Array.from(history?.querySelectorAll('.record-list > article') ?? [], article => ({ title: article.querySelector('div > b')?.textContent, when: article.querySelector('div > small')?.textContent, score: article.querySelector('dd')?.textContent })),
+      status: history?.querySelector('[role="status"]')?.textContent, empty: history?.querySelector('.history-empty')?.textContent,
+      more: history?.querySelector('.history-more')?.textContent,
+      unfiltered: { header: document.querySelector('.header-status')?.textContent, summary: document.querySelector('.record-summary')?.textContent, gameRecords: document.querySelector('.game-record-grid')?.textContent, progress: Array.from(document.querySelectorAll('.record-progress'), panel => panel.textContent), activity: document.querySelector('.training-activity')?.textContent, activityDates: Array.from(document.querySelectorAll('.training-activity-days li'), day => ({ date: day.getAttribute('data-date'), count: day.querySelector('b')?.textContent })) },
+      active: { tag: active?.tagName, id: active?.id, text: active?.textContent?.slice(0, 160), connected: active?.isConnected, inert: Boolean(active?.closest('[inert], [aria-hidden="true"]')) },
+    };
+  });
+  const sample = { phase, ...view, date: view.date ? { ...view.date, ratio: contrastRatio(view.date.effectiveColor, view.date.effectiveBackground) } : null, saved: await readActivityGoalStorage(page), errors: [...errors], ...extra };
+  console.log('HISTORY_DATE', JSON.stringify(sample));
+  await testInfo.attach(`history-date-${phase}.json`, { body: JSON.stringify(sample, null, 2), contentType: 'application/json' });
+  await page.screenshot({ path: testInfo.outputPath(`history-date-${phase}.png`) });
+  return sample;
+}
+
 async function installActivityGoalFixture(page: Page, { offsets = [], rawGoal = null, fault = null }: { offsets?: number[]; rawGoal?: string | null; fault?: 'get' | 'set' | 'remove' | null } = {}) {
   await page.addInitScript(({ key, dates, initialGoal, initialFault }) => {
     const generationKey = 'nineflow-practice-results-generation-v1';
@@ -2052,3 +2140,312 @@ test('올바르지 않은 활동 목표 원문은 설정 안 함으로 읽고 �
   }
   expect(errors).toEqual([]);
 });
+
+for (const timezone of ['Asia/Seoul', 'America/New_York']) {
+  test.describe(`완료 날짜 찾기 ${timezone}`, () => {
+    test.use({ timezoneId: timezone });
+
+    test('완료 날짜·게임·모드 교집합과 더 보기는 전체 활동·비교·CSV·저장 원문을 바꾸지 않는다', async ({ page }, testInfo) => {
+      const errors = watchActivityGoalErrors(page);
+      await installHistoryDateFixture(page);
+      await page.goto('/');
+      await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+      const oracle = await readHistoryDateOracle(page);
+      const history = page.locator('.history-panel');
+      await history.locator('summary').press('Enter');
+      const game = history.getByRole('combobox', { name: '게임', exact: true });
+      const mode = history.getByRole('combobox', { name: '모드', exact: true });
+      const date = history.getByRole('combobox', { name: '완료 날짜', exact: true });
+      await expect(date).toBeVisible();
+      const initial = await captureHistoryDate(page, testInfo, 'initial', errors, { oracle });
+      const expectedRows = (records: typeof oracle.records) => records.map(record => ({ title: games.find(game => game.id === record.gameId)!.title, when: `${record.when} · ${record.detail.sessionMode === 'practice' ? '연습 모드' : '실전형 연습'}`, score: `${record.accuracy}%` }));
+      const check = (sample: Awaited<ReturnType<typeof captureHistoryDate>>, records: typeof oracle.records, limit = 8) => {
+        expect(sample.rows).toEqual(expectedRows(records.slice(0, limit)));
+        expect(sample.status).toBe(`저장된 24개 중 ${records.length}개 일치 · ${Math.min(limit, records.length)}개 표시`);
+        expect(sample.unfiltered).toEqual(initial.unfiltered);
+        expect(sample.saved.protected).toEqual(initial.saved.protected);
+        expect(sample.saved.goal).toBe('3');
+        expect(sample.errors).toEqual([]);
+      };
+      expect(oracle.records).toHaveLength(24);
+      expect(oracle.dates).toHaveLength(3);
+      expect(oracle.offsetPair).toHaveLength(2);
+      expect(oracle.offsetPair[0].timestamp).toBe(oracle.offsetPair[1].timestamp);
+      expect(oracle.offsetPair[0].date).toBe(oracle.offsetPair[1].date);
+      expect(oracle.offsetPair.some(record => record.raw.slice(0, 10) !== record.date)).toBe(true);
+      expect(oracle.offsetPair.every(record => record.utcDate !== record.date)).toBe(true);
+      expect(initial.timezone).toBe(timezone);
+      expect(initial.filters.map(filter => filter.label)).toEqual(['게임', '모드', '완료 날짜']);
+      expect(initial.filters[2].options).toEqual([{ value: '', text: '모든 날짜' }, ...oracle.dates.map(value => ({ value, text: value }))]);
+      expect(initial.date?.describedBy).toBe('history-date-note');
+      expect(initial.note).toBe('브라우저 현지 날짜 기준입니다. 필터는 화면 표시만 바꾸며 백업·활동 집계에는 적용하지 않습니다.');
+      expect(initial.unfiltered.progress.length).toBe(2);
+      check(initial, oracle.records);
+      for (const limit of [16, 24]) {
+        await history.getByRole('button', { name: /기록 더 보기/ }).press('Enter');
+        const expanded = await captureHistoryDate(page, testInfo, `all-${limit}`, errors);
+        check(expanded, oracle.records, limit);
+      }
+      await expect(history.getByRole('button', { name: /기록 더 보기/ })).toHaveCount(0);
+      await mode.selectOption('practice');
+      const modeReset = await captureHistoryDate(page, testInfo, 'mode-limit-reset', errors);
+      check(modeReset, oracle.records.filter(record => record.detail.sessionMode === 'practice'));
+      expect(modeReset.rows).toHaveLength(8);
+      expect(oracle.records.filter(record => record.detail.sessionMode === 'practice')).toHaveLength(14);
+      await mode.selectOption('all');
+      await history.getByRole('button', { name: /기록 더 보기/ }).press('Enter');
+      await game.selectOption('rps');
+      const gameReset = await captureHistoryDate(page, testInfo, 'game-limit-reset', errors);
+      check(gameReset, oracle.records.filter(record => record.gameId === 'rps'));
+      expect(gameReset.rows).toHaveLength(8);
+      expect(oracle.records.filter(record => record.gameId === 'rps')).toHaveLength(12);
+      await game.selectOption('all');
+      await history.getByRole('button', { name: /기록 더 보기/ }).press('Enter');
+
+      const newest = oracle.dates[0];
+      const newestRecords = oracle.records.filter(record => record.date === newest);
+      await date.selectOption(newest);
+      const day = await captureHistoryDate(page, testInfo, 'newest-limit-reset', errors);
+      check(day, newestRecords);
+      expect(newestRecords).toHaveLength(10);
+      expect(day.more).toBe('기록 더 보기 (2개 남음)');
+      await history.getByRole('button', { name: /기록 더 보기/ }).press('Enter');
+      const expandedDay = await captureHistoryDate(page, testInfo, 'newest-expanded', errors);
+      check(expandedDay, newestRecords, 16);
+      await game.selectOption('rps');
+      const gameDay = await captureHistoryDate(page, testInfo, 'date-game', errors);
+      check(gameDay, newestRecords.filter(record => record.gameId === 'rps'));
+      await mode.selectOption('practice');
+      const intersection = await captureHistoryDate(page, testInfo, 'date-game-mode', errors);
+      check(intersection, newestRecords.filter(record => record.gameId === 'rps' && record.detail.sessionMode === 'practice'));
+
+      const oldest = oracle.dates[2];
+      const oldestRecords = oracle.records.filter(record => record.date === oldest);
+      expect(oracle.records.slice(0, 8).every(record => record.date !== oldest)).toBe(true);
+      await date.selectOption(oldest);
+      const old = await captureHistoryDate(page, testInfo, 'old-date-outside-first-eight', errors);
+      check(old, oldestRecords.filter(record => record.gameId === 'rps' && record.detail.sessionMode === 'practice'));
+      expect(old.filters[2].options).toEqual(initial.filters[2].options);
+      await game.selectOption('number');
+      await mode.selectOption('unknown');
+      const empty = await captureHistoryDate(page, testInfo, 'empty-intersection', errors);
+      check(empty, []);
+      expect(empty.date?.value).toBe(oldest);
+      expect(empty.empty).toBe('이 조건의 기록이 없습니다. 다른 날짜·게임·모드를 선택하거나 필터를 초기화하세요.');
+      await mode.selectOption('simulation');
+      const beforeExport = await captureHistoryDate(page, testInfo, 'filtered-before-full-export', errors);
+      check(beforeExport, oldestRecords.filter(record => record.gameId === 'number' && record.detail.sessionMode === 'simulation'));
+
+      const opener = page.locator('.records-data-button');
+      await opener.press('Enter');
+      const data = page.getByRole('dialog', { name: '내 기록 백업·복원', exact: true });
+      const downloadPromise = page.waitForEvent('download');
+      await data.getByRole('button', { name: 'CSV 요약 받기', exact: true }).press('Enter');
+      const download = await downloadPromise;
+      const stream = await download.createReadStream();
+      if (!stream) throw new Error('Actual history date CSV download stream is unavailable');
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+      const bytes = Buffer.concat(chunks);
+      const csv: string = bytes.toString('utf8');
+      const csvRows = csv.slice(1, -2).split('\r\n').map(line => Array.from(line.matchAll(/"((?:[^"]|"")*)"(?:,|$)/g), match => match[1].replaceAll('""', '"')));
+      const exported = await captureHistoryDate(page, testInfo, 'full-csv', errors, { filename: download.suggestedFilename(), downloadBytes: bytes.length, csvRows });
+      expect(await download.failure()).toBeNull();
+      expect(download.suggestedFilename()).toMatch(/^nineflow-practice-summary-\d{4}-\d{2}-\d{2}\.csv$/);
+      expect([...bytes.subarray(0, 3)]).toEqual([239, 187, 191]);
+      expect(csv.endsWith('\r\n')).toBe(true);
+      expect(csvRows).toHaveLength(25);
+      expect(csvRows.every(row => row.length === 10)).toBe(true);
+      expect(csvRows[0]).toEqual(['완료 시각(UTC)', '게임', '모드', '점수 지표', '점수(%)', '시간 지표', '중앙시간(ms)', '오류 지표', '오류 수', '훈련 설정(JSON)']);
+      for (const [index, record] of oracle.records.entries()) {
+        expect(csvRows[index + 1].slice(0, 9)).toEqual([record.utc, games.find(game => game.id === record.gameId)!.title, record.detail.sessionMode === 'practice' ? '연습 모드' : '실전형 연습', '정확도', String(record.accuracy), '중앙 반응', '720', '오류', '2']);
+        expect(JSON.parse(csvRows[index + 1][9])).toEqual(record.detail);
+      }
+      check(exported, oldestRecords.filter(record => record.gameId === 'number' && record.detail.sessionMode === 'simulation'));
+      await expect(data.locator('.data-dialog-notice')).toContainText('연습 요약 24개를 CSV 파일로 내보냈습니다.');
+      await page.keyboard.press('Escape');
+      await expect(data).toHaveCount(0);
+      await expect(opener).toBeFocused();
+      await history.getByRole('button', { name: '필터 초기화', exact: true }).press('Enter');
+      const reset = await captureHistoryDate(page, testInfo, 'all-filters-reset', errors);
+      expect(reset.filters.map(filter => filter.value)).toEqual(['all', 'all', '']);
+      check(reset, oracle.records);
+      expect(errors).toEqual([]);
+    });
+
+    test('완료 날짜는 키보드·좁은 화면·고대비 큰 글자를 지원하고 새로고침하면 표시 필터만 초기화한다', async ({ page }, testInfo) => {
+      const errors = watchActivityGoalErrors(page);
+      await installHistoryDateFixture(page);
+      await page.setViewportSize({ width: 320, height: 568 });
+      await page.goto('/');
+      await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+      const history = page.locator('.history-panel');
+      await history.locator('summary').press('Enter');
+      const date = history.getByRole('combobox', { name: '완료 날짜', exact: true });
+      await expect(date).toBeVisible();
+      const oracle = await readHistoryDateOracle(page);
+      const initial = await captureHistoryDate(page, testInfo, 'keyboard-initial', errors);
+      await history.getByRole('combobox', { name: '게임', exact: true }).focus();
+      await page.keyboard.press('Tab');
+      await expect(history.getByRole('combobox', { name: '모드', exact: true })).toBeFocused();
+      await page.keyboard.press('Tab');
+      const focused = await captureHistoryDate(page, testInfo, 'keyboard-date-focused', errors);
+      expect(focused.date?.focused).toBe(true);
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('Tab');
+      const selected = await captureHistoryDate(page, testInfo, 'keyboard-selected', errors);
+      expect(selected.date?.value).toBe(oracle.dates[0]);
+      expect(selected.active.text).toBe('필터 초기화');
+      expect(selected.rows).toHaveLength(8);
+      expect(selected.status).toBe('저장된 24개 중 10개 일치 · 8개 표시');
+      expect(selected.saved.protected).toEqual(initial.saved.protected);
+
+      for (const profile of ['standard', 'high-large'] as const) {
+        if (profile === 'high-large') {
+          await page.locator('.readiness-banner button').press('Enter');
+          const readiness = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+          await readiness.getByRole('button', { name: '고대비', exact: true }).press('Enter');
+          await readiness.getByRole('button', { name: '큰 글자', exact: true }).press('Enter');
+          await page.keyboard.press('Escape');
+          await expect(readiness).toHaveCount(0);
+          await expect(page.locator('html')).toHaveAttribute('data-contrast', 'high');
+          await expect(page.locator('html')).toHaveAttribute('data-text-scale', 'large');
+        }
+        for (const viewport of [{ width: 320, height: 568 }, { width: 844, height: 360 }]) {
+          await page.setViewportSize(viewport);
+          await history.getByRole('combobox', { name: '모드', exact: true }).focus();
+          await page.keyboard.press('Tab');
+          const layout = await captureHistoryDate(page, testInfo, `layout-${profile}-${viewport.width}`, errors);
+          expect(layout.date?.value).toBe(oracle.dates[0]);
+          expect(layout.date?.focused).toBe(true);
+          expect(layout.date?.focusVisible).toBe(true);
+          expect(layout.date!.outlineStyle).not.toBe('none');
+          expect(layout.date!.outlineWidth).toBeGreaterThanOrEqual(3);
+          expect(layout.date!.box.width).toBeGreaterThanOrEqual(44);
+          expect(layout.date!.box.height).toBeGreaterThanOrEqual(44);
+          expect(layout.date!.box.x).toBeGreaterThanOrEqual(0);
+          expect(layout.date!.box.y).toBeGreaterThanOrEqual(0);
+          expect(layout.date!.box.right).toBeLessThanOrEqual(viewport.width);
+          expect(layout.date!.box.bottom).toBeLessThanOrEqual(viewport.height);
+          expect(layout.date!.ratio).toBeGreaterThanOrEqual(4.5);
+          expect(layout.date!.images.every(image => image === 'none')).toBe(true);
+          expect(layout.date!.opacities.every(opacity => opacity === 1)).toBe(true);
+          expect(layout.date!.fontSize).toBeGreaterThanOrEqual(profile === 'high-large' ? 13 : 12);
+          expect(layout.panel!.scrollWidth).toBeLessThanOrEqual(layout.panel!.clientWidth);
+          expect(layout.viewport.scrollWidth).toBeLessThanOrEqual(layout.viewport.clientWidth);
+          expect(layout.saved.protected).toEqual(initial.saved.protected);
+          if (profile === 'high-large') expect([layout.contrast, layout.textScale]).toEqual(['high', 'large']);
+          await expect(date).toHaveAccessibleDescription('브라우저 현지 날짜 기준입니다. 필터는 화면 표시만 바꾸며 백업·활동 집계에는 적용하지 않습니다.');
+        }
+      }
+      const accessibility = (await readActivityGoalStorage(page)).accessibility;
+      await page.reload();
+      await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+      await history.locator('summary').press('Enter');
+      await expect(date).toBeVisible();
+      const reloaded = await captureHistoryDate(page, testInfo, 'reloaded-default-filter', errors);
+      expect(reloaded.filters.map(filter => filter.value)).toEqual(['all', 'all', '']);
+      expect(reloaded.rows).toHaveLength(8);
+      expect(reloaded.status).toBe('저장된 24개 중 24개 일치 · 8개 표시');
+      expect(reloaded.saved.protected).toEqual(initial.saved.protected);
+      expect(reloaded.saved.accessibility).toBe(accessibility);
+      expect([reloaded.contrast, reloaded.textScale]).toEqual(['high', 'large']);
+      expect(errors).toEqual([]);
+    });
+
+    test('다른 탭의 정상 100개 저장과 상한 정리로 선택 날짜가 사라져도 빈 선택·목표·전체삭제를 보존한다', async ({ page, context }, testInfo) => {
+      const errors = watchActivityGoalErrors(page);
+      await installHistoryDateFixture(page);
+      await page.goto('/');
+      await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+      const oracle = await readHistoryDateOracle(page);
+      const history = page.locator('.history-panel');
+      await history.locator('summary').press('Enter');
+      const date = history.getByRole('combobox', { name: '완료 날짜', exact: true });
+      const removedDate = oracle.dates[2];
+      await date.selectOption(removedDate);
+      await date.focus();
+      const before = await captureHistoryDate(page, testInfo, 'peer-selected-date', errors);
+      expect(before.date?.value).toBe(removedDate);
+      expect(before.rows).toHaveLength(4);
+      const peer = await context.newPage();
+      const peerErrors = watchActivityGoalErrors(peer);
+      await peer.goto('/');
+      await expect(peer.locator('#records')).toHaveAttribute('aria-busy', 'false');
+      // A normal peer 100-record write prunes the four oldest records in the
+      // existing same-generation union. It does not simulate a deletion UI.
+      const peerMutation = await peer.evaluate(selectedDate => {
+        const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+        if (!generation) throw new Error('Missing history date generation');
+        const key = `nineflow-practice-results-v4:${generation}`;
+        const raw = localStorage.getItem(key);
+        if (!raw) throw new Error('Missing history date envelope');
+        const envelope: { version: number; generation: string; results: Array<{ id: string; completedAt: string; [key: string]: unknown }> } = JSON.parse(raw);
+        const kept = envelope.results.filter(result => {
+          const date = new Date(result.completedAt);
+          return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` !== selectedDate;
+        });
+        const base = kept[0];
+        if (!base) throw new Error('Missing retained history date record');
+        const fresh = Array.from({ length: 80 }, (_, index) => ({ ...base, id: `date-peer-fresh-${String(index).padStart(2, '0')}`, completedAt: new Date(Date.parse(base.completedAt) + index + 1).toISOString() }));
+        const next = JSON.stringify({ ...envelope, results: [...kept, ...fresh] });
+        localStorage.setItem(key, next);
+        return { generation, key, beforeRaw: raw, afterRaw: next, retained: kept.length, fresh: fresh.length, freshIds: fresh.map(record => record.id) };
+      }, removedDate);
+      await captureHistoryDate(page, testInfo, 'peer-hundred-prune-requested', errors, { peerMutation, peerErrors: [...peerErrors] });
+      await expect(history.getByRole('status')).toHaveText('저장된 100개 중 0개 일치 · 0개 표시');
+      const missing = await captureHistoryDate(page, testInfo, 'peer-hundred-prune-settled', errors, { peerMutation, peerErrors: [...peerErrors] });
+      const prunedOracle = await readHistoryDateOracle(page);
+      expect(peerMutation.retained).toBe(20);
+      expect(peerMutation.fresh).toBe(80);
+      expect(new Set(peerMutation.freshIds).size).toBe(80);
+      expect(prunedOracle.records).toHaveLength(100);
+      expect(prunedOracle.records.every(record => record.date !== removedDate)).toBe(true);
+      expect(prunedOracle.records.filter(record => record.id.startsWith('date-peer-fresh-'))).toHaveLength(80);
+      expect(prunedOracle.records.filter(record => record.id.startsWith('date-record-'))).toHaveLength(20);
+      expect(missing.date?.value).toBe(removedDate);
+      expect(missing.date?.focused).toBe(true);
+      expect(missing.filters.map(filter => filter.value)).toEqual(['all', 'all', removedDate]);
+      expect(missing.filters[2].options).toEqual([{ value: '', text: '모든 날짜' }, { value: removedDate, text: `${removedDate} · 보관 기록 없음` }, ...oracle.dates.slice(0, 2).map(value => ({ value, text: value }))]);
+      expect(missing.rows).toEqual([]);
+      expect(missing.empty).toBe('이 조건의 기록이 없습니다. 다른 날짜·게임·모드를 선택하거나 필터를 초기화하세요.');
+      expect(missing.saved.protected[peerMutation.key]).toBe(peerMutation.afterRaw);
+      expect(missing.saved.protected['nineflow-practice-results-generation-v1']).toBe(oracle.generation);
+      expect(missing.saved.goal).toBe('3');
+      expect(missing.saved.protected['nineflow-practice-config-v1']).toBe(before.saved.protected['nineflow-practice-config-v1']);
+      expect(missing.saved.protected['nineflow-game-order-v2']).toBe(before.saved.protected['nineflow-game-order-v2']);
+      await history.getByRole('button', { name: '필터 초기화', exact: true }).press('Enter');
+      const reset = await captureHistoryDate(page, testInfo, 'peer-pruned-filter-reset', errors);
+      expect(reset.filters.map(filter => filter.value)).toEqual(['all', 'all', '']);
+      expect(reset.filters[2].options).toEqual([{ value: '', text: '모든 날짜' }, ...oracle.dates.slice(0, 2).map(value => ({ value, text: value }))]);
+      expect(reset.status).toBe('저장된 100개 중 100개 일치 · 8개 표시');
+      expect(reset.rows).toHaveLength(8);
+      expect(reset.saved.protected).toEqual(missing.saved.protected);
+      await peer.reload();
+      await expect(peer.locator('.header-status b')).toHaveText('100');
+      await peer.locator('.records-data-button').press('Enter');
+      const data = peer.getByRole('dialog', { name: '내 기록 백업·복원', exact: true });
+      await data.getByRole('button', { name: '전체 기록 삭제', exact: true }).press('Enter');
+      await expect(data).toContainText('100개 기록을 삭제할까요?');
+      await expect(data.getByRole('button', { name: '취소', exact: true })).toBeFocused();
+      await data.getByRole('button', { name: '삭제 확정', exact: true }).press('Enter');
+      await expect(data).toContainText('모두 삭제했습니다');
+      await captureHistoryDate(page, testInfo, 'peer-ui-clear-requested', errors, { peerErrors: [...peerErrors] });
+      await expect(page.locator('.header-status b')).toHaveText('0');
+      const deleted = await captureHistoryDate(page, testInfo, 'peer-ui-clear-settled', errors, { peerErrors: [...peerErrors] });
+      expect(deleted.date).toBeNull();
+      expect(deleted.rows).toEqual([]);
+      expect(deleted.unfiltered.activityDates.map(day => day.count)).toEqual(Array(7).fill('0회'));
+      expect(deleted.unfiltered.activity).toContain('완료 세션 0회 · 기록이 있는 날 0일 / 7일 · 내 목표 3일 · 3일 더 활동하면 달성');
+      expect(deleted.saved.goal).toBe('3');
+      expect(deleted.saved.protected['nineflow-practice-config-v1']).toBe(before.saved.protected['nineflow-practice-config-v1']);
+      expect(deleted.saved.protected['nineflow-game-order-v2']).toBe(before.saved.protected['nineflow-game-order-v2']);
+      const generation = deleted.saved.protected['nineflow-practice-results-generation-v1'];
+      expect(JSON.parse(deleted.saved.protected[`nineflow-practice-results-v4:${generation}`]!)).toEqual({ version: 4, generation, results: [] });
+      await expect(page.getByText('첫 기록을 만들어 볼까요?', { exact: true })).toBeVisible();
+      expect(errors).toEqual([]);
+      expect(peerErrors).toEqual([]);
+      await peer.close();
+    });
+  });
+}
