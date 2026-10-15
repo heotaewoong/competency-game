@@ -63,7 +63,13 @@ for (const nested of [false, true]) {
       for (const text of ['초대 메일이나 회사 채용 안내', '응시 전에 초대장이나 응시 기관', '실제 평가에 적용되지 않습니다', '조회하거나 변경하지 않습니다']) await expect(guide).toContainText(text);
       await expect(guide.locator('dl')).toBeVisible();
       await page.keyboard.press('Tab');
-      await expect(kind === '의견창' ? dialog.getByLabel('의견 유형', { exact: true }) : dialog.getByRole('button', { name: '설정 저장하고 닫기', exact: true })).toBeFocused();
+      const nextFocus = await dialog.evaluate(element => {
+        const active = document.activeElement;
+        return { tag: active?.tagName, label: active?.closest('label')?.querySelector('span')?.textContent ?? active?.textContent, inside: Boolean(active && element.contains(active)) };
+      });
+      console.log('SUPPORT_GUIDE_NEXT_FOCUS', JSON.stringify({ nested, kind, ...nextFocus }));
+      await testInfo.attach('support-guide-next-focus', { body: JSON.stringify(nextFocus), contentType: 'application/json' });
+      await expect(kind === '의견창' ? dialog.getByRole('combobox', { name: '의견 유형', exact: true }) : dialog.getByRole('button', { name: '설정 저장하고 닫기', exact: true })).toBeFocused();
       await page.keyboard.press('Shift+Tab');
       await expect(summary).toBeFocused();
       await page.keyboard.press('Space');
