@@ -283,6 +283,11 @@ function storageMessage(outcome: PersistSessionResultsResult) {
   return '';
 }
 
+function focusHomePractice() {
+  const target = document.querySelector<HTMLButtonElement>('.hero-primary:not(:disabled)');
+  if (!target?.closest('[inert]')) target?.focus({ preventScroll: true });
+}
+
 export default function Home() {
   const [activeGame, setActiveGame] = useState<GameId | null>(null);
   const [results, setResults] = useState<SessionResult[]>([]);
@@ -716,6 +721,7 @@ export default function Home() {
   const lastResultMode = lastResult ? getResultMode(lastResult) : null;
   const lastResultModeLabel = lastResultMode ? resultModeLabels[lastResultMode] : '';
   const recommendation = chooseTrainingRecommendation(results, recurringErrors, games.map((game) => game.id));
+  const recommendedReview = recommendation.reason === 'recurring-error' ? recommendation.error : undefined;
   const featuredGame = games.find((game) => game.id === recommendation.gameId) ?? games[0];
   const featuredResult = results.find((result) => result.gameId === featuredGame.id);
   const featuredResultMode = featuredResult ? getResultMode(featuredResult) : null;
@@ -879,6 +885,7 @@ export default function Home() {
               <b>{featuredGame.title}</b><i aria-hidden="true">→</i>
             </button>
             <button type="button" className="hero-guide" disabled={!resultsLoaded} onClick={() => setGuideGameId(featuredGame.id)}>공략 보기</button>
+            {resultsLoaded && recommendedReview && <button type="button" className="hero-guide recommendation-review" aria-describedby="coach-title" onClick={(event) => openReview(event.currentTarget, recommendedReview.representativeSessionId, recommendedReview.errorCode)}>추천한 실수 먼저 보기</button>}
             <a href="#games">모든 게임</a>
           </div>
           <details className="simulator-note">
@@ -1066,7 +1073,7 @@ export default function Home() {
       {dataManagementOpen && <DataManagementDialog results={results} onImport={importBackupResults} onClear={clearAllResults} onClose={() => setDataManagementOpen(false)} />}
       {feedbackOpen && <FeedbackDialog onClose={() => setFeedbackOpen(false)} />}
       {guideGameId && <StrategyGuideDialog initialGameId={guideGameId} onClose={() => setGuideGameId(null)} onStartGame={(gameId) => { setGuideGameId(null); openGame(gameId); }} />}
-      {reviewSessionId !== null && <ReviewDialog results={results} initialSessionId={reviewSessionId || undefined} initialErrorCode={reviewErrorCode || undefined} onClose={closeReview} onPracticeGame={(gameId) => { closeReview(); openGame(gameId); }} />}
+      {reviewSessionId !== null && <ReviewDialog results={results} initialSessionId={reviewSessionId || undefined} initialErrorCode={reviewErrorCode || undefined} onClose={closeReview} onMissingOpener={focusHomePractice} onPracticeGame={(gameId) => { closeReview(); openGame(gameId); }} />}
       {activeGame && (
         <Suspense fallback={<StageLoading onClose={closeActiveGame} />}>
           <GameStage key={activeGame} gameId={activeGame} onClose={closeActiveGame} onSwitch={switchActiveGame} onSave={saveResult} onReadinessChecked={handleReadinessChecked} onOpenBackup={openResultBackup} />
