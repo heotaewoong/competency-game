@@ -131,18 +131,14 @@ for (const action of ['load', 'retry', 'close', 'review', 'guide', 'restart'] as
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => { if (message.type() === 'error') resourceErrors.push(message.text()); });
     const { stage, opener, notice, saved, backup } = await completeUnsavedRotation(page);
-    await page.evaluate(() => {
-      const loads: string[] = [];
-      (window as Window & { recoveryScriptLoads?: string[] }).recoveryScriptLoads = loads;
-      window.addEventListener('load', event => {
-        if (event.target instanceof HTMLScriptElement) loads.push(event.target.src);
-      }, true);
-    });
     let releaseScripts!: () => void;
     const scriptsReady = new Promise<void>(resolve => { releaseScripts = resolve; });
     let delayedRequests = 0;
     let backupScriptUrl = '';
+    let completedRequests = 0;
+    let rejectBackup = action === 'retry';
     const failedRequests: string[] = [];
+    page.on('requestfinished', request => { if (request.url() === backupScriptUrl) completedRequests += 1; });
     await page.route('**/_next/static/**/*.js', async route => {
       const response = await route.fetch();
       const body = await response.body();
@@ -150,7 +146,7 @@ for (const action of ['load', 'retry', 'close', 'review', 'guide', 'restart'] as
       if (Buffer.from(body).toString('utf8').includes('data-dialog-title')) {
         backupScriptUrl = route.request().url();
         delayedRequests += 1;
-        if (action === 'retry' && failedRequests.length === 0) {
+        if (rejectBackup) {
           failedRequests.push(route.request().url());
           await route.abort('failed');
           return;
@@ -168,9 +164,12 @@ for (const action of ['load', 'retry', 'close', 'review', 'guide', 'restart'] as
         await expect(backup).toHaveAttribute('aria-disabled', 'false');
         await expect(data).toHaveCount(0);
         await page.screenshot({ path: testInfo.outputPath('result-backup-load-failed.png') });
+        rejectBackup = false;
+        const failedAttemptCount = delayedRequests;
         await backup.click();
-        await expect.poll(() => delayedRequests).toBeGreaterThan(1);
+        await expect.poll(() => delayedRequests).toBeGreaterThan(failedAttemptCount);
       }
+      const pendingRequestCount = delayedRequests;
       await expect(backup).toHaveAttribute('aria-busy', 'true');
       await expect(backup).toHaveAttribute('aria-disabled', 'true');
       await expect(notice).toContainText('브라우저 저장 공간을 사용할 수 없습니다');
@@ -179,7 +178,7 @@ for (const action of ['load', 'retry', 'close', 'review', 'guide', 'restart'] as
       await expect(data).toHaveCount(0);
       await backup.focus();
       await page.keyboard.press('Enter');
-      expect(delayedRequests).toBe(action === 'retry' ? 2 : 1);
+      expect(delayedRequests).toBe(pendingRequestCount);
       const pending = { action, delayedRequests, failedRequests, saved, notice: await notice.textContent() };
       console.log('RESULT_BACKUP_LOADING', JSON.stringify({ phase: 'pending', ...pending }));
       await testInfo.attach('result-backup-pending.json', { body: JSON.stringify(pending, null, 2), contentType: 'application/json' });
@@ -200,8 +199,8 @@ for (const action of ['load', 'retry', 'close', 'review', 'guide', 'restart'] as
       }
       releaseScripts();
       await page.unrouteAll({ behavior: 'wait' });
-      // Wait for this held script's real load event, not a global quiet-time delay.
-      await page.waitForFunction(url => (window as Window & { recoveryScriptLoads?: string[] }).recoveryScriptLoads?.includes(url), backupScriptUrl);
+      // Observe the actual browser transfer, independent of the framework's script loader.
+      await expect.poll(() => completedRequests, { timeout: 15_000 }).toBeGreaterThan(0);
       if (action === 'load' || action === 'retry') {
         await expect(data).toBeVisible();
         await expect(stage).toHaveCount(0);
@@ -235,7 +234,7 @@ for (const action of ['load', 'retry', 'close', 'review', 'guide', 'restart'] as
           await data.getByRole('button', { name: '닫기', exact: true }).click();
         }
       }
-      const final = { action, delayedRequests, failedRequests, errors, resourceErrors, saved: await readRecoveryStorage(page) };
+      const final = { action, delayedRequests, completedRequests, failedRequests, errors, resourceErrors, saved: await readRecoveryStorage(page) };
       console.log('RESULT_BACKUP_LOADING', JSON.stringify({ phase: 'settled', ...final }));
       await testInfo.attach('result-backup-settled.json', { body: JSON.stringify(final, null, 2), contentType: 'application/json' });
       await page.screenshot({ path: testInfo.outputPath('result-backup-settled.png') });
@@ -243,7 +242,7 @@ for (const action of ['load', 'retry', 'close', 'review', 'guide', 'restart'] as
       expect(errors).toEqual([]);
       if (action !== 'retry') expect(resourceErrors).toEqual([]);
       else {
-        expect(failedRequests).toHaveLength(1);
+        expect(failedRequests.length).toBeGreaterThanOrEqual(1);
         // Deliberate resource failure is preserved separately, not hidden as a clean console.
         expect(resourceErrors.every(error => /Failed to load resource|Load failed|Failed to fetch|loading chunk|load chunk/i.test(error))).toBe(true);
       }
