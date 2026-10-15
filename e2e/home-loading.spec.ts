@@ -46,6 +46,134 @@ async function completeUnsavedRotation(page: Page) {
   return { stage, opener, notice, saved, backup: notice.getByRole('button', { name: '목록으로 이동해 백업하기', exact: true }) };
 }
 
+test('실제 완료 결과에서 다른 모드 설정으로 이동해도 자동 시작·중복 저장 없이 맞춤값을 보존한다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  const origin = Date.UTC(2035, 0, 12);
+  await page.clock.install({ time: origin });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  const opener = page.getByRole('button', { name: /가위바위보, 난이도 하, 설정 열기/ });
+  await opener.click();
+  const stage = page.locator('section[data-game="rps"]');
+  await expect(stage.getByRole('button', { name: '게임 바꾸기', exact: true })).toBeFocused();
+  for (let index = 0; index < 2; index += 1) await stage.getByRole('button', { name: '문제 수 줄이기', exact: true }).click();
+  await stage.locator('.session-stepper').nth(1).getByRole('button').last().click();
+  await stage.getByText('시간 제한 없이 연습', { exact: true }).click();
+  await expect(stage.getByLabel('문제 수 현재 값')).toHaveText('9');
+  await expect(stage.getByRole('checkbox', { name: /시간 제한 없이 연습/ })).toBeChecked();
+  const readPreferences = () => page.evaluate(() => ({
+    config: localStorage.getItem('nineflow-practice-config-v1'),
+    pacing: localStorage.getItem('nineflow-practice-pacing-v1'),
+    focus: localStorage.getItem('nineflow-focused-practice-v1'),
+  }));
+  const preferences = await readPreferences();
+  expect(JSON.parse(preferences.config!).rps).toMatchObject({ quantity: 9, paceMs: 5000 });
+  expect(JSON.parse(preferences.pacing!).rps).toBe(true);
+  await page.clock.pauseAt(origin + 60_000);
+
+  async function completeRps(mode: 'practice' | 'simulation', quantity: number) {
+    await stage.getByRole('button', { name: mode === 'practice' ? /^설명·연습 시작/ : /^실전형 연습 시작/ }).click();
+    for (const second of ['3', '2', '1']) {
+      await expect(stage.locator('.game-preparation > b')).toHaveText(second);
+      await page.clock.runFor(1050);
+    }
+    const workspace = stage.locator('.game-workspace.game-rps');
+    await expect(workspace.locator('.mode-chip')).toHaveText(mode === 'practice' ? '연습' : '실전형 연습');
+    for (let index = 0; index < quantity; index += 1) {
+      await expect(workspace.locator('.workspace-progress > span')).toContainText(`${mode === 'simulation' ? index % 10 + 1 : index + 1} / ${mode === 'simulation' ? 10 : quantity}`);
+      const shown = await workspace.locator('.rps-board img').getAttribute('alt');
+      expect(shown).toMatch(/^(가위|바위|보)$/);
+      const playerUnknown = await workspace.locator('.rps-board article').first().locator('.rps-question').count() === 1;
+      const answers: Record<string, string> = playerUnknown ? { 가위: '바위', 바위: '보', 보: '가위' } : { 가위: '보', 바위: '가위', 보: '바위' };
+      await workspace.locator('.rps-actions button').filter({ hasText: answers[shown!] }).click();
+      await expect.poll(() => workspace.locator('.rps-actions button').evaluateAll(buttons => buttons.every(button => (button as HTMLButtonElement).disabled))).toBe(true);
+      if (index === quantity - 1) {
+        await page.clock.runFor(1100);
+      } else {
+        await page.clock.runFor(1400);
+        if (mode === 'simulation' && (index === 9 || index === 19)) {
+          const transition = workspace.locator('.rps-round-transition');
+          await expect(transition).toBeVisible();
+          for (const second of ['3', '2', '1']) {
+            await expect(transition.locator('.rps-transition-countdown b')).toHaveText(second);
+            await page.clock.runFor(1050);
+          }
+          await expect(transition).toHaveCount(0);
+        }
+      }
+    }
+    await expect(stage.locator('.stage-result')).toBeVisible();
+    // Allow the existing paint save or its 500ms fallback to finish.
+    await page.clock.runFor(500);
+    await expect(stage.locator('.result-metrics article').first().locator('b')).toHaveText('100%');
+  }
+
+  async function inspectButton(mode: 'practice' | 'simulation') {
+    const button = stage.getByRole('button', { name: mode === 'practice' ? '실전형 설정 보기' : '맞춤 연습 설정 보기', exact: true });
+    for (const viewport of [{ width: 320, height: 568 }, { width: 844, height: 360 }]) {
+      await page.setViewportSize(viewport);
+      await button.scrollIntoViewIfNeeded();
+      const snapshot = await button.evaluate(element => {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return { label: element.textContent, height: rect.height, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, color: style.color, background: style.backgroundColor, width: innerWidth, viewportHeight: innerHeight, documentWidth: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth };
+      });
+      console.log('RESULT_MODE_BUTTON', JSON.stringify({ mode, viewport, ...snapshot }));
+      await testInfo.attach(`result-mode-${mode}-${viewport.width}.json`, { body: JSON.stringify(snapshot, null, 2), contentType: 'application/json' });
+      await page.screenshot({ path: testInfo.outputPath(`result-mode-${mode}-${viewport.width}.png`) });
+      expect(snapshot.height).toBeGreaterThanOrEqual(44);
+      expect(snapshot.left).toBeGreaterThanOrEqual(-1);
+      expect(snapshot.right).toBeLessThanOrEqual(snapshot.width + 1);
+      expect(snapshot.top).toBeGreaterThanOrEqual(-1);
+      expect(snapshot.bottom).toBeLessThanOrEqual(snapshot.viewportHeight + 1);
+      expect(snapshot.scrollWidth).toBeLessThanOrEqual(snapshot.documentWidth + 1);
+      expect(contrastRatio(snapshot.color, snapshot.background)).toBeGreaterThanOrEqual(4.5);
+    }
+    return button;
+  }
+
+  for (const mode of ['practice', 'simulation'] as const) {
+    await completeRps(mode, mode === 'practice' ? 9 : 30);
+    const saved = await readRecoveryStorage(page);
+    const results = JSON.parse(saved.raw!).results as SessionResult[];
+    expect(results).toHaveLength(mode === 'practice' ? 1 : 2);
+    expect(new Set(results.map(result => result.id)).size).toBe(results.length);
+    expect(results[0].detail).toMatchObject({ sessionMode: mode === 'practice' ? '연습 모드' : '실전형 연습', trialCount: mode === 'practice' ? 9 : 30, correctCount: mode === 'practice' ? 9 : 30 });
+    const button = await inspectButton(mode);
+    await button.focus();
+    await page.keyboard.press('Enter');
+    // Deliver the existing phase-focus RAF, without starting a game timer.
+    await page.clock.runFor(20);
+    const target = stage.locator(mode === 'practice' ? '.simulation-preset' : '.session-settings');
+    const snapshot = await stage.evaluate(element => ({ label: element.getAttribute('aria-label'), activeClass: document.activeElement?.className, checkedMode: element.querySelector('[role="radio"][aria-checked="true"]')?.textContent, workspaces: element.querySelectorAll('.game-workspace').length, preparations: element.querySelectorAll('.game-preparation').length, results: element.querySelectorAll('.stage-result').length }));
+    console.log('RESULT_MODE_SETTINGS', JSON.stringify({ from: mode, snapshot, saved: await readRecoveryStorage(page), preferences: await readPreferences() }));
+    await testInfo.attach(`result-mode-settings-from-${mode}.json`, { body: JSON.stringify(snapshot, null, 2), contentType: 'application/json' });
+    await page.screenshot({ path: testInfo.outputPath(`result-mode-settings-from-${mode}.png`) });
+    await expect(target).toBeFocused();
+    await expect(stage.getByRole('radio', { name: mode === 'practice' ? /실전형 연습/ : /연습 모드/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(stage.locator('.game-workspace, .game-preparation, .stage-result')).toHaveCount(0);
+    expect(await readRecoveryStorage(page)).toEqual(saved);
+    expect(await readPreferences()).toEqual(preferences);
+    // Passing the whole preparation interval must not start or save another session.
+    await page.clock.runFor(3100);
+    await expect(target).toBeFocused();
+    await expect(stage.locator('.game-workspace, .game-preparation')).toHaveCount(0);
+    expect(await readRecoveryStorage(page)).toEqual(saved);
+    if (mode === 'simulation') {
+      await expect(stage.getByLabel('문제 수 현재 값')).toHaveText('9');
+      await expect(stage.getByRole('checkbox', { name: /시간 제한 없이 연습/ })).toBeChecked();
+    }
+  }
+  const beforeClose = await readRecoveryStorage(page);
+  await page.keyboard.press('Escape');
+  await expect(stage).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  expect(await readRecoveryStorage(page)).toEqual(beforeClose);
+  expect(errors).toEqual([]);
+});
+
 test('저장 실패 복구: 실제 내려받은 JSON을 새로고침 뒤 가져와 결과와 문항별 복습을 복원한다', async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -124,7 +252,7 @@ test('저장 실패 복구: 실제 내려받은 JSON을 새로고침 뒤 가져�
   expect(errors).toEqual([]);
 });
 
-for (const action of ['load', 'retry', 'close', 'review', 'guide', 'restart'] as const) {
+for (const action of ['load', 'retry', 'close', 'review', 'guide', 'restart', 'configure'] as const) {
   test(`결과 백업 창 로딩: ${action} 동안 결과를 보존하고 취소된 이동을 되살리지 않는다`, async ({ page }, testInfo) => {
     const errors: string[] = [];
     const resourceErrors: string[] = [];
@@ -196,6 +324,10 @@ for (const action of ['load', 'retry', 'close', 'review', 'guide', 'restart'] as
       } else if (action === 'restart') {
         await stage.getByRole('button', { name: '다시 연습', exact: true }).click();
         await expect(stage.locator('.game-workspace.game-rotation')).toBeVisible();
+      } else if (action === 'configure') {
+        await stage.getByRole('button', { name: '실전형 설정 보기', exact: true }).click();
+        await expect(stage.locator('.simulation-preset')).toBeFocused();
+        await expect(stage.locator('.game-workspace, .game-preparation, .stage-result')).toHaveCount(0);
       }
       releaseScripts();
       await page.unrouteAll({ behavior: 'wait' });
@@ -221,8 +353,15 @@ for (const action of ['load', 'retry', 'close', 'review', 'guide', 'restart'] as
           await stage.getByRole('button', { name: '1번 왼쪽 45° 회전', exact: true }).click();
           await expect(stage.getByRole('list', { name: '입력한 변환 순서', exact: true }).locator('li.filled')).toHaveCount(1);
           await expect(data).toHaveCount(0);
-        }
-        else {
+        } else if (action === 'configure') {
+          await expect(stage.locator('.simulation-preset')).toBeFocused();
+          await expect(stage.getByRole('radio', { name: /실전형 연습/ })).toHaveAttribute('aria-checked', 'true');
+          await expect(stage.locator('.game-workspace, .game-preparation, .stage-result')).toHaveCount(0);
+          await page.keyboard.press('Escape');
+          await expect(stage).toHaveCount(0);
+          await expect(opener).toBeFocused();
+          await expect(data).toHaveCount(0);
+        } else {
           const overlay = action === 'review' ? page.getByRole('dialog', { name: '내 실수 복습', exact: true }) : page.locator('.strategy-guide-dialog');
           await expect(overlay).toBeVisible();
           await overlay.getByRole('button', { name: action === 'review' ? '복습 센터 닫기' : '전략게임 가이드 닫기', exact: true }).click();
