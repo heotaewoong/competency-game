@@ -94,7 +94,8 @@ test('탭 이탈 일시정지도 유지된 Enter로 자동 재개되지 않는�
   expect(errors).toEqual([]);
 });
 
-test('약속 위치 질문으로 넘어간 유지 Enter는 답안을 자동 선택하지 않고 새 입력만 채점한다', async ({ page }, testInfo) => {
+for (const resultProfile of ['standard', 'large-high-contrast'] as const) {
+test(`${resultProfile === 'standard' ? '' : '큰 글자·고대비: '}약속 위치 질문으로 넘어간 유지 Enter는 답안을 자동 선택하지 않고 새 입력만 채점한다`, async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
@@ -106,7 +107,7 @@ test('약속 위치 질문으로 넘어간 유지 Enter는 답안을 자동 선�
     let envelopeVersion: number | null = null;
     let envelopeGeneration: string | null = null;
     let saved: Array<{
-      id: string; gameId: string; accuracy: number; errors: number;
+      id: string; gameId: string; accuracy: number; errors: number; medianRt: number;
       detail: { trialCount: number; responseCount: number; correctCount: number; completedRounds: number; quantity: number };
       review: { summary: { attemptedCount: number; correctCount: number }; attempts: Array<{
         id: string; index: number; kind: string; status: string; expected: string; selected: string; errorCodes: string[];
@@ -150,6 +151,16 @@ test('약속 위치 질문으로 넘어간 유지 Enter는 답안을 자동 선�
   await page.getByRole('button', { name: /약속 정하기, 난이도 상, 설정 열기/ }).click();
   const stage = page.locator('section[data-game="appointment"]');
   await expect(stage).toBeVisible();
+  if (resultProfile === 'large-high-contrast') {
+    await stage.getByRole('button', { name: '응시 준비센터 열기', exact: true }).click();
+    const readiness = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+    await readiness.getByRole('button', { name: '큰 글자', exact: true }).click();
+    await readiness.getByRole('button', { name: '고대비', exact: true }).click();
+    await readiness.getByRole('button', { name: '응시 준비센터 닫기', exact: true }).click();
+    await expect(readiness).toHaveCount(0);
+    await expect(page.locator('html')).toHaveAttribute('data-text-scale', 'large');
+    await expect(page.locator('html')).toHaveAttribute('data-contrast', 'high');
+  }
   await stage.getByRole('button', { name: '2라운드 위치만 연습', exact: true }).click();
   const quantity = stage.getByLabel('라운드당 문항 현재 값');
   const configuredQuantity = Number(await quantity.textContent());
@@ -239,8 +250,55 @@ test('약속 위치 질문으로 넘어간 유지 Enter는 답안을 자동 선�
     id: 'attempt-0', index: 0, kind: 'generic', status: 'correct', expected: expectedCode, selected: expectedCode, errorCodes: [],
   })]);
   await page.screenshot({ path: testInfo.outputPath('appointment-fresh-enter-correct-result.png') });
+  const timeMetric = result.locator('.result-metrics article').filter({ hasText: '중앙 반응' });
+  const timeNote = result.getByRole('complementary', { name: '시간 기록 안내', exact: true });
+  const readTimeNote = () => page.evaluate(() => {
+    const result = document.querySelector('.stage-result');
+    const note = result?.querySelector<HTMLElement>('#result-time-note');
+    const paragraph = note?.querySelector('p');
+    if (!note || !paragraph) return null;
+    const style = getComputedStyle(paragraph);
+    const background = getComputedStyle(note).backgroundColor;
+    const luminance = (color: string) => (color.match(/[\d.]+/g) ?? []).slice(0, 3)
+      .map(value => Number(value) / 255)
+      .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)
+      .reduce((total, value, index) => total + value * [.2126, .7152, .0722][index], 0);
+    const foregroundLuminance = luminance(style.color);
+    const backgroundLuminance = luminance(background);
+    return {
+      text: paragraph.textContent, fontSize: style.fontSize, color: style.color, background,
+      contrast: (Math.max(foregroundLuminance, backgroundLuminance) + .05) / (Math.min(foregroundLuminance, backgroundLuminance) + .05),
+      box: note.getBoundingClientRect().toJSON(), viewport: { width: innerWidth, height: innerHeight },
+      overflow: paragraph.scrollWidth > paragraph.clientWidth || result!.scrollWidth > result!.clientWidth,
+      followsMetrics: result?.querySelector('.result-metrics')?.nextElementSibling === note,
+      precedesActions: Boolean(note.compareDocumentPosition(result!.querySelector('.result-actions')!) & Node.DOCUMENT_POSITION_FOLLOWING),
+      live: Boolean(note.closest('[aria-live], [role="status"], [role="alert"]')),
+    };
+  });
+  await testInfo.attach('result-time-note-initial', { body: JSON.stringify(await readTimeNote()), contentType: 'application/json' });
+  expect(saved.medianRt).toBeGreaterThan(0);
+  await expect(timeMetric.locator('b')).toHaveText(`${saved.medianRt}ms`);
+  await expect(timeMetric).toHaveAttribute('aria-describedby', 'result-time-note');
+  await expect(timeNote).toHaveText('시간값은 응답·풀이 기록의 중앙값이며 전체 진행시간이 아닙니다. 기기·화면·입력 방식에 영향을 받으니 비슷한 환경에서 비교하세요. 기기 지연은 따로 보정하지 않습니다.');
+  for (const viewport of [{ width: 320, height: 568 }, { width: 844, height: 360 }]) {
+    await page.setViewportSize(viewport);
+    await timeNote.scrollIntoViewIfNeeded();
+    const snapshot = await readTimeNote();
+    await testInfo.attach(`result-time-note-${viewport.width}`, { body: JSON.stringify(snapshot), contentType: 'application/json' });
+    console.log('RESULT_TIME_GUIDANCE', JSON.stringify({ profile: resultProfile, medianRt: saved.medianRt, snapshot }));
+    await page.screenshot({ path: testInfo.outputPath(`result-time-note-${viewport.width}.png`) });
+    expect(snapshot).not.toBeNull();
+    expect(snapshot).toMatchObject({ fontSize: resultProfile === 'standard' ? '13px' : '14px', overflow: false, followsMetrics: true, precedesActions: true, live: false, viewport });
+    expect(snapshot!.contrast).toBeGreaterThanOrEqual(4.5);
+    expect(snapshot!.box.x).toBeGreaterThanOrEqual(0);
+    expect(snapshot!.box.y).toBeGreaterThanOrEqual(0);
+    expect(snapshot!.box.right).toBeLessThanOrEqual(viewport.width);
+    expect(snapshot!.box.bottom).toBeLessThanOrEqual(viewport.height);
+    expect(await readSnapshot()).toEqual(completed);
+  }
   expect(errors).toEqual([]);
 });
+}
 
 test('약속 요일 질문의 유지 Enter는 자동 응답하지 않고 새 Space만 정답을 채점한다', async ({ page }, testInfo) => {
   const errors: string[] = [];

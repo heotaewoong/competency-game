@@ -1872,10 +1872,11 @@ function ResultView({ result, mode, storageNotice, onClose, onRestart, onOpenGui
       </aside>
       <div className="result-metrics">
         <article><span>{accuracyLabel}</span><b>{potionUsesEvidenceScore && potionEvidenceTrials === 0 ? '—' : `${result.accuracy}%`}</b></article>
-        <article><span>{responseTimeLabel}</span><b>{result.medianRt ? `${result.medianRt}ms` : '—'}</b></article>
+        <article aria-describedby={result.medianRt > 0 ? 'result-time-note' : undefined}><span>{responseTimeLabel}</span><b>{result.medianRt ? `${result.medianRt}ms` : '—'}</b></article>
         <article><span>일관성</span><b>{responseCount >= 2 ? `${result.stability}%` : '—'}</b></article>
         <article><span>{errorLabel}</span><b>{result.errors}</b></article>
       </div>
+      {result.medianRt > 0 && <aside id="result-time-note" className="result-time-note" aria-label="시간 기록 안내"><p>시간값은 응답·풀이 기록의 중앙값이며 전체 진행시간이 아닙니다. 기기·화면·입력 방식에 영향을 받으니 비슷한 환경에서 비교하세요. 기기 지연은 따로 보정하지 않습니다.</p></aside>}
       {rotationDetail.length > 0 && <aside className="rotation-result-detail" aria-label="도형 회전 상세 결과"><b>도형 회전 상세</b><dl>{rotationDetail.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><p>조작 효율은 정답 문제의 최소 단계 수를 회전·반전·지움·초기화에 실제 사용한 조작 수로 나눈 연습 지표입니다.</p></aside>}
       {nbackDetail.length > 0 && <aside className="rotation-result-detail nback-result-detail" aria-label="도형 순서 상세 결과"><b>도형 순서 상세</b><dl>{nbackDetail.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><p>정확도는 선택한 기억 간격과 응답 유형별 채점 문항을 기준으로 계산합니다.</p></aside>}
       {potionDetail.length > 0 && <aside className="rotation-result-detail potion-result-detail" aria-label="마법약 판단 상세 결과"><b>판단 품질과 실제 결과를 분리했습니다</b><dl>{potionDetail.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><p>낮은 확률의 결과가 나온 것은 판단 오류가 아닙니다. 복습에서는 선택 당시 누적 관찰과 일치했는지를 따로 확인합니다.</p></aside>}

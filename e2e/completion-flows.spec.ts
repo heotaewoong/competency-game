@@ -179,6 +179,12 @@ test('길 만들기 최소 연습을 UI 울타리 조작으로 완료하고 복�
     }
   }
 
+  const result = page.locator('.stage-result');
+  const timeMetric = result.locator('.result-metrics article').filter({ hasText: '경로 연결 중앙시간' });
+  await expect(timeMetric.locator('b')).toHaveText(/^[1-9]\d*ms$/);
+  await expect(timeMetric).toHaveAttribute('aria-describedby', 'result-time-note');
+  await expect(result.getByRole('complementary', { name: '시간 기록 안내', exact: true })).toContainText('응답·풀이 기록의 중앙값');
+  await expect(result.locator('.result-metrics article').filter({ hasText: '중앙 반응' })).toHaveCount(0);
   await assertResultStored(page, game);
 });
 
