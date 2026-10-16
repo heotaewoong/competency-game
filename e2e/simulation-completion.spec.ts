@@ -555,6 +555,7 @@ test('개수 비교하기 실전형은 준비·1초 제시·3초 응답 46문항
   await expectClock();
   expect(pageErrors).toEqual([]);
   expect(consoleErrors).toEqual([]);
+  await expect(page.locator('.stage-result').getByRole('button', { name: '실전형 설정 확인', exact: true })).toHaveCount(0);
 });
 
 test('고양이 술래잡기 실전형은 위치 제시 네 단계와 색상 판단 20라운드를 완주한다', async ({ page }) => {
