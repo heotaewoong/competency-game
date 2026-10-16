@@ -2833,3 +2833,149 @@ test(`숫자 ${focus} 최종 정답은 입력 수를 모두 표시하고 750ms �
   expect(errors).toEqual([]);
 });
 }
+
+for (const key of ['Enter', 'Space'] as const) {
+test(`훈련 묶음 생성의 유지 ${key}는 새 설정을 연속 실행하지 않고 새 입력만 설정을 연다`, async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  if (key === 'Space') {
+    await page.locator('.readiness-banner button').click();
+    const readiness = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+    await readiness.getByRole('button', { name: '큰 글자', exact: true }).click();
+    await readiness.getByRole('button', { name: '고대비', exact: true }).click();
+    await readiness.getByRole('button', { name: '응시 준비센터 닫기', exact: true }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-text-scale', 'large');
+    await expect(page.locator('html')).toHaveAttribute('data-contrast', 'high');
+  }
+  const region = page.locator('section[aria-labelledby="training-bundle-title"]');
+  await expect(region.getByRole('group', { name: '연습할 게임 2~3개 선택', exact: true })).toBeVisible();
+  for (const checkbox of await region.getByRole('checkbox').all()) if (await checkbox.isChecked()) await checkbox.uncheck();
+  const create = region.getByRole('button', { name: '훈련 묶음 만들기', exact: true });
+  await expect(create).toBeDisabled();
+  await region.getByRole('checkbox', { name: '도형 회전하기', exact: true }).check();
+  await expect(create).toBeDisabled();
+  await region.getByRole('checkbox', { name: '약속 정하기', exact: true }).check();
+  await expect(create).toBeEnabled();
+  if (key === 'Enter') {
+    await region.getByRole('checkbox', { name: '가위바위보', exact: true }).check();
+    await expect(region.getByRole('checkbox', { name: '숫자 누르기', exact: true })).toBeDisabled();
+    await region.getByRole('checkbox', { name: '가위바위보', exact: true }).uncheck();
+    await expect(region.getByRole('checkbox', { name: '숫자 누르기', exact: true })).toBeEnabled();
+  }
+  const readBundleKeyBoundary = () => page.evaluate(() => {
+    const region = document.querySelector('section[aria-labelledby="training-bundle-title"]');
+    const heading = region?.querySelector('h2');
+    const list = region?.querySelector('ol[aria-label="훈련 묶음 진행"]');
+    const actions = region?.querySelector('.training-bundle-actions');
+    let generation: string | null = null;
+    let resultsRaw: string | null = null;
+    let storageError: string | null = null;
+    try {
+      generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+      resultsRaw = generation ? localStorage.getItem(`nineflow-practice-results-v4:${generation}`) : null;
+    } catch (error) { storageError = String(error); }
+    return {
+      viewport: { width: innerWidth, height: innerHeight },
+      status: region?.querySelector('[role="status"]')?.textContent ?? null,
+      items: Array.from(list?.querySelectorAll('li') ?? [], item => item.textContent),
+      buttons: Array.from(region?.querySelectorAll<HTMLButtonElement>('button') ?? [], button => {
+        const box = button.getBoundingClientRect();
+        return { text: button.textContent, focused: button === document.activeElement, disabled: button.disabled, width: box.width, height: box.height, left: box.left, right: box.right };
+      }),
+      selected: Array.from(region?.querySelectorAll<HTMLInputElement>('input:checked') ?? [], input => input.labels?.[0]?.textContent),
+      labelHeights: Array.from(region?.querySelectorAll('label') ?? [], label => label.getBoundingClientRect().height),
+      headingFocused: heading === document.activeElement,
+      headingBeforeList: Boolean(heading && list && (heading.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING)),
+      listBeforeActions: Boolean(list && actions && (list.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING)),
+      horizontalOverflow: document.documentElement.scrollWidth > innerWidth + 1,
+      stages: Array.from(document.querySelectorAll('.stage-panel'), stage => stage.getAttribute('data-game')),
+      workspaceCount: document.querySelectorAll('.game-workspace').length,
+      preparationCount: document.querySelectorAll('.game-preparation').length,
+      resultCount: document.querySelectorAll('.stage-result').length,
+      generation, resultsRaw, storageError,
+    };
+  });
+  const snapshots: Record<string, Awaited<ReturnType<typeof readBundleKeyBoundary>>> = {};
+  const record = async (phase: string) => {
+    snapshots[phase] = await readBundleKeyBoundary();
+    console.log('TRAINING_BUNDLE_NATIVE_KEY', JSON.stringify({ project: testInfo.project.name, key, phase, snapshot: snapshots[phase] }));
+    await testInfo.attach(`bundle-${key}-${phase}`, { body: JSON.stringify(snapshots[phase], null, 2), contentType: 'application/json' });
+    return snapshots[phase];
+  };
+  await create.focus();
+  const before = await record('before-down');
+  await page.keyboard.down(key);
+  try {
+    await record('after-down');
+    for (let repeat = 0; repeat < 3; repeat += 1) await page.keyboard.down(key);
+    await record('after-repeat');
+  } finally {
+    await page.keyboard.up(key);
+    await record('after-release');
+    await page.screenshot({ path: testInfo.outputPath(`bundle-${key}-released.png`) });
+  }
+  await expect(region.getByRole('heading', { name: '이번 훈련 묶음', exact: true })).toBeFocused();
+  await expect(region.getByRole('heading', { name: '이번 훈련 묶음', exact: true })).toBeInViewport();
+  const created = await record('created-stable');
+  expect(before).toMatchObject({ viewport: { width: 320, height: 568 }, stages: [], workspaceCount: 0, preparationCount: 0, resultCount: 0, horizontalOverflow: false, storageError: null });
+  expect(before.selected).toEqual(['도형 회전하기', '약속 정하기']);
+  for (const height of before.labelHeights) expect(height).toBeGreaterThanOrEqual(44);
+  expect(before.buttons.find(button => button.text === '훈련 묶음 만들기')).toMatchObject({ focused: true });
+  expect(before.buttons.find(button => button.text === '훈련 묶음 만들기')!.height).toBeGreaterThanOrEqual(44);
+  expect(created).toMatchObject({ headingFocused: true, headingBeforeList: true, listBeforeActions: true, stages: [], workspaceCount: 0, preparationCount: 0, resultCount: 0, horizontalOverflow: false, generation: before.generation, resultsRaw: before.resultsRaw, storageError: null });
+  expect(created.status).toBe('완료 0 / 2 · 다음: 도형 회전하기');
+  expect(created.items).toHaveLength(2);
+  expect(created.items[0]).toContain('도형 회전하기');
+  expect(created.items[1]).toContain('약속 정하기');
+  for (const phase of ['after-repeat', 'after-release']) expect(snapshots[phase]).toMatchObject({ stages: [], workspaceCount: 0, preparationCount: 0, resultCount: 0, generation: before.generation, resultsRaw: before.resultsRaw });
+  const next = region.getByRole('button', { name: '도형 회전하기 설정 열기', exact: true });
+  await next.focus();
+  const ready = await record('next-focused');
+  const nextBox = ready.buttons.find(button => button.text === '도형 회전하기 설정 열기')!;
+  expect(nextBox.focused).toBe(true);
+  expect(nextBox.height).toBeGreaterThanOrEqual(44);
+  expect(nextBox.width).toBeGreaterThanOrEqual(44);
+  expect(nextBox.left).toBeGreaterThanOrEqual(0);
+  expect(nextBox.right).toBeLessThanOrEqual(320);
+  await page.keyboard.press(key);
+  await record('fresh-open-raw');
+  const stage = page.locator('section[data-game="rotation"]');
+  await expect(stage).toBeVisible();
+  await expect(stage.getByRole('button', { name: '게임 바꾸기', exact: true })).toBeFocused();
+  expect(await record('fresh-open-stable')).toMatchObject({ stages: ['rotation'], workspaceCount: 0, preparationCount: 0, resultCount: 0, generation: before.generation, resultsRaw: before.resultsRaw });
+  await page.screenshot({ path: testInfo.outputPath(`bundle-${key}-fresh-settings.png`) });
+  await page.keyboard.press('Escape');
+  await expect(stage).toHaveCount(0);
+  await expect(next).toBeFocused();
+  if (key === 'Space') {
+    await region.getByRole('button', { name: '묶음 취소', exact: true }).click();
+    await expect(region.getByRole('heading', { name: '이번 훈련 묶음', exact: true })).toBeFocused();
+    await expect(region.getByRole('heading', { name: '이번 훈련 묶음', exact: true })).toBeInViewport();
+    await create.focus();
+    await page.keyboard.down('Space');
+    try {
+      await create.click();
+      await next.focus();
+      await record('space-held-across-pointer-create');
+    } finally {
+      await page.keyboard.up('Space');
+      await record('space-release-on-new-action');
+      await page.screenshot({ path: testInfo.outputPath('bundle-space-new-action-release.png') });
+    }
+    expect(snapshots['space-release-on-new-action']).toMatchObject({ stages: [], workspaceCount: 0, preparationCount: 0, resultCount: 0 });
+    await page.keyboard.press('Space');
+    await record('space-new-press-raw');
+    await expect(stage).toBeVisible();
+    await expect(page.locator('.game-preparation, .game-workspace, .stage-result')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(stage).toHaveCount(0);
+    await expect(next).toBeFocused();
+  }
+  expect(await record('closed')).toMatchObject({ stages: [], workspaceCount: 0, preparationCount: 0, resultCount: 0, generation: before.generation, resultsRaw: before.resultsRaw, storageError: null });
+  expect(errors).toEqual([]);
+});
+}

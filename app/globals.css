@@ -3211,6 +3211,28 @@ html[data-motion="reduce"] .time-strip i {
   .stage-backdrop { backdrop-filter: none; }
 }
 
+.training-bundle { width: min(1180px, calc(100% - 32px)); margin: 28px auto 0; padding: clamp(16px, 3vw, 28px); border: 1px solid var(--line); border-radius: 18px; background: var(--surface); overflow-wrap: anywhere; }
+.training-bundle h2:focus { outline: 3px solid #1267d6; outline-offset: 4px; }
+.training-bundle fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.training-bundle legend { margin-bottom: 12px; font-size: 15px; font-weight: 800; }
+.training-bundle-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 8px; }
+.training-bundle-options label { min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; cursor: pointer; }
+.training-bundle-options label:has(input:checked) { border-color: var(--brand-strong); background: var(--brand-soft); }
+.training-bundle-options label:has(input:disabled) { cursor: default; }
+.training-bundle-options input { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--brand-strong); }
+.training-bundle-options input:focus-visible { outline: 3px solid #1267d6; outline-offset: 4px; }
+.training-bundle-note { margin: 14px 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.training-bundle-status { margin: 0 0 14px; font-weight: 800; font-size: 16px; }
+.training-bundle-list { margin: 0; padding-left: 24px; }
+.training-bundle-list li { padding: 8px 0; font-size: 14px; }
+.training-bundle-list b { margin-left: 12px; color: var(--brand-strong); font-size: inherit; }
+.training-bundle-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.training-bundle-actions button { min-height: 48px; max-width: 100%; padding: 10px 16px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: var(--surface); font-size: 14px; font-weight: 800; }
+.training-bundle-actions .training-bundle-start { color: #fff; background: var(--brand-strong); border-color: var(--brand-strong); }
+html[data-contrast="high"] .training-bundle { border-color: #657187; }
+html[data-text-scale="large"] .training-bundle :where(p, li, label, legend, button) { font-size: 16px; }
+html[data-text-scale="large"] .training-bundle .training-bundle-status { font-size: 18px; }
+
 .public-feedback-section { width: min(1180px, calc(100% - 32px)); margin: 0 auto 64px; scroll-margin-top: 84px; word-break: keep-all; overflow-wrap: anywhere; }
 .public-feedback-list { padding: 0; margin: 0; display: grid; gap: 12px; list-style: none; }
 .public-feedback-list article, .public-feedback-empty { padding: clamp(18px, 3vw, 28px); border: 1px solid var(--line); border-radius: 18px; background: var(--surface); }

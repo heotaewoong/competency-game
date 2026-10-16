@@ -645,7 +645,7 @@ function progressUnitForGame(gameId: GameId, mode: SessionMode) {
   return '문제';
 }
 
-export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecked }: { gameId: GameId; onClose: () => void; onSwitch: (gameId: GameId) => void; onSave: (result: SessionResult) => string; onReadinessChecked?: (summary: SavedReadinessSummary) => void }) {
+export function GameStage({ gameId, onClose, onSwitch, onSave, onComplete, onReadinessChecked }: { gameId: GameId; onClose: () => void; onSwitch: (gameId: GameId) => void; onSave: (result: SessionResult) => string; onComplete?: () => void; onReadinessChecked?: (summary: SavedReadinessSummary) => void }) {
   const [phase, setPhase] = useState<'intro' | 'play' | 'result'>('intro');
   const [result, setResult] = useState<SessionResult | null>(null);
   const [run, setRun] = useState(0);
@@ -1094,6 +1094,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
         window.setTimeout(persistResult, 0);
       });
     });
+    try { onComplete?.(); } catch { /* 훈련 진행 알림 오류가 기존 결과 저장 예약을 막지 않게 한다. */ }
   }
 
   function restart(nextMode: SessionMode = sessionMode) {
