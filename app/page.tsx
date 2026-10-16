@@ -302,6 +302,7 @@ export default function Home() {
   const bundleLaunchSequence = useRef(0);
   const bundleHeadingRef = useRef<HTMLHeadingElement>(null);
   const bundleOpenerRef = useRef<HTMLButtonElement | null>(null);
+  const bundleHeadingFocusPendingRef = useRef(false);
   const futureSchemaWriteBlockedRef = useRef(false);
   const resultsRef = useRef<SessionResult[]>([]);
   const resultsGenerationRef = useRef<string | null>(null);
@@ -328,11 +329,22 @@ export default function Home() {
   }, [publishTrainingBundle]);
 
   useEffect(() => {
-    if (activeGame) return;
+    if (activeGame) {
+      bundleHeadingFocusPendingRef.current = false;
+      return;
+    }
     const opener = bundleOpenerRef.current;
     bundleOpenerRef.current = null;
-    if (opener && !opener.isConnected) bundleHeadingRef.current?.focus();
-  }, [activeGame]);
+    const heading = bundleHeadingRef.current;
+    const requested = bundleHeadingFocusPendingRef.current;
+    bundleHeadingFocusPendingRef.current = false;
+    const focus = document.activeElement;
+    if (heading && ((requested && focus === heading) || (opener && !opener.isConnected && (!focus || focus === document.body)))) {
+      heading.focus({ preventScroll: true });
+      // The selector can shrink after the event's neutral focus. Settle only this viewport.
+      heading.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+    }
+  }, [activeGame, trainingBundle?.id]);
 
   useEffect(() => { resultsRef.current = results; }, [results]);
 
@@ -735,9 +747,10 @@ export default function Home() {
     const next = createTrainingBundle(bundlePlanSequence.current + 1, bundleSelection);
     if (!next) return;
     bundlePlanSequence.current += 1;
+    bundleHeadingFocusPendingRef.current = true;
     publishTrainingBundle(next);
     setActiveBundleTicket(null);
-    bundleHeadingRef.current?.focus();
+    bundleHeadingRef.current?.focus({ preventScroll: true });
   }
 
   function openBundleGame(opener: HTMLButtonElement) {
@@ -998,7 +1011,7 @@ export default function Home() {
             <p className="training-bundle-note">게임을 끝내면 완료로 표시합니다. 기록 저장 여부는 결과 화면에서 별도로 확인하세요.</p>
             <div className="training-bundle-actions">
               {nextBundleGame && <button type="button" className="training-bundle-start" onPointerEnter={preloadGameStage} onPointerDown={preloadGameStage} onFocus={preloadGameStage} onKeyDown={(event) => { if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault(); }} onClick={(event) => openBundleGame(event.currentTarget)}>{nextBundleGame.title} 설정 열기</button>}
-              <button type="button" onClick={() => { resetTrainingBundle(); bundleHeadingRef.current?.focus(); }} onKeyDown={(event) => { if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault(); }}>묶음 취소</button>
+              <button type="button" onClick={() => { bundleHeadingFocusPendingRef.current = true; resetTrainingBundle(); bundleHeadingRef.current?.focus({ preventScroll: true }); }} onKeyDown={(event) => { if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault(); }}>묶음 취소</button>
             </div>
           </>
         ) : (

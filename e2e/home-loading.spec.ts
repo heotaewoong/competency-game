@@ -125,6 +125,7 @@ async function captureBundle(page: Page, testInfo: TestInfo, phase: string) {
   const snapshot = await page.evaluate(() => {
     const region = document.querySelector('section[aria-labelledby="training-bundle-title"]');
     const heading = region?.querySelector('h2');
+    const headingBox = heading?.getBoundingClientRect();
     const list = region?.querySelector('ol');
     const actions = region?.querySelector('.training-bundle-actions');
     const luminance = (color: string) => {
@@ -164,6 +165,8 @@ async function captureBundle(page: Page, testInfo: TestInfo, phase: string) {
       items: Array.from(region?.querySelectorAll('ol[aria-label="훈련 묶음 진행"] li') ?? [], item => item.textContent),
       buttons: Array.from(region?.querySelectorAll<HTMLButtonElement>('button') ?? [], button => ({ text: button.textContent, disabled: button.disabled, focused: button === document.activeElement })),
       headingFocused: region?.querySelector('h2') === document.activeElement,
+      headingBox: headingBox ? { top: headingBox.top, bottom: headingBox.bottom, height: headingBox.height, width: headingBox.width } : null,
+      scrollY: window.scrollY, viewportHeight: window.innerHeight,
       theme: { textScale: document.documentElement.dataset.textScale, contrast: document.documentElement.dataset.contrast },
       horizontalOverflow: document.documentElement.scrollWidth > innerWidth + 1,
       headingBeforeList: Boolean(heading && list && (heading.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING)),
@@ -221,7 +224,9 @@ async function prepareBundlePractice(page: Page, game: BundleGame) {
   expect(initial).toBeLessThanOrEqual(game === 'rotation' ? 30 : 8);
   for (let current = initial; current > 1; current -= 1) await stage.getByRole('button', { name: `${label} 줄이기`, exact: true }).click();
   await expect(quantity).toHaveText('1');
-  await stage.getByRole('checkbox', { name: /시간 제한 없이 연습/ }).check();
+  const untimed = stage.getByRole('checkbox', { name: /시간 제한 없이 연습/ });
+  if (!(await untimed.isChecked())) await stage.getByText('시간 제한 없이 연습', { exact: true }).click();
+  await expect(untimed).toBeChecked();
   await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 60_000);
   await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
   await runBundlePreparation(page, game);

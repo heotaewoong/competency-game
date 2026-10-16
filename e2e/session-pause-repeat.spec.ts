@@ -2869,6 +2869,7 @@ test(`훈련 묶음 생성의 유지 ${key}는 새 설정을 연속 실행하지
   const readBundleKeyBoundary = () => page.evaluate(() => {
     const region = document.querySelector('section[aria-labelledby="training-bundle-title"]');
     const heading = region?.querySelector('h2');
+    const headingBox = heading?.getBoundingClientRect();
     const list = region?.querySelector('ol[aria-label="훈련 묶음 진행"]');
     const actions = region?.querySelector('.training-bundle-actions');
     let generation: string | null = null;
@@ -2889,6 +2890,8 @@ test(`훈련 묶음 생성의 유지 ${key}는 새 설정을 연속 실행하지
       selected: Array.from(region?.querySelectorAll<HTMLInputElement>('input:checked') ?? [], input => input.labels?.[0]?.textContent),
       labelHeights: Array.from(region?.querySelectorAll('label') ?? [], label => label.getBoundingClientRect().height),
       headingFocused: heading === document.activeElement,
+      headingBox: headingBox ? { top: headingBox.top, bottom: headingBox.bottom, height: headingBox.height, width: headingBox.width } : null,
+      scrollY: window.scrollY, viewportHeight: window.innerHeight,
       headingBeforeList: Boolean(heading && list && (heading.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING)),
       listBeforeActions: Boolean(list && actions && (list.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING)),
       horizontalOverflow: document.documentElement.scrollWidth > innerWidth + 1,
