@@ -260,7 +260,7 @@ async function finishBundlePractice(page: Page, game: BundleGame, testInfo: Test
     await expect(workspace.locator('.rotation-review')).toContainText('모양 일치');
     await workspace.getByRole('button', { name: /결과 보기/ }).click();
   } else {
-    await workspace.getByRole('button', { name: '이 라운드 시작', exact: true }).click();
+    await workspace.getByRole('button', { name: '이 라운드 시작', exact: false }).click();
     const people: string[][] = [];
     const next = workspace.locator('.appointment-stimulus .single-action');
     for (let person = 1; person <= 3; person += 1) {
@@ -452,7 +452,7 @@ test('훈련 묶음은 일반 진입·취소 교체·중도종료·게임 바꾸
   await page.clock.resume();
   await bundleRegion(page).getByRole('button', { name: '약속 정하기 설정 열기', exact: true }).click();
   await prepareBundlePractice(page, 'appointment');
-  await page.locator('.game-workspace.game-appointment').getByRole('button', { name: '이 라운드 시작', exact: true }).click();
+  await page.locator('.game-workspace.game-appointment').getByRole('button', { name: '이 라운드 시작', exact: false }).click();
   await expect(page.locator('.appointment-phase-meta b')).toHaveText('1 / 3');
   await page.locator('.game-workspace').getByRole('button', { name: '연습 닫기', exact: true }).click();
   await page.getByRole('alertdialog', { name: '이번 세션을 종료할까요?', exact: true }).getByRole('button', { name: '연습창 닫기', exact: true }).click();
@@ -461,7 +461,7 @@ test('훈련 묶음은 일반 진입·취소 교체·중도종료·게임 바꾸
   await page.clock.resume();
   await bundleRegion(page).getByRole('button', { name: '약속 정하기 설정 열기', exact: true }).click();
   await prepareBundlePractice(page, 'appointment');
-  await page.locator('.game-workspace.game-appointment').getByRole('button', { name: '이 라운드 시작', exact: true }).click();
+  await page.locator('.game-workspace.game-appointment').getByRole('button', { name: '이 라운드 시작', exact: false }).click();
   await page.locator('.game-workspace.game-appointment').getByRole('button', { name: '게임 바꾸기', exact: true }).click();
   await page.getByRole('alertdialog').getByRole('button', { name: '게임 선택 열기', exact: true }).click();
   await page.getByRole('dialog', { name: '다른 게임 선택', exact: true }).getByRole('button', { name: /도형 회전하기/ }).click();

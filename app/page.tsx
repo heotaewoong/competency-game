@@ -341,8 +341,8 @@ export default function Home() {
     const focus = document.activeElement;
     if (heading && ((requested && focus === heading) || (opener && !opener.isConnected && (!focus || focus === document.body)))) {
       heading.focus({ preventScroll: true });
-      // The selector can shrink after the event's neutral focus. Settle only this viewport.
-      heading.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+      // Explicit alignment settles any earlier focus scroll, even while the heading is visible.
+      heading.scrollIntoView({ block: 'start', behavior: 'instant' });
     }
   }, [activeGame, trainingBundle?.id]);
 
