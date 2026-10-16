@@ -297,6 +297,114 @@ test(`${resultProfile === 'standard' ? '' : '큰 글자·고대비: '}약속 위
     expect(await readSnapshot()).toEqual(completed);
   }
   expect(errors).toEqual([]);
+
+  const readSettingsTransition = () => page.evaluate(() => {
+    const panel = document.querySelector<HTMLElement>('section[data-game="appointment"]');
+    const intro = panel?.querySelector<HTMLElement>('.stage-intro');
+    const preset = panel?.querySelector<HTMLElement>('.appointment-simulation-preset');
+    const modeSelector = panel?.querySelector('.mode-selector');
+    const startActions = panel?.querySelector('.intro-start-options');
+    const radios = Array.from(panel?.querySelectorAll<HTMLButtonElement>('.mode-options [role="radio"]') ?? []);
+    const ctas = Array.from(document.querySelectorAll<HTMLButtonElement>('.result-actions button')).filter(button => button.textContent?.trim() === '실전형 설정 확인');
+    let settings: Record<string, string | null> = {};
+    let generation: string | null = null;
+    let resultsRaw: string | null = null;
+    let storageError: string | null = null;
+    try {
+      settings = Object.fromEntries(['nineflow-practice-config-v1', 'nineflow-appointment-preferences-v1', 'nineflow-practice-pacing-v1'].map(key => [key, localStorage.getItem(key)]));
+      generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+      resultsRaw = generation ? localStorage.getItem(`nineflow-practice-results-v4:${generation}`) : null;
+    } catch (error) { storageError = String(error); }
+    return {
+      viewport: { width: innerWidth, height: innerHeight },
+      ctaCount: ctas.length, ctaFocused: ctas[0] === document.activeElement,
+      ctaBox: ctas[0]?.getBoundingClientRect().toJSON() ?? null,
+      ctaOverflow: ctas[0] ? ctas[0].scrollWidth > ctas[0].clientWidth : null,
+      introCount: panel?.querySelectorAll('.stage-intro').length ?? 0,
+      presetCount: panel?.querySelectorAll('.simulation-preset').length ?? 0,
+      presetFocused: Boolean(preset && preset === document.activeElement),
+      presetFollowsModes: Boolean(modeSelector && preset && (modeSelector.compareDocumentPosition(preset) & Node.DOCUMENT_POSITION_FOLLOWING)),
+      presetPrecedesStart: Boolean(preset && startActions && (preset.compareDocumentPosition(startActions) & Node.DOCUMENT_POSITION_FOLLOWING)),
+      presetLabel: preset?.getAttribute('aria-label') ?? null,
+      presetSummary: preset?.querySelector(':scope > div')?.textContent ?? null,
+      presetRows: Array.from(preset?.querySelectorAll('dl > div') ?? [], row => ({ label: row.querySelector('dt')?.textContent, value: row.querySelector('dd')?.textContent })),
+      presetBoundary: preset?.querySelector(':scope > p')?.textContent ?? null,
+      boundaryTitle: panel?.querySelector('.intro-evidence-boundary > b')?.textContent ?? null,
+      boundaryCopy: panel?.querySelector('.intro-evidence-boundary > p')?.textContent ?? null,
+      radios: radios.map(radio => ({ checked: radio.getAttribute('aria-checked'), focused: radio === document.activeElement })),
+      startButtons: Array.from(panel?.querySelectorAll<HTMLButtonElement>('.intro-start-options button') ?? [], button => ({ label: button.querySelector('span')?.textContent, disabled: button.disabled })),
+      practiceQuantity: panel?.querySelector('[aria-label="라운드당 문항 현재 값"]')?.textContent ?? null,
+      practiceRounds: Array.from(panel?.querySelectorAll<HTMLInputElement>('input[aria-label$=" 연습 포함"]') ?? []).filter(input => input.checked).map(input => input.getAttribute('aria-label')),
+      untimed: panel?.querySelector<HTMLInputElement>('.accessible-pacing-setting input')?.checked ?? null,
+      workspaceCount: document.querySelectorAll('.game-workspace').length,
+      preparationCount: document.querySelectorAll('.game-preparation').length,
+      resultCount: document.querySelectorAll('.stage-result').length,
+      horizontalOverflow: Boolean(panel && panel.scrollWidth > panel.clientWidth || intro && intro.scrollWidth > intro.clientWidth),
+      settings, generation, resultsRaw, storageError,
+    };
+  });
+  const captureSettingsTransition = async (phase: string, screenshot = true) => {
+    const snapshot = await readSettingsTransition();
+    await testInfo.attach(`practice-result-simulation-settings-${phase}`, { body: JSON.stringify(snapshot), contentType: 'application/json' });
+    console.log('PRACTICE_RESULT_SIMULATION_SETTINGS', JSON.stringify({ project: testInfo.project.name, profile: resultProfile, phase, snapshot }));
+    if (screenshot) await page.screenshot({ path: testInfo.outputPath(`practice-result-simulation-settings-${phase}.png`) });
+    return snapshot;
+  };
+  await page.setViewportSize({ width: 320, height: 568 });
+  const settingsCta = result.getByRole('button', { name: '실전형 설정 확인', exact: true });
+  await settingsCta.scrollIntoViewIfNeeded();
+  await settingsCta.focus();
+  const settingsBaseline = await captureSettingsTransition('focused-cta');
+  expect(settingsBaseline).toMatchObject({ viewport: { width: 320, height: 568 }, ctaCount: 1, ctaFocused: true, ctaOverflow: false, horizontalOverflow: false, resultCount: 1, storageError: null, generation: initial.generation });
+  expect(settingsBaseline.ctaBox).not.toBeNull();
+  expect(settingsBaseline.ctaBox!.height).toBeGreaterThanOrEqual(44);
+  expect(settingsBaseline.ctaBox!.x).toBeGreaterThanOrEqual(0);
+  expect(settingsBaseline.ctaBox!.y).toBeGreaterThanOrEqual(0);
+  expect(settingsBaseline.ctaBox!.right).toBeLessThanOrEqual(320);
+  expect(settingsBaseline.ctaBox!.bottom).toBeLessThanOrEqual(568);
+  expect(Object.values(settingsBaseline.settings)).toEqual([expect.any(String), expect.any(String), expect.any(String)]);
+  expect(settingsBaseline.resultsRaw).not.toBeNull();
+  try { await page.keyboard.down('Enter'); }
+  finally { await page.keyboard.up('Enter'); }
+  await captureSettingsTransition('opened-immediate', false);
+  const preset = stage.getByRole('region', { name: '약속 정하기 실전형 연습 고정 설정', exact: true });
+  await expect(preset).toBeVisible();
+  await expect(preset).toBeFocused();
+  const simulationSettings = await captureSettingsTransition('simulation-ready');
+  expect(simulationSettings).toMatchObject({
+    ctaCount: 0, introCount: 1, presetCount: 1, presetFocused: true, presetFollowsModes: true, presetPrecedesStart: true,
+    presetLabel: '약속 정하기 실전형 연습 고정 설정',
+    presetSummary: '2023 공개 영상형요일 → 위치 → 메뉴 → 미탑승 버스4R · 40문항',
+    boundaryTitle: '독립 실전형 프리셋',
+    boundaryCopy: '2023 개발사 공개 레거시 흐름을 바탕으로 재구성했습니다. 비공개 문항·타이밍·채점식과 동일함을 뜻하지 않습니다. 실제 응시에서는 기업 초대 화면을 우선하세요.',
+    radios: [{ checked: 'false', focused: false }, { checked: 'true', focused: false }],
+    startButtons: [{ label: '설명·연습 시작', disabled: false }, { label: '실전형 연습 시작', disabled: false }],
+    workspaceCount: 0, preparationCount: 0, resultCount: 0, horizontalOverflow: false,
+    settings: settingsBaseline.settings, generation: settingsBaseline.generation, resultsRaw: settingsBaseline.resultsRaw, storageError: null,
+  });
+  expect(simulationSettings.presetRows).toEqual([
+    { label: '1라운드', value: '요일 · 10문항' }, { label: '2라운드', value: '위치 · 10문항' },
+    { label: '3라운드', value: '메뉴 · 10문항' }, { label: '4라운드', value: '버스 · 10문항' },
+    { label: '메뉴 답안', value: '이미지 6개 · 공개 예시 기반 자체 구성' },
+    { label: '버스 답안', value: '숫자 5개 · 친구별 2·1·2개는 공개 예시 반복값' },
+    { label: '진행', value: '자동 제시 · 정답 해설 숨김 · 정오 신호 표시' },
+  ]);
+  expect(simulationSettings.presetBoundary).toBe('공식 영상에서 확인되는 네 라운드와 라운드별 10문항을 적용합니다. 1~3라운드의 ‘후반 4개’는 절반 이후로 운용하며, 정확한 전환 문항·노출시간·응답시간은 비공개라 약 4분에 맞춘 독립 훈련값입니다. 2024 공개자료의 버스 6선지 변형과 섞지 않았습니다.');
+  const practiceRadio = stage.getByRole('radio', { name: /^연습 모드/ });
+  await practiceRadio.focus();
+  try { await page.keyboard.down('Enter'); }
+  finally { await page.keyboard.up('Enter'); }
+  const practiceSettings = await captureSettingsTransition('practice-restored');
+  expect(practiceSettings).toMatchObject({
+    ctaCount: 0, introCount: 1, presetCount: 0, presetFocused: false,
+    radios: [{ checked: 'true', focused: true }, { checked: 'false', focused: false }],
+    practiceQuantity: '1', practiceRounds: ['위치 연습 포함'], untimed: true,
+    startButtons: [{ label: '설명·연습 시작', disabled: false }, { label: '실전형 연습 시작', disabled: false }],
+    workspaceCount: 0, preparationCount: 0, resultCount: 0, horizontalOverflow: false,
+    settings: settingsBaseline.settings, generation: settingsBaseline.generation, resultsRaw: settingsBaseline.resultsRaw, storageError: null,
+  });
+  expect(await readSnapshot()).toMatchObject({ saved: completed.saved, generation: completed.generation, envelopeVersion: completed.envelopeVersion, envelopeGeneration: completed.envelopeGeneration, storageError: null });
+  expect(errors).toEqual([]);
 });
 }
 

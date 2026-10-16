@@ -811,6 +811,11 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
     panelRef.current?.scrollTo({ top: 0 });
     panelRef.current?.querySelector<HTMLElement>('.stage-intro')?.scrollTo({ top: 0 });
     const focusFrame = window.requestAnimationFrame(() => {
+      if (phase === 'intro' && !overlayOpenRef.current) {
+        const preset = panelRef.current?.querySelector<HTMLElement>('.simulation-preset');
+        preset?.scrollIntoView({ block: 'start' });
+        preset?.focus({ preventScroll: true });
+      }
       if (phase === 'play' && prepCountdown === null) {
         const workspace = panelRef.current?.querySelector<HTMLElement>('.game-workspace');
         const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -1203,7 +1208,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onReadinessChecke
           </>
         )}
         {phase === 'play' && <GamePauseContext.Provider value={sessionPaused}><SessionModeContext.Provider value={{ mode: sessionMode, showGlyphNames }}><GuidedPacingContext.Provider value={sessionMode === 'practice' && guidedPacing}><FocusedPracticeContext.Provider value={sessionMode === 'practice' ? focusedPractice : DEFAULT_FOCUSED_PRACTICE}><StageActionsContext.Provider value={{ openGameSwitcher, openFeedback }}>{prepCountdown !== null ? <GamePreparation gameId={gameId} countdown={prepCountdown} total={gameId === 'rotation' && sessionMode === 'simulation' ? 2 : gameId === 'appointment' ? (sessionMode === 'simulation' ? APPOINTMENT_SIMULATION_TOTAL_QUESTIONS : practiceConfig.quantity * appointmentPreferences.selectedRounds.length) : (sessionMode === 'practice' ? practiceConfig : simulationConfig(gameId)).quantity} onClose={requestClose} /> : <GameRouter key={`${gameId}-${run}`} gameId={gameId} config={sessionMode === 'practice' ? practiceConfig : simulationConfig(gameId)} glyphMnemonics={glyphMnemonics} nbackPreferences={nbackPreferences} rotationPreferences={rotationPreferences} appointmentPreferences={appointmentPreferences} onRotationPreviewChange={(showPreview) => saveRotationPreferences({ ...rotationPreferences, showPreview })} onFinish={finish} onClose={requestClose} />}</StageActionsContext.Provider></FocusedPracticeContext.Provider></GuidedPacingContext.Provider></SessionModeContext.Provider></GamePauseContext.Provider>}
-        {phase === 'result' && result && <ResultView result={result} mode={sessionMode} storageNotice={saveNotice} onClose={requestClose} onRestart={() => restart()} onOpenGuide={() => setStrategyGuideOpen(true)} onReview={(opener) => { reviewReturnFocusRef.current = opener; setReviewOpen(true); }} />}
+        {phase === 'result' && result && <ResultView result={result} mode={sessionMode} storageNotice={saveNotice} onClose={requestClose} onRestart={() => restart()} onOpenSimulationSettings={() => { setSessionMode('simulation'); stopActiveSession(); }} onOpenGuide={() => setStrategyGuideOpen(true)} onReview={(opener) => { reviewReturnFocusRef.current = opener; setReviewOpen(true); }} />}
         </div>
         {switcherOpen && <GameSwitcher currentGameId={gameId} sessionWasStopped={switcherEndedSession} onClose={() => setSwitcherOpen(false)} onSelect={(nextGameId) => { setSwitcherOpen(false); if (nextGameId !== gameId) onSwitchRef.current(nextGameId); }} />}
         {feedbackOpen && <FeedbackDialog initialGameId={gameId} sessionMode={sessionMode === 'practice' ? '연습 모드' : '실전형 연습'} nested onClose={() => setFeedbackOpen(false)} />}
@@ -1793,7 +1798,7 @@ function GamePreparation({ gameId, countdown, total, onClose }: { gameId: GameId
   );
 }
 
-function ResultView({ result, mode, storageNotice, onClose, onRestart, onOpenGuide, onReview }: { result: SessionResult; mode: SessionMode; storageNotice?: string; onClose: () => void; onRestart: () => void; onOpenGuide: () => void; onReview: (opener: HTMLButtonElement) => void }) {
+function ResultView({ result, mode, storageNotice, onClose, onRestart, onOpenSimulationSettings, onOpenGuide, onReview }: { result: SessionResult; mode: SessionMode; storageNotice?: string; onClose: () => void; onRestart: () => void; onOpenSimulationSettings: () => void; onOpenGuide: () => void; onReview: (opener: HTMLButtonElement) => void }) {
   const game = getGame(result.gameId);
   const visibilityPauses = typeof result.detail?.visibilityPauses === 'number' ? result.detail.visibilityPauses : 0;
   const trialCount = typeof result.detail?.trialCount === 'number' ? result.detail.trialCount : 0;
@@ -1885,7 +1890,7 @@ function ResultView({ result, mode, storageNotice, onClose, onRestart, onOpenGui
       {visibilityPauses > 0 && <aside className="result-storage-notice result-comparison-notice" role="status"><b>탭 이탈 {visibilityPauses}회 · 참고용 기록</b><p>다른 탭에 있던 시간은 제외했으며, 공정한 비교를 위해 이 결과는 동일 설정 최고 기록 계산에 포함하지 않습니다.</p></aside>}
       {storageNotice && <aside className="result-storage-notice" role="status"><b>기록 저장 안내</b><p>{storageNotice}</p></aside>}
       {hasActionableReview && <aside className="result-review"><b>이번 세션 복습 포인트</b><p>{reviewAdvice[result.gameId]}</p></aside>}
-      <div className="result-actions"><button onClick={onRestart}>{mode === 'practice' ? '다시 연습' : '실전형으로 다시 하기'}</button>{hasReview && <button className="result-review-button" onClick={(event) => onReview(event.currentTarget)}>문항별 복습</button>}<button className="result-guide" onClick={onOpenGuide}>공략 복습</button><button className="stage-start" onClick={onClose}>게임 목록 <span>→</span></button></div>
+      <div className="result-actions"><button onClick={onRestart}>{mode === 'practice' ? '다시 연습' : '실전형으로 다시 하기'}</button>{mode === 'practice' && <button type="button" className="result-guide" onClick={onOpenSimulationSettings}>실전형 설정 확인</button>}{hasReview && <button className="result-review-button" onClick={(event) => onReview(event.currentTarget)}>문항별 복습</button>}<button className="result-guide" onClick={onOpenGuide}>공략 복습</button><button className="stage-start" onClick={onClose}>게임 목록 <span>→</span></button></div>
       <small>개인 연습 기록이며 실제 역량검사 점수나 채용 결과가 아닙니다.</small>
     </section>
   );
