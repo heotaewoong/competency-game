@@ -24,6 +24,7 @@ import { formatResultScore, resultErrorLabel, resultScoreLabel } from './lib/res
 import { isReviewPayloadStructurallyValid } from './lib/practice-backup';
 import { resolveReadinessOverall } from './lib/readiness';
 import { chooseTrainingRecommendation, type RecommendationReason } from './lib/training-recommendation';
+import { clearTrainingBundleLaunch, completeTrainingBundle, createTrainingBundle, launchTrainingBundle, type TrainingBundle, type TrainingBundleTicket } from './lib/training-bundle';
 import { AccessibilityBootstrap, ReadinessCenter, READINESS_STORAGE_KEY, captureCurrentReadinessAssessment, parseSavedReadinessSummary, type SavedReadinessSummary } from './components/readiness-center';
 import type { DataManagementActionResult } from './components/data-management-dialog';
 import { lockDocumentScroll } from './lib/scroll-lock';
@@ -293,9 +294,57 @@ export default function Home() {
   const [reviewSessionId, setReviewSessionId] = useState<string | null>(null);
   const [reviewErrorCode, setReviewErrorCode] = useState<string | null>(null);
   const [storageNotice, setStorageNotice] = useState('');
+  const [bundleSelection, setBundleSelection] = useState<GameId[]>([]);
+  const [trainingBundle, setTrainingBundle] = useState<TrainingBundle | null>(null);
+  const [activeBundleTicket, setActiveBundleTicket] = useState<TrainingBundleTicket | null>(null);
+  const trainingBundleRef = useRef<TrainingBundle | null>(null);
+  const bundlePlanSequence = useRef(0);
+  const bundleLaunchSequence = useRef(0);
+  const bundleHeadingRef = useRef<HTMLHeadingElement>(null);
+  const bundleOpenerRef = useRef<HTMLButtonElement | null>(null);
+  const bundleHeadingFocusPendingRef = useRef(false);
   const futureSchemaWriteBlockedRef = useRef(false);
   const resultsRef = useRef<SessionResult[]>([]);
   const resultsGenerationRef = useRef<string | null>(null);
+
+  const publishTrainingBundle = useCallback((next: TrainingBundle | null) => {
+    // Consume tickets synchronously so repeated completion callbacks cannot advance twice.
+    trainingBundleRef.current = next;
+    setTrainingBundle(next);
+  }, []);
+  const resetTrainingBundle = useCallback(() => {
+    publishTrainingBundle(null);
+    setActiveBundleTicket(null);
+  }, [publishTrainingBundle]);
+  const clearBundleLaunch = useCallback(() => {
+    const current = trainingBundleRef.current;
+    if (current?.launch) publishTrainingBundle(clearTrainingBundleLaunch(current));
+    setActiveBundleTicket(null);
+  }, [publishTrainingBundle]);
+  const completeBundleLaunch = useCallback((ticket: TrainingBundleTicket) => {
+    const current = trainingBundleRef.current;
+    if (!current) return;
+    const next = completeTrainingBundle(current, ticket);
+    if (next !== current) publishTrainingBundle(next);
+  }, [publishTrainingBundle]);
+
+  useEffect(() => {
+    if (activeGame) {
+      bundleHeadingFocusPendingRef.current = false;
+      return;
+    }
+    const opener = bundleOpenerRef.current;
+    bundleOpenerRef.current = null;
+    const heading = bundleHeadingRef.current;
+    const requested = bundleHeadingFocusPendingRef.current;
+    bundleHeadingFocusPendingRef.current = false;
+    const focus = document.activeElement;
+    if (heading && ((requested && focus === heading) || (opener && !opener.isConnected && (!focus || focus === document.body)))) {
+      heading.focus({ preventScroll: true });
+      // Explicit alignment settles any earlier focus scroll, even while the heading is visible.
+      heading.scrollIntoView({ block: 'start', behavior: 'instant' });
+    }
+  }, [activeGame, trainingBundle?.id]);
 
   useEffect(() => { resultsRef.current = results; }, [results]);
 
@@ -497,6 +546,7 @@ export default function Home() {
           // value that is still authoritative may reset this tab's view.
           if (event.newValue !== window.localStorage.getItem(RESULTS_GENERATION_KEY)) return;
         } catch { return; }
+        if (resultsGenerationRef.current !== null || isResultsGeneration(event.oldValue) || !isResultsGeneration(event.newValue)) resetTrainingBundle();
         resultsGenerationRef.current = isResultsGeneration(event.newValue) ? event.newValue : null;
         futureSchemaWriteBlockedRef.current = false;
         resultsRef.current = [];
@@ -544,6 +594,7 @@ export default function Home() {
           setStorageNotice('다른 탭의 저장 기록이 손상되어 현재 화면과 합치지 않았습니다.');
           return;
         }
+        if (generationChanged && resultsGenerationRef.current !== null) resetTrainingBundle();
         const merged = mergeSessionResults(generationChanged ? [] : resultsRef.current, remoteResults);
         resultsGenerationRef.current = currentGeneration;
         resultsRef.current = merged;
@@ -556,6 +607,7 @@ export default function Home() {
           const outcome = persistResultsEnvelope(window.localStorage, currentGeneration, merged);
           const generationAfterWrite = window.localStorage.getItem(RESULTS_GENERATION_KEY);
           if (generationAfterWrite !== currentGeneration) {
+            resetTrainingBundle();
             resultsGenerationRef.current = generationAfterWrite;
             resultsRef.current = [];
             setResults([]);
@@ -576,7 +628,7 @@ export default function Home() {
     };
     window.addEventListener('storage', syncResultsFromAnotherTab);
     return () => window.removeEventListener('storage', syncResultsFromAnotherTab);
-  }, []);
+  }, [resetTrainingBundle]);
 
   function saveResult(result: SessionResult) {
     const keepInMemory = (message: string) => {
@@ -597,6 +649,7 @@ export default function Home() {
     try {
       generationBefore = getOrCreateResultsGeneration(storage).generation;
       if (generationBefore !== resultsGenerationRef.current) {
+        if (resultsGenerationRef.current !== null) resetTrainingBundle();
         resultsGenerationRef.current = generationBefore;
         futureSchemaWriteBlockedRef.current = false;
         resultsRef.current = [];
@@ -633,6 +686,7 @@ export default function Home() {
     try {
       const generationAfter = storage.getItem(RESULTS_GENERATION_KEY);
       if (generationAfter !== generationBefore) {
+        resetTrainingBundle();
         resultsGenerationRef.current = generationAfter;
         futureSchemaWriteBlockedRef.current = false;
         resultsRef.current = [];
@@ -673,14 +727,47 @@ export default function Home() {
     setReadinessOpen(true);
   }
 
-  const closeActiveGame = useCallback(() => setActiveGame(null), []);
+  const closeActiveGame = useCallback(() => {
+    clearBundleLaunch();
+    setActiveGame(null);
+  }, [clearBundleLaunch]);
   const openGame = useCallback((gameId: GameId, opener?: HTMLButtonElement) => {
+    clearBundleLaunch();
     // Safari pointer clicks do not focus buttons; preserve the actual home trigger.
     opener?.focus({ preventScroll: true });
     preloadGameStage();
     setActiveGame(gameId);
-  }, []);
-  const switchActiveGame = useCallback((gameId: GameId) => setActiveGame(gameId), []);
+  }, [clearBundleLaunch]);
+  const switchActiveGame = useCallback((gameId: GameId) => {
+    clearBundleLaunch();
+    setActiveGame(gameId);
+  }, [clearBundleLaunch]);
+
+  function createBundle() {
+    const next = createTrainingBundle(bundlePlanSequence.current + 1, bundleSelection);
+    if (!next) return;
+    bundlePlanSequence.current += 1;
+    bundleHeadingFocusPendingRef.current = true;
+    publishTrainingBundle(next);
+    setActiveBundleTicket(null);
+    bundleHeadingRef.current?.focus({ preventScroll: true });
+  }
+
+  function openBundleGame(opener: HTMLButtonElement) {
+    const current = trainingBundleRef.current;
+    if (!current || activeGame) return;
+    const next = launchTrainingBundle(current, bundleLaunchSequence.current + 1);
+    if (next === current || !next.launch) return;
+    bundleLaunchSequence.current += 1;
+    publishTrainingBundle(next);
+    setActiveBundleTicket(next.launch);
+    bundleOpenerRef.current = opener;
+    opener.focus({ preventScroll: true });
+    preloadGameStage();
+    setActiveGame(next.launch.gameId);
+  }
+
+  const nextBundleGame = trainingBundle && games.find((game) => game.id === trainingBundle.games[trainingBundle.completed]);
 
   const recentResults = results.slice(0, 8);
   const reviewableResults = results.filter((result) => hasReviewData(result.review));
@@ -746,6 +833,7 @@ export default function Home() {
     try {
       generationBefore = getOrCreateResultsGeneration(storage).generation;
       if (generationBefore !== resultsGenerationRef.current) {
+        if (resultsGenerationRef.current !== null) resetTrainingBundle();
         resultsGenerationRef.current = generationBefore;
         futureSchemaWriteBlockedRef.current = false;
         inMemorySnapshot = [];
@@ -779,6 +867,7 @@ export default function Home() {
     try {
       const generationAfter = storage.getItem(RESULTS_GENERATION_KEY);
       if (generationAfter !== generationBefore) {
+        resetTrainingBundle();
         resultsGenerationRef.current = generationAfter;
         resultsRef.current = [];
         setResults([]);
@@ -815,6 +904,7 @@ export default function Home() {
       try { storage.removeItem(clearStorageKey); } catch { /* 비활성 준비 키는 다음 로드에서 정리한다. */ }
       return { ok: false, message: '다른 탭의 저장 작업과 겹쳐 기록 삭제를 확정하지 못했습니다. 잠시 후 다시 시도해 주세요.' };
     }
+    resetTrainingBundle();
     resultsGenerationRef.current = clearGeneration;
     futureSchemaWriteBlockedRef.current = false;
     resultsRef.current = [];
@@ -905,6 +995,35 @@ export default function Home() {
         <div className="readiness-banner-copy"><span>10초 응시 준비센터</span><h2 id="readiness-banner-title">화면·입력·기록 저장을 시작 전에 확인하세요.</h2><p>핵심 리소스를 미리 불러오고 클릭·키보드를 직접 시험한 뒤, 고대비·큰 글자·움직임 줄이기도 한곳에서 설정할 수 있습니다.</p></div>
         <dl aria-label="준비센터 점검 항목"><div><dt>자동 점검</dt><dd>화면·온라인 신호·저장</dd></div><div><dt>직접 확인</dt><dd>클릭·터치·키보드</dd></div><div><dt>보기 설정</dt><dd>명암·글자·모션</dd></div></dl>
         <div className="readiness-banner-action"><small>{readinessSummary ? `${readinessSummary.overall === 'ready' ? '준비 완료' : readinessSummary.overall === 'review' ? '확인 필요' : '환경 조정 필요'} · ${formatCompletedAt(readinessSummary.checkedAt)}` : '아직 이 브라우저를 점검하지 않았습니다.'}</small><button type="button" onClick={(event) => openReadiness(event.currentTarget)}>{readinessSummary ? '다시 점검' : '준비 점검 시작'} <span aria-hidden="true">→</span></button></div>
+      </section>
+
+      <section className="training-bundle" aria-labelledby="training-bundle-title" aria-describedby="training-bundle-help">
+        <div className="section-heading">
+          <div><span>내가 고르는 연습 순서</span><h2 id="training-bundle-title" ref={bundleHeadingRef} tabIndex={-1}>이번 훈련 묶음</h2></div>
+          <p id="training-bundle-help">이 페이지에서만 유지됩니다. 새로고침하면 묶음은 사라집니다.</p>
+        </div>
+        {trainingBundle ? (
+          <>
+            <p className="training-bundle-status" role="status">완료 {trainingBundle.completed} / {trainingBundle.games.length}{nextBundleGame ? <> · 다음: {nextBundleGame.title}</> : ' · 선택한 훈련을 모두 마쳤습니다.'}</p>
+            <ol className="training-bundle-list" aria-label="훈련 묶음 진행">
+              {trainingBundle.games.map((id, index) => <li key={id}><span>{games.find((game) => game.id === id)?.title}</span><b>{index < trainingBundle.completed ? '완료' : index === trainingBundle.completed ? '다음' : '대기'}</b></li>)}
+            </ol>
+            <p className="training-bundle-note">게임을 끝내면 완료로 표시합니다. 기록 저장 여부는 결과 화면에서 별도로 확인하세요.</p>
+            <div className="training-bundle-actions">
+              {nextBundleGame && <button type="button" className="training-bundle-start" onPointerEnter={preloadGameStage} onPointerDown={preloadGameStage} onFocus={preloadGameStage} onKeyDown={(event) => { if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault(); }} onClick={(event) => openBundleGame(event.currentTarget)}>{nextBundleGame.title} 설정 열기</button>}
+              <button type="button" onClick={() => { bundleHeadingFocusPendingRef.current = true; resetTrainingBundle(); bundleHeadingRef.current?.focus({ preventScroll: true }); }} onKeyDown={(event) => { if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault(); }}>묶음 취소</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <fieldset disabled={!resultsLoaded} aria-describedby="training-bundle-selection">
+              <legend>연습할 게임 2~3개 선택</legend>
+              <div className="training-bundle-options">{games.map((game) => <label key={game.id}><input type="checkbox" checked={bundleSelection.includes(game.id)} disabled={bundleSelection.length >= 3 && !bundleSelection.includes(game.id)} onChange={() => setBundleSelection((current) => current.includes(game.id) ? current.filter((id) => id !== game.id) : current.length < 3 ? [...current, game.id] : current)} /><span>{game.title}</span></label>)}</div>
+            </fieldset>
+            <p id="training-bundle-selection" className="training-bundle-note">{bundleSelection.length ? <>선택 순서: {bundleSelection.map((id) => games.find((game) => game.id === id)?.title).join(' → ')}</> : '고른 순서대로 연습합니다. 각 게임의 설정을 확인한 뒤 직접 시작하세요.'}</p>
+            <div className="training-bundle-actions"><button type="button" className="training-bundle-start" disabled={!resultsLoaded || bundleSelection.length < 2} onClick={createBundle} onKeyDown={(event) => { if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault(); }}>훈련 묶음 만들기</button></div>
+          </>
+        )}
       </section>
 
       <section className="game-section" id="games" aria-labelledby="games-title">
@@ -1028,7 +1147,7 @@ export default function Home() {
       {reviewSessionId !== null && <ReviewDialog results={results} initialSessionId={reviewSessionId || undefined} initialErrorCode={reviewErrorCode || undefined} onClose={closeReview} onPracticeGame={(gameId) => { closeReview(); openGame(gameId); }} />}
       {activeGame && (
         <Suspense fallback={<StageLoading onClose={closeActiveGame} />}>
-          <GameStage key={activeGame} gameId={activeGame} onClose={closeActiveGame} onSwitch={switchActiveGame} onSave={saveResult} onReadinessChecked={handleReadinessChecked} />
+          <GameStage key={activeGame} gameId={activeGame} onClose={closeActiveGame} onSwitch={switchActiveGame} onSave={saveResult} onComplete={activeBundleTicket ? () => completeBundleLaunch(activeBundleTicket) : undefined} onReadinessChecked={handleReadinessChecked} />
         </Suspense>
       )}
     </main>
