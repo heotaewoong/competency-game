@@ -3700,9 +3700,10 @@ function NumberGame({ onFinish, onClose, config }: GameProps & { config: Practic
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  const displayedInputCount = locked && gameFeedbackSignal(feedback)?.tone === 'success' ? expected.length : cursor;
   const statusMessage = roundConfig.mode === 'flash'
     ? `${roundPosition.round}라운드 ${roundPosition.index}번째 문제. 현재 목표 숫자는 ${expected[cursor]}입니다.`
-    : `${roundPosition.round}라운드 ${roundPosition.index}번째 문제. ${roundConfig.skip}은 건너뛰고 ${roundConfig.double.join('과 ')}은 두 번 누릅니다. 현재 ${cursor}/${expected.length}개 입력했습니다.`;
+    : `${roundPosition.round}라운드 ${roundPosition.index}번째 문제. ${roundConfig.skip}은 건너뛰고 ${roundConfig.double.join('과 ')}은 두 번 누릅니다. 현재 ${displayedInputCount}/${expected.length}개 입력했습니다.`;
   const phaseHelper = roundConfig.mode === 'flash'
     ? '배열이 바뀌면 불이 들어온 숫자 하나를 누릅니다.'
     : `건너뛰기 ${roundConfig.skip} · 두 번 누르기 ${roundConfig.double.join('·')}`;
@@ -3723,7 +3724,7 @@ function NumberGame({ onFinish, onClose, config }: GameProps & { config: Practic
         <div className="number-layout">
           <div className="number-round-banner" aria-label={`${roundPosition.round}라운드 ${focus === 'full' ? '' : '유형 집중 연습, '}${phaseName}, ${roundPosition.total}문제 중 ${roundPosition.index}번째`}><span>{roundBadge}</span><b>{phaseName}</b><em>{roundPosition.index} / {roundPosition.total} 문제</em></div>
           {guidedPacing ? <p className="guided-pacing-note" role="status">시간 제한 없이 연습 중 · 규칙을 확인한 뒤 순서대로 누르세요</p> : <DeadlineBar key={attemptIndex} duration={config.paceMs} label="문제 제한시간" active={!locked} />}
-          <div className="number-rule">{roundConfig.mode === 'flash' ? <span className="basic">불이 들어온 숫자를 누르세요</span> : <><span>건너뛰기 <b>{roundConfig.skip}</b></span><span>두 번 누르기 <b>{roundConfig.double.join(' · ')}</b></span></>}<em>입력 {cursor} / {expected.length}</em></div>
+          <div className="number-rule">{roundConfig.mode === 'flash' ? <span className="basic">불이 들어온 숫자를 누르세요</span> : <><span>건너뛰기 <b>{roundConfig.skip}</b></span><span>두 번 누르기 <b>{roundConfig.double.join(' · ')}</b></span></>}<em>입력 {displayedInputCount} / {expected.length}</em></div>
           {roundConfig.mode === 'flash' && <p className="sr-only" aria-live="polite" aria-atomic="true">현재 목표 숫자 {expected[cursor]}</p>}
           <div ref={boardRef} className="number-board-pro" tabIndex={-1} aria-label="1부터 9까지의 숫자 입력판">{roundConfig.board.map((value) => { const currentTarget = roundConfig.mode === 'flash' && value === expected[cursor]; return <button className={currentTarget ? 'target' : ''} aria-current={currentTarget ? 'step' : undefined} aria-label={currentTarget ? `${value}, 현재 목표` : String(value)} disabled={locked} key={value} onKeyDown={(event) => { if (event.repeat) event.preventDefault(); }} onClick={() => choose(value)}>{value}</button>; })}</div>
         </div>

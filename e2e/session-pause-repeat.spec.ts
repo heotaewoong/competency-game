@@ -2675,3 +2675,161 @@ test('고양이 실전형 정오 신호는 제시·색상 전환 경계와 표�
   await expect(page.locator('.record-summary')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
+
+for (const focus of ['flash', 'rules'] as const) {
+test(`숫자 ${focus} 최종 정답은 입력 수를 모두 표시하고 750ms 뒤 다음 문제에서 초기화한다`, async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  const origin = Date.UTC(2035, 0, 16);
+  await page.clock.install({ time: origin });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  await page.getByRole('button', { name: /숫자 누르기, 난이도 하, 설정 열기/ }).click();
+  const stage = page.locator('section[data-game="number"]');
+  await expect(stage).toBeVisible();
+  await expect(stage.getByLabel('문제 수 현재 값')).toHaveText('10');
+  await stage.locator('.practice-advanced-settings > summary').click();
+  const focusOption = stage.getByRole('radiogroup', { name: '연습할 라운드', exact: true })
+    .getByRole('radio', { name: focus === 'flash' ? /^1R · 점등/ : /^2R · 규칙/ });
+  await focusOption.click();
+  await expect(focusOption).toHaveAttribute('aria-checked', 'true');
+  await page.clock.pauseAt(origin + 60_000);
+  const started = await page.evaluate(() => ({ wall: Date.now(), ticks: performance.now() }));
+  await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
+  for (const second of ['3', '2', '1']) {
+    await expect(page.locator('.game-preparation > b')).toHaveText(second);
+    await page.clock.runFor(1_000);
+  }
+  const workspace = page.locator('.game-workspace.game-number');
+  await expect(workspace).toBeVisible();
+  const buttons = workspace.locator('.number-board-pro button');
+  await expect(buttons).toHaveCount(9);
+  const values = (await buttons.allTextContents()).map(Number).sort((a, b) => a - b);
+  expect(values).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  let expected: number[];
+  if (focus === 'flash') {
+    const target = workspace.locator('.number-board-pro button.target');
+    await expect(target).toHaveCount(1);
+    const targetValue = Number(await target.textContent());
+    expect(values).toContain(targetValue);
+    await expect(target).toHaveAttribute('aria-current', 'step');
+    await expect(target).toHaveAttribute('aria-label', `${targetValue}, 현재 목표`);
+    expected = [targetValue];
+  } else {
+    const skip = Number(await workspace.locator('.number-rule > span').nth(0).locator('b').textContent());
+    const doubles = ((await workspace.locator('.number-rule > span').nth(1).locator('b').textContent()) ?? '').match(/\d+/g)?.map(Number) ?? [];
+    expect(values).toContain(skip);
+    expect(doubles).toHaveLength(2);
+    expect(new Set(doubles).size).toBe(2);
+    for (const value of doubles) { expect(values).toContain(value); expect(value).not.toBe(skip); }
+    expected = values.flatMap(value => value === skip ? [] : doubles.includes(value) ? [value, value] : [value]);
+  }
+  expect(expected.length).toBeGreaterThan(0);
+  expect(expected.every(value => Number.isInteger(value) && value >= 1 && value <= 9)).toBe(true);
+  const nativeClicks: number[] = [];
+  const readBoundary = async () => ({
+    ...await page.evaluate(() => {
+      const workspace = document.querySelector('.game-workspace.game-number');
+      let generation: string | null = null;
+      let resultsRaw: string | null = null;
+      let resultsCount = 0;
+      let storageError: string | null = null;
+      try {
+        generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+        if (!generation || !/^[A-Za-z0-9_-]{1,128}$/.test(generation)) throw new Error('활성 저장 세대가 올바르지 않습니다.');
+        resultsRaw = localStorage.getItem(`nineflow-practice-results-v4:${generation}`);
+        if (resultsRaw !== null) {
+          const envelope = JSON.parse(resultsRaw) as { version?: number; generation?: string; results?: unknown[] };
+          if (envelope?.version !== 4 || envelope.generation !== generation || !Array.isArray(envelope.results)) throw new Error('활성 저장 묶음이 올바르지 않습니다.');
+          resultsCount = envelope.results.length;
+        }
+      } catch (error) { storageError = String(error); }
+      return {
+        wall: Date.now(), ticks: performance.now(),
+        banner: workspace?.querySelector('.number-round-banner')?.textContent ?? null,
+        bannerLabel: workspace?.querySelector('.number-round-banner')?.getAttribute('aria-label') ?? null,
+        roundProgress: workspace?.querySelector('.number-round-banner > em')?.textContent ?? null,
+        inputCounter: workspace?.querySelector('.number-rule > em')?.textContent ?? null,
+        buttons: Array.from(workspace?.querySelectorAll<HTMLButtonElement>('.number-board-pro button') ?? [], button => ({
+          value: Number(button.textContent), disabled: button.disabled, target: button.classList.contains('target'),
+          current: button.getAttribute('aria-current'), label: button.getAttribute('aria-label'),
+        })),
+        flashLive: workspace?.querySelector('.number-layout > .sr-only[aria-live="polite"]')?.textContent ?? null,
+        frameLive: workspace?.querySelector(':scope > .sr-only[aria-live="polite"]')?.textContent ?? null,
+        signals: Array.from(workspace?.querySelectorAll('.answer-signal') ?? [], signal => ({ text: signal.textContent, tone: signal.getAttribute('data-feedback-tone'), label: signal.getAttribute('aria-label') })),
+        footer: workspace?.querySelector('.workspace-foot > b')?.textContent ?? null,
+        generation, resultsCount, resultsRaw, storageError, resultCount: document.querySelectorAll('.stage-result').length,
+      };
+    }),
+    nativeClicks: [...nativeClicks], errors: [...errors],
+  });
+  const captureBoundary = async (phase: string) => {
+    const snapshot = await readBoundary();
+    await testInfo.attach(`number-completion-${focus}-${phase}`, { body: JSON.stringify(snapshot), contentType: 'application/json' });
+    console.log('NUMBER_COMPLETION_INPUT_BOUNDARY', JSON.stringify({ profile: focus, project: testInfo.project.name, phase, expected, snapshot }));
+    await page.screenshot({ path: testInfo.outputPath(`number-completion-${focus}-${phase}.png`) });
+    return snapshot;
+  };
+  for (const value of expected.slice(0, -1)) {
+    await buttons.filter({ hasText: new RegExp(`^${value}$`) }).click();
+    nativeClicks.push(value);
+  }
+  const before = await captureBoundary('before-final');
+  await buttons.filter({ hasText: new RegExp(`^${expected.at(-1)}$`) }).click();
+  nativeClicks.push(expected.at(-1)!);
+  const after = await captureBoundary('after-final');
+  expect(before).toMatchObject({
+    wall: started.wall + 3_000, ticks: started.ticks + 3_000,
+    roundProgress: '1 / 10 문제', inputCounter: `입력 ${expected.length - 1} / ${expected.length}`,
+    nativeClicks: expected.slice(0, -1), signals: [], footer: '', resultsCount: 0, resultCount: 0, storageError: null, errors: [],
+  });
+  expect(before.generation).toMatch(/^[A-Za-z0-9_-]{1,128}$/);
+  expect(before.resultsRaw).not.toBeNull();
+  expect(before.buttons.every(button => !button.disabled)).toBe(true);
+  expect(after).toMatchObject({
+    wall: before.wall, ticks: before.ticks, banner: before.banner, bannerLabel: before.bannerLabel, roundProgress: before.roundProgress,
+    nativeClicks: expected, signals: [{ text: '정답', tone: 'success', label: '응답 결과: 정답' }], footer: '정답',
+    generation: before.generation, resultsCount: 0, resultsRaw: before.resultsRaw, storageError: null, resultCount: 0, errors: [],
+  });
+  expect(after.buttons).toHaveLength(9);
+  expect(after.buttons.every(button => button.disabled && /^[1-9](, 현재 목표)?$/.test(button.label ?? ''))).toBe(true);
+  expect(after.frameLive).toContain('정답');
+  expect(after.frameLive).not.toContain('undefined');
+  if (focus === 'flash') {
+    expect(after.buttons.filter(button => button.target)).toEqual([
+      { value: expected[0], disabled: true, target: true, current: 'step', label: `${expected[0]}, 현재 목표` },
+    ]);
+    expect(after.flashLive).toBe(`현재 목표 숫자 ${expected[0]}`);
+  }
+  expect(after.inputCounter).toBe(`입력 ${expected.length} / ${expected.length}`);
+  await page.clock.runFor(749);
+  const held = await captureBoundary('after-749');
+  expect(held).toEqual({ ...after, wall: after.wall + 749, ticks: after.ticks + 749 });
+  await page.clock.runFor(1);
+  const next = await captureBoundary('next-problem');
+  expect(next).toMatchObject({
+    wall: after.wall + 750, ticks: after.ticks + 750, roundProgress: '2 / 10 문제', inputCounter: `입력 0 / ${expected.length}`,
+    nativeClicks: expected, signals: [], footer: '', generation: before.generation, resultsCount: 0, resultsRaw: before.resultsRaw, storageError: null, resultCount: 0, errors: [],
+  });
+  expect(next.buttons).toHaveLength(9);
+  expect(next.buttons.every(button => !button.disabled && /^[1-9](, 현재 목표)?$/.test(button.label ?? ''))).toBe(true);
+  expect(next.frameLive).toContain('2번째');
+  expect(next.frameLive).not.toContain('정답');
+  expect(next.frameLive).not.toContain('undefined');
+  if (focus === 'flash') {
+    const targets = next.buttons.filter(button => button.target);
+    expect(targets).toHaveLength(1);
+    expect(targets[0]).toMatchObject({ current: 'step', label: `${targets[0].value}, 현재 목표` });
+    expect(next.flashLive).toBe(`현재 목표 숫자 ${targets[0].value}`);
+  }
+  await workspace.getByRole('button', { name: '연습 닫기', exact: true }).click();
+  const confirmation = page.getByRole('alertdialog', { name: '이번 세션을 종료할까요?', exact: true });
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole('button', { name: '연습창 닫기', exact: true }).click();
+  await expect(page.locator('.stage-panel')).toHaveCount(0);
+  await expect(page.locator('.record-summary')).toHaveCount(0);
+  expect(await readBoundary()).toMatchObject({ generation: before.generation, resultsCount: 0, resultsRaw: before.resultsRaw, storageError: null, resultCount: 0 });
+  expect(errors).toEqual([]);
+});
+}
