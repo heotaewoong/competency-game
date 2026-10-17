@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
+import { games } from '../app/lib/game-data';
 
 test('첫 화면은 Tailwind 빌드 컴파일러를 내려받지 않는다', async ({ page }) => {
   const scripts: import('@playwright/test').Response[] = [];
@@ -983,7 +984,7 @@ for (const viewport of [{ width: 320, height: 568 }, { width: 568, height: 320 }
   }
 }
 
-for (const viewport of [{ width: 568, height: 320 }, { width: 768, height: 360 }, { width: 844, height: 320 }] as const) {
+for (const viewport of [{ width: 320, height: 568 }, { width: 385, height: 640 }, { width: 568, height: 320 }, { width: 768, height: 360 }, { width: 844, height: 320 }] as const) {
   for (const textScale of ['standard', 'large'] as const) {
     test('개수 비교하기: ' + viewport.width + '×' + viewport.height + ' ' + textScale + ' 글자의 기본 제한시간 제시와 응답 보드가 스크롤 없이 보인다', async ({ page }, testInfo) => {
       const errors: string[] = [];
@@ -1158,3 +1159,177 @@ for (const viewport of [{ width: 568, height: 320 }, { width: 768, height: 360 }
   }
 }
 
+
+async function captureCommonWorkspaceHeader(page: Page, testInfo: TestInfo, gameId: string, textScale: string) {
+  const raw = await page.locator('.game-workspace.game-' + gameId).evaluate((frame) => {
+    const box = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
+    };
+    const header = frame.querySelector<HTMLElement>('.workspace-head')!;
+    const actions = header.querySelector<HTMLElement>('.workspace-actions')!;
+    const viewport = { left: 0, top: 0, right: document.documentElement.clientWidth, bottom: innerHeight };
+    const outside = (rect: ReturnType<typeof box>, clip: { left: number; right: number; top: number; bottom: number }) => ({
+      x: rect.left < clip.left - 1 || rect.right > clip.right + 1,
+      y: rect.top < clip.top - 1 || rect.bottom > clip.bottom + 1,
+    });
+    const buttons = [...actions.querySelectorAll<HTMLButtonElement>(':scope > button')].map((button) => {
+      const bounds = box(button), style = getComputedStyle(button), pseudo = getComputedStyle(button, '::before');
+      const clippingAncestors = [];
+      for (let ancestor = button.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        const css = getComputedStyle(ancestor), rect = ancestor.getBoundingClientRect();
+        const axes = outside(bounds, { left: rect.left + ancestor.clientLeft, right: rect.left + ancestor.clientLeft + ancestor.clientWidth,
+          top: rect.top + ancestor.clientTop, bottom: rect.top + ancestor.clientTop + ancestor.clientHeight });
+        if ((['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowX) && axes.x) ||
+          (['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowY) && axes.y)) {
+          clippingAncestors.push({ tag: ancestor.tagName, className: ancestor.className, axes,
+            overflowX: css.overflowX, overflowY: css.overflowY, box: box(ancestor),
+            clientWidth: ancestor.clientWidth, clientHeight: ancestor.clientHeight, scrollWidth: ancestor.scrollWidth, scrollHeight: ancestor.scrollHeight });
+        }
+      }
+      return { className: button.className, text: button.textContent?.trim(), label: button.getAttribute('aria-label'), disabled: button.disabled,
+        box: bounds, clientWidth: button.clientWidth, clientHeight: button.clientHeight, scrollWidth: button.scrollWidth, scrollHeight: button.scrollHeight,
+        fontSize: style.fontSize, lineHeight: style.lineHeight, display: style.display, visibility: style.visibility,
+        pseudo: { content: pseudo.content, fontSize: pseudo.fontSize, lineHeight: pseudo.lineHeight, display: pseudo.display, visibility: pseudo.visibility },
+        outsideViewport: outside(bounds, viewport), outsideHeader: outside(bounds, box(header)), outsideActions: outside(bounds, box(actions)), clippingAncestors };
+    });
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    return { capturedAt: new Date().toISOString(), scope: 'Common GameFrame header only; preparation may still be active, not nine active-board coverage.',
+      frameClass: frame.className, preparationVisible: Boolean(frame.querySelector('.game-preparation')), progress: frame.querySelector('.workspace-progress span')?.textContent,
+      textScale: document.documentElement.dataset.textScale, fonts: document.fonts.status,
+      viewport: { width: innerWidth, height: innerHeight, clientWidth: document.documentElement.clientWidth },
+      header: box(header), actions: box(actions), buttons,
+      storage: { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null } };
+  });
+  await testInfo.attach('common-header-' + gameId + '-' + textScale, { body: JSON.stringify(raw), contentType: 'application/json' });
+  console.log('COMMON_HEADER_LAYOUT', JSON.stringify({ project: testInfo.project.name, gameId, textScale, viewport: raw.viewport,
+    preparationVisible: raw.preparationVisible, progress: raw.progress,
+    buttons: raw.buttons.map((button) => ({ label: button.label, width: button.box.width, height: button.box.height, font: button.fontSize,
+      pseudo: button.pseudo, viewport: button.outsideViewport, header: button.outsideHeader, actions: button.outsideActions, clipping: button.clippingAncestors.length })),
+    generation: raw.storage.generation, resultsCount: raw.storage.resultsRaw ? JSON.parse(raw.storage.resultsRaw).results.length : null }));
+  return raw;
+}
+
+async function closeCommonHeaderSession(page: Page, workspace: Locator, withKeyboard: boolean) {
+  const confirmation = page.getByRole('alertdialog', { name: '이번 세션을 종료할까요?', exact: true });
+  if (!await confirmation.count()) {
+    const close = workspace.getByRole('button', { name: '연습 닫기', exact: true });
+    if (withKeyboard) {
+      // Explicit native-control focus checks Enter activation, not the complete Tab order.
+      await close.focus();
+      await expect(close).toBeFocused();
+      await close.press('Enter');
+    } else await close.click();
+  }
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole('button', { name: '연습창 닫기', exact: true }).click();
+  await expect(page.locator('.stage-panel')).toHaveCount(0);
+}
+
+for (const viewport of [{ width: 320, height: 568 }, { width: 568, height: 320 }] as const) {
+  for (const textScale of ['standard', 'large'] as const) {
+    test('공통 게임 헤더: ' + viewport.width + '×' + viewport.height + ' ' + textScale + ' 글자에서 9게임의 축약 이름과 닫기를 유지한다', async ({ page }, testInfo) => {
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+      await page.setViewportSize(viewport);
+      const readStorage = () => page.evaluate(() => {
+        const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+        return { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null };
+      });
+      let failed = false, activeGame: string | null = null;
+      try {
+        await page.goto('/');
+        await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+        await page.getByRole('navigation', { name: '빠른 메뉴', exact: true }).getByRole('button', { name: '준비', exact: true }).click();
+        const readiness = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+        await readiness.getByRole('button', { name: textScale === 'large' ? '큰 글자' : '기본 크기', exact: true }).click();
+        await readiness.getByRole('button', { name: '설정 저장하고 닫기', exact: true }).click();
+        await expect(readiness).toHaveCount(0);
+        await expect(page.locator('html')).toHaveAttribute('data-text-scale', textScale);
+        await page.evaluate(() => document.fonts.ready);
+        const baseline = await readStorage();
+        expect(baseline.generation).not.toBeNull();
+        expect(baseline.resultsRaw).not.toBeNull();
+        expect(JSON.parse(baseline.resultsRaw!).results).toEqual([]);
+        expect(games).toHaveLength(9);
+        expect(new Set(games.map((game) => game.id)).size).toBe(9);
+        const completed: string[] = [];
+        for (const game of games) {
+          activeGame = game.id;
+          await page.getByRole('button', { name: game.title + ', 난이도 ' + game.difficulty + ', 설정 열기', exact: true }).click();
+          const panel = page.locator('.stage-panel[data-game="' + game.id + '"]');
+          await expect(panel).toBeVisible();
+          await panel.getByRole('radio', { name: /연습 모드/ }).click();
+          await panel.locator('.stage-start-practice').click();
+          const workspace = panel.locator('.game-workspace.game-' + game.id);
+          await expect(workspace).toBeVisible();
+          // GamePreparation reuses this exact header, so no artificial three-second wait is needed.
+          const raw = await captureCommonWorkspaceHeader(page, testInfo, game.id, textScale);
+          expect(raw.viewport).toMatchObject(viewport);
+          expect(raw.textScale).toBe(textScale);
+          expect(raw.fonts).toBe('loaded');
+          expect(raw.buttons).toHaveLength(3);
+          expect(raw.storage).toEqual(baseline);
+          const labels = ['게임 바꾸기', '문제 신고', '연습 닫기'];
+          const contents = ['"게임"', '"신고"'];
+          for (let index = 0; index < 3; index += 1) {
+            const button = raw.buttons[index], control = workspace.locator('.workspace-actions > button').nth(index);
+            await expect(control).toHaveAccessibleName(labels[index]);
+            await expect(control).toBeEnabled();
+            expect(button.label).toBe(labels[index]);
+            expect(button.disabled).toBe(false);
+            expect(button.box.width).toBeGreaterThanOrEqual(44);
+            expect(button.box.height).toBeGreaterThanOrEqual(44);
+            expect(button.display).not.toBe('none');
+            expect(button.visibility).toBe('visible');
+            expect(button.outsideViewport).toEqual({ x: false, y: false });
+            expect(button.outsideHeader).toEqual({ x: false, y: false });
+            expect(button.outsideActions).toEqual({ x: false, y: false });
+            expect(button.clippingAncestors).toEqual([]);
+            expect(button.fontSize).toBe(index === 2 ? '20px' : '0px');
+            if (index < 2) {
+              // Generated text has no DOM Range; retain full ARIA and inspect its computed line box.
+              expect(button.text).toBe(labels[index]);
+              expect(button.pseudo.content).toBe(contents[index]);
+              expect(button.pseudo.fontSize).toBe(textScale === 'large' ? '14px' : '9px');
+              expect(button.pseudo.display).not.toBe('none');
+              expect(button.pseudo.visibility).toBe('visible');
+              const lineHeight = Number.parseFloat(button.pseudo.lineHeight);
+              expect(Number.isFinite(lineHeight)).toBe(true);
+              expect(lineHeight).toBeGreaterThan(0);
+              expect(lineHeight).toBeLessThanOrEqual(button.clientHeight);
+            } else expect(button.text).toBe('×');
+          }
+          // Keep the frame open through all assertions; failure evidence is captured before finally closes it.
+          await closeCommonHeaderSession(page, workspace, true);
+          expect(await readStorage()).toEqual(baseline);
+          await expect(page.locator('.stage-result')).toHaveCount(0);
+          completed.push(game.id);
+          activeGame = null;
+        }
+        expect(completed).toEqual(games.map((game) => game.id));
+      } catch (error) {
+        failed = true;
+        console.log('COMMON_HEADER_FAILURE', JSON.stringify({ project: testInfo.project.name, viewport, textScale, activeGame, error: String(error) }));
+        await page.content().then((body) => testInfo.attach('common-header-first-failure.html', { body, contentType: 'text/html' }))
+          .catch((captureError) => console.log('COMMON_HEADER_DOM_CAPTURE_ERROR', String(captureError)));
+        await page.screenshot({ path: testInfo.outputPath('common-header-first-failure.png') })
+          .catch((captureError) => console.log('COMMON_HEADER_CAPTURE_ERROR', String(captureError)));
+        throw error;
+      } finally {
+        console.log('COMMON_HEADER_ERRORS', JSON.stringify({ project: testInfo.project.name, viewport, textScale, activeGame, errors }));
+        try {
+          if (activeGame) {
+            const workspace = page.locator('.game-workspace.game-' + activeGame);
+            if (await workspace.count()) await closeCommonHeaderSession(page, workspace, false);
+          }
+        } catch (closeError) {
+          if (!failed) throw closeError;
+          console.log('COMMON_HEADER_CLOSE_ERROR', String(closeError));
+        }
+      }
+      expect(errors).toEqual([]);
+    });
+  }
+}

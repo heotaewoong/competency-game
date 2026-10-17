@@ -967,10 +967,10 @@ html[data-text-scale="large"] .result-time-note p { font-size: 14px; }
   .workspace-head > div:first-child { min-width: 0; }
   .workspace-head h2 { overflow: hidden; font-size: 17px; text-overflow: ellipsis; white-space: nowrap; }
   .workspace-actions { grid-column: 2; grid-row: 1; gap: 4px; }
-  .workspace-actions > button { width: 42px; min-height: 42px; padding: 0; font-size: 0; }
+  .game-workspace .workspace-actions > button { width: 44px; min-height: 44px; padding: 0; font-size: 0; }
   .workspace-actions > .workspace-switch::before { content: '게임'; font-size: 9px; }
   .workspace-actions > .workspace-report::before { content: '신고'; font-size: 9px; }
-  .workspace-actions > .session-close { width: 42px; font-size: 20px; }
+  .game-workspace .workspace-actions > .session-close { width: 44px; font-size: 20px; }
   .workspace-progress { width: 100%; grid-column: 1 / -1; grid-row: 2; }
   .workspace-progress span { justify-self: start; }
 
@@ -2922,6 +2922,9 @@ html[data-contrast="high"] :where(.game-card, .continue-card, .readiness-banner,
 html[data-contrast="high"] :where(.hero-copy p, .card-copy p, .readiness-banner-copy p, .simulator-note, small) { color: #3d485b; }
 html[data-contrast="high"] button:focus-visible, html[data-contrast="high"] a:focus-visible, html[data-contrast="high"] summary:focus-visible { outline-color: #004bd6; outline-width: 4px; }
 html[data-text-scale="large"] :where(button, a, label, legend) { font-size: max(13px, .875em); }
+/* Keep compact generated labels readable without reviving the long native text. */
+html[data-text-scale="large"] .game-workspace .workspace-actions > .workspace-switch::before,
+html[data-text-scale="large"] .game-workspace .workspace-actions > .workspace-report::before { font-size: 14px; }
 html[data-text-scale="large"] :where(p, li, dt, dd, small) { font-size: max(12px, .8em); }
 html[data-text-scale="large"] .hero-copy > p:not(.eyebrow) { font-size: 16px; }
 html[data-text-scale="large"] :where(.mode-options button > span, .mode-options button > b, .appointment-practice-options b, .appointment-round-picker em, .intro-settings-shortcut b, .intro-settings-shortcut em) { font-size: 12px !important; }
@@ -3266,3 +3269,9 @@ html[data-text-scale="large"] .training-bundle .training-bundle-status { font-si
   .game-count .count-wrap.phase-show:has(> .time-strip) > .count-board > button > span { display: none; }
 }
 
+
+/* Constrain only timed Count phases to the actual remaining play area. */
+.game-count .workspace-body:has(.count-wrap > .time-strip) { grid-template-rows: minmax(0, 1fr); }
+.game-count .count-stage-shell:has(> .count-wrap > .time-strip) { min-height: 0; align-self: stretch; grid-template-rows: auto minmax(0, 1fr); }
+.game-count .count-wrap:has(> .time-strip) { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.game-count .count-wrap:has(> .time-strip) > .count-board { min-height: 44px; max-height: 100%; }
