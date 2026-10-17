@@ -1775,7 +1775,25 @@ function GameFrame({ gameId, current, total, children, helper, simulationHelper,
   const liveMessage = `${progressText}${liveDetail ? `. ${liveDetail}` : ''}`;
   const footerHelper = mode === 'practice' ? helper : simulationHelper ?? '고정 설정으로 진행 중';
   useLayoutEffect(() => {
-    bodyRef.current?.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    const body = bodyRef.current;
+    if (!body) return;
+    const shell = gameId === 'path' && current > 0 ? body.querySelector<HTMLElement>('.path-shell') : null;
+    let top = 0;
+    if (shell && body.clientHeight > 0) {
+      const bounds = shell.getBoundingClientRect();
+      const contentTop = bounds.top - body.getBoundingClientRect().top - body.clientTop + body.scrollTop;
+      const deadline = body.querySelector<HTMLElement>(':scope > .time-strip');
+      const style = deadline ? getComputedStyle(deadline) : null;
+      const deadlineHeight = deadline?.getBoundingClientRect().height ?? 0;
+      const inset = style?.position === 'sticky' && deadlineHeight > 0
+        ? Math.max(0, Number.parseFloat(style.top) || 0) + deadlineHeight + Math.max(0, Number.parseFloat(style.marginBottom) || 0) : 0;
+      const usableHeight = body.clientHeight - inset;
+      if (bounds.height > 0 && usableHeight > 0) {
+        if (contentTop < inset) top = contentTop - inset;
+        else if (contentTop + bounds.height > body.clientHeight) top = bounds.height <= usableHeight ? contentTop + bounds.height - body.clientHeight : contentTop - inset;
+      }
+    }
+    body.scrollTo({ top: Math.max(0, Math.min(top, body.scrollHeight - body.clientHeight)), left: 0, behavior: 'auto' });
   }, [current, gameId]);
   return (
     <div className={`game-workspace game-${gameId}`} data-mode={mode} role="region" aria-labelledby={`${gameId}-workspace-title`} tabIndex={-1}>

@@ -1333,3 +1333,518 @@ for (const viewport of [{ width: 320, height: 568 }, { width: 568, height: 320 }
     });
   }
 }
+
+async function captureNumberRpsFirstBoard(firstFrame: Locator, gameId: 'number' | 'rps') {
+  return firstFrame.evaluate((frame, id) => {
+    const box = (rect: DOMRect) => ({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height });
+    type Bounds = ReturnType<typeof box>;
+    const outside = (rect: Bounds, boundary: Pick<Bounds, 'left' | 'right' | 'top' | 'bottom'>) => ({
+      x: rect.left < boundary.left - 1 || rect.right > boundary.right + 1,
+      y: rect.top < boundary.top - 1 || rect.bottom > boundary.bottom + 1,
+    });
+    const body = frame.querySelector<HTMLElement>('.workspace-body')!;
+    const bodyBox = box(body.getBoundingClientRect());
+    const viewport = { left: 0, right: document.documentElement.clientWidth, top: 0, bottom: innerHeight };
+    const geometry = (element: HTMLElement, withText: boolean) => {
+      const bounds = box(element.getBoundingClientRect()), style = getComputedStyle(element);
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const textRects = withText ? [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0).map(box) : [];
+      type Clip = { tag: string; className: string; overflowX: string; overflowY: string; clipBox: Bounds;
+        clientWidth: number; clientHeight: number; scrollWidth: number; scrollHeight: number; scrollLeft: number; scrollTop: number;
+        elementOutside: { x: boolean; y: boolean }; textOutside: { x: boolean; y: boolean } };
+      const clippingAncestors: Clip[] = [];
+      for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        const css = getComputedStyle(ancestor);
+        const clipsX = ['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowX);
+        const clipsY = ['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowY);
+        if (!clipsX && !clipsY) continue;
+        const rect = ancestor.getBoundingClientRect();
+        const clipBox = { left: rect.left + ancestor.clientLeft, right: rect.left + ancestor.clientLeft + ancestor.clientWidth,
+          top: rect.top + ancestor.clientTop, bottom: rect.top + ancestor.clientTop + ancestor.clientHeight,
+          width: ancestor.clientWidth, height: ancestor.clientHeight };
+        const elementAxes = outside(bounds, clipBox), textAxes = textRects.map((text) => outside(text, clipBox));
+        clippingAncestors.push({ tag: ancestor.tagName, className: ancestor.className, overflowX: css.overflowX, overflowY: css.overflowY, clipBox,
+          clientWidth: ancestor.clientWidth, clientHeight: ancestor.clientHeight, scrollWidth: ancestor.scrollWidth, scrollHeight: ancestor.scrollHeight,
+          scrollLeft: ancestor.scrollLeft, scrollTop: ancestor.scrollTop,
+          elementOutside: { x: clipsX && elementAxes.x, y: clipsY && elementAxes.y },
+          textOutside: { x: clipsX && textAxes.some((axes) => axes.x), y: clipsY && textAxes.some((axes) => axes.y) } });
+      }
+      const button = element.closest('button');
+      const buttonBox = button ? box(button.getBoundingClientRect()) : null;
+      const hit = document.elementFromPoint((bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+      return { tag: element.tagName, className: element.className, text: element.textContent?.trim() ?? '', box: bounds,
+        font: style.font, lineHeight: style.lineHeight, display: style.display, visibility: style.visibility,
+        clientWidth: element.clientWidth, clientHeight: element.clientHeight, scrollWidth: element.scrollWidth, scrollHeight: element.scrollHeight,
+        textRects, textOutsideSelf: textRects.some((text) => { const axes = outside(text, bounds); return axes.x || axes.y; }),
+        textOutsideButton: buttonBox ? textRects.some((text) => { const axes = outside(text, buttonBox); return axes.x || axes.y; }) : false,
+        outsideBody: outside(bounds, bodyBox), outsideViewport: outside(bounds, viewport), clippingAncestors,
+        centerHit: Boolean(hit && (hit === element || element.contains(hit))), focused: document.activeElement === element };
+    };
+    const board = frame.querySelector<HTMLElement>(id === 'number' ? '.number-board-pro' : '.rps-board')!;
+    const buttons = [...frame.querySelectorAll<HTMLButtonElement>(id === 'number' ? '.number-board-pro > button' : '.rps-actions > button')];
+    const responseButtons = buttons.map((button) => ({ ...geometry(button, id === 'number'), disabled: button.disabled,
+      label: button.getAttribute('aria-label'), current: button.getAttribute('aria-current'), target: button.classList.contains('target'),
+      labels: (id === 'number' ? [button] : [...button.querySelectorAll<HTMLElement>(':scope > span, :scope > b')])
+        .map((label) => geometry(label, true)) }));
+    const labelSelector = id === 'number'
+      ? '.number-round-banner > span, .number-round-banner > b, .number-round-banner > em, .number-rule > span, .number-rule > em'
+      : '.round-label > span, .round-label > b, .rps-board article > span, .rps-board > div > b, .rps-question';
+    // The RPS relationship subtitle is intentionally display:none at these widths; real board names and choice labels remain required.
+    const labels = [...frame.querySelectorAll<HTMLElement>(labelSelector)].map((label) => geometry(label, true));
+    const deadline = frame.querySelector<HTMLElement>('.time-strip')!;
+    const progress = frame.querySelector<HTMLElement>('.workspace-progress > i[role="progressbar"]')!;
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    const active = document.activeElement;
+    return { capturedAt: new Date().toISOString(), gameId: id, mode: frame.getAttribute('data-mode'), preparationCount: frame.querySelectorAll('.game-preparation').length,
+      resultCount: document.querySelectorAll('.stage-result').length, guidedCount: frame.querySelectorAll('.guided-pacing-note').length,
+      progress: { current: progress.getAttribute('aria-valuenow'), total: progress.getAttribute('aria-valuemax'),
+        text: frame.querySelector('.workspace-progress span')?.textContent ?? null },
+      number: { banner: frame.querySelector('.number-round-banner')?.getAttribute('aria-label') ?? null,
+        round: frame.querySelector('.number-round-banner > span')?.textContent ?? null, counter: frame.querySelector('.number-rule > em')?.textContent ?? null },
+      rps: { round: frame.querySelector('.round-label > span')?.textContent ?? null, phase: frame.querySelector('.round-label > b')?.textContent ?? null,
+        questions: frame.querySelectorAll('.rps-question').length,
+        images: [...board.querySelectorAll<HTMLImageElement>('img')].map((image) => ({ ...geometry(image, false),
+          alt: image.alt, complete: image.complete, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight })) },
+      deadline: { ...geometry(deadline, false), duration: deadline.getAttribute('aria-valuemax'), remaining: deadline.getAttribute('aria-valuenow'),
+        active: deadline.getAttribute('data-deadline-active'), label: deadline.getAttribute('aria-label'),
+        visibleText: geometry(deadline.querySelector<HTMLElement>('.deadline-text')!, true) },
+      feedback: frame.querySelector('.workspace-foot > b')?.textContent ?? null,
+      live: [...frame.querySelectorAll('[aria-live]')].map((node) => node.textContent),
+      viewport: { width: innerWidth, height: innerHeight, clientWidth: document.documentElement.clientWidth,
+        documentWidth: document.documentElement.scrollWidth, bodyWidth: document.body.scrollWidth, scrollX, scrollY },
+      body: { box: bodyBox, clientWidth: body.clientWidth, clientHeight: body.clientHeight, scrollWidth: body.scrollWidth,
+        scrollHeight: body.scrollHeight, scrollLeft: body.scrollLeft, scrollTop: body.scrollTop },
+      board: geometry(board, false), responseButtons, labels,
+      focus: { tag: active?.tagName ?? null, className: active?.getAttribute('class') ?? null, label: active?.getAttribute('aria-label') ?? null,
+        text: active?.textContent?.trim().slice(0, 100) ?? null },
+      textScale: document.documentElement.dataset.textScale, fonts: document.fonts.status, mediaCount: document.querySelectorAll('audio,video').length,
+      storage: { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null } };
+  }, gameId);
+}
+
+for (const game of [{ id: 'number', title: '숫자 누르기', quantity: '10', pace: '20초', total: '5', duration: '20000', responses: 9 },
+  { id: 'rps', title: '가위바위보', quantity: '15', pace: '4.5초', total: '15', duration: '4500', responses: 3 }] as const) {
+  for (const viewport of [{ width: 320, height: 568 }, { width: 568, height: 320 }] as const) {
+    for (const textScale of ['standard', 'large'] as const) {
+      test(game.title + ': ' + viewport.width + '×' + viewport.height + ' ' + textScale + ' 글자에서 첫 실제 보드와 응답 이름표를 자르지 않는다', async ({ page }, testInfo) => {
+        const errors: string[] = [];
+        page.on('pageerror', (error) => errors.push(error.message));
+        page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+        await page.setViewportSize(viewport);
+        const readStorage = () => page.evaluate(() => {
+          const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+          return { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null };
+        });
+        const panel = page.locator('.stage-panel[data-game="' + game.id + '"]');
+        // Closing must not depend on progress=1: the unchanged RPS timer may advance while the first PNG is written.
+        const workspace = panel.locator('.game-workspace.game-' + game.id);
+        let failed = false, closedNormally = false;
+        try {
+          await page.goto('/');
+          await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+          await page.getByRole('navigation', { name: '빠른 메뉴', exact: true }).getByRole('button', { name: '준비', exact: true }).click();
+          const readiness = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+          await readiness.getByRole('button', { name: textScale === 'large' ? '큰 글자' : '기본 크기', exact: true }).click();
+          await readiness.getByRole('button', { name: '설정 저장하고 닫기', exact: true }).click();
+          await expect(readiness).toHaveCount(0);
+          await expect(page.locator('html')).toHaveAttribute('data-text-scale', textScale);
+          await page.evaluate(() => document.fonts.ready);
+          await page.getByRole('button', { name: game.title + ', 난이도 하, 설정 열기', exact: true }).click();
+          await expect(panel).toBeVisible();
+          await panel.getByRole('radio', { name: /연습 모드/ }).click();
+          await expect(panel.locator('output[aria-label="문제 수 현재 값"]')).toHaveText(game.quantity);
+          await expect(panel.locator('output[aria-label="문제 제한 현재 값"]')).toHaveText(game.pace);
+          const pacing = panel.locator('label.accessible-pacing-setting');
+          if (await pacing.locator('input[type="checkbox"]').isChecked()) await pacing.click();
+          await expect(pacing.locator('input[type="checkbox"]')).not.toBeChecked();
+          const baseline = await readStorage();
+          expect(baseline.generation).not.toBeNull();
+          expect(baseline.resultsRaw).not.toBeNull();
+          expect(JSON.parse(baseline.resultsRaw!).results).toEqual([]);
+          await panel.locator('.stage-start-practice').click();
+          const boardSelector = game.id === 'number' ? '.number-board-pro' : '.rps-board';
+          const firstFrame = panel.locator('.game-workspace.game-' + game.id + '[data-mode="practice"]:has(.workspace-progress > i[role="progressbar"][aria-valuenow="1"][aria-valuemax="' + game.total + '"]):has(' + boardSelector + ')');
+          // Exactly one synchronous first-board read; natural preparation and the default deadline are not replaced.
+          const raw = await captureNumberRpsFirstBoard(firstFrame, game.id);
+          await testInfo.attach('number-rps-first-board.json', { body: JSON.stringify({ project: testInfo.project.name, viewport, textScale, errorsAtCapture: [...errors], ...raw }, null, 2), contentType: 'application/json' });
+          console.log('NUMBER_RPS_FIRST_BOARD', JSON.stringify({ project: testInfo.project.name, gameId: game.id, viewport, textScale,
+            capturedAt: raw.capturedAt, progress: raw.progress, number: raw.number, rps: { round: raw.rps.round, phase: raw.rps.phase },
+            deadline: { active: raw.deadline.active, remaining: raw.deadline.remaining, duration: raw.deadline.duration },
+            body: raw.body, generation: raw.storage.generation, nativeGameAnswers: 0 }));
+          expect(raw.progress).toMatchObject({ current: '1', total: game.total });
+          expect(raw.preparationCount).toBe(0);
+          expect(raw.responseButtons).toHaveLength(game.responses);
+          expect(raw.responseButtons.every((button) => !button.disabled)).toBe(true);
+          expect(raw.deadline.active).toBe('true');
+          expect(raw.deadline.duration).toBe(game.duration);
+          expect(Number(raw.deadline.remaining)).toBeGreaterThan(0);
+          if (game.id === 'number') {
+            expect(raw.number.round).toBe('ROUND 1 / 2');
+            expect(raw.number.counter).toBe('입력 0 / 1');
+            expect(raw.responseButtons.filter((button) => button.target)).toHaveLength(1);
+            expect(raw.responseButtons.filter((button) => button.current === 'step')).toHaveLength(1);
+          } else {
+            expect(raw.rps.round).toBe('라운드 1 / 3');
+            expect(raw.rps.phase).toBe('내 패 찾기');
+            expect(raw.rps.questions).toBe(1);
+            expect(raw.rps.images).toHaveLength(1);
+            expect(raw.rps.images[0].complete).toBe(true);
+            expect(raw.rps.images[0].naturalWidth).toBeGreaterThan(0);
+          }
+          await page.screenshot({ path: testInfo.outputPath('number-rps-first-board.png') });
+          const afterPNG = await workspace.evaluate((frame) => ({ capturedAt: new Date().toISOString(),
+            progress: frame.querySelector('.workspace-progress > i[role="progressbar"]')?.getAttribute('aria-valuenow'),
+            total: frame.querySelector('.workspace-progress > i[role="progressbar"]')?.getAttribute('aria-valuemax'),
+            numberRound: frame.querySelector('.number-round-banner')?.getAttribute('aria-label') ?? null,
+            rpsRound: frame.querySelector('.round-label > span')?.textContent ?? null,
+            rpsPhase: frame.querySelector('.round-label > b')?.textContent ?? null,
+            deadlineActive: frame.querySelector('.time-strip')?.getAttribute('data-deadline-active') ?? null,
+            numberCounter: frame.querySelector('.number-rule > em')?.textContent ?? null,
+            feedback: frame.querySelector('.workspace-foot > b')?.textContent ?? null,
+            disabled: [...frame.querySelectorAll<HTMLButtonElement>('.number-board-pro > button, .rps-actions > button')].map((button) => button.disabled) }));
+          await testInfo.attach('number-rps-after-first-png.json', { body: JSON.stringify(afterPNG), contentType: 'application/json' });
+          console.log('NUMBER_RPS_FIRST_PNG_PROVENANCE', JSON.stringify({ project: testInfo.project.name, gameId: game.id, viewport, textScale,
+            first: { capturedAt: raw.capturedAt, progress: raw.progress, number: raw.number, rpsRound: raw.rps.round, rpsPhase: raw.rps.phase },
+            afterPNG, sameActiveFirstBoardAfterPNG: afterPNG.progress === '1' && afterPNG.total === game.total && afterPNG.deadlineActive === 'true'
+              && afterPNG.numberCounter === raw.number.counter && afterPNG.rpsRound === raw.rps.round && afterPNG.rpsPhase === raw.rps.phase
+              && afterPNG.disabled.length === game.responses && afterPNG.disabled.every((disabled) => !disabled) }));
+          await closeCommonHeaderSession(page, workspace, false);
+          closedNormally = true;
+          expect(await readStorage()).toEqual(baseline);
+          await expect(page.locator('.stage-result')).toHaveCount(0);
+          expect(raw.storage).toEqual(baseline);
+          expect(raw.mode).toBe('practice');
+          expect(raw.resultCount).toBe(0);
+          expect(raw.guidedCount).toBe(0);
+          expect(raw.textScale).toBe(textScale);
+          expect(raw.fonts).toBe('loaded');
+          expect(raw.mediaCount).toBe(0);
+          expect(raw.viewport).toMatchObject(viewport);
+          expect(raw.viewport.documentWidth).toBeLessThanOrEqual(raw.viewport.clientWidth + 1);
+          expect(raw.viewport.bodyWidth).toBeLessThanOrEqual(raw.viewport.clientWidth + 1);
+          expect(raw.body.scrollLeft).toBe(0);
+          expect(raw.feedback?.trim() ?? '').toBe('');
+          const elements = [raw.board, raw.deadline, raw.deadline.visibleText, ...raw.labels, ...raw.responseButtons,
+            ...raw.responseButtons.flatMap((button) => button.labels), ...raw.rps.images];
+          for (const element of elements) {
+            expect(element.box.width, element.text).toBeGreaterThan(0);
+            expect(element.box.height, element.text).toBeGreaterThan(0);
+            expect(element.display, element.text).not.toBe('none');
+            expect(element.visibility, element.text).toBe('visible');
+            expect(element.outsideBody, element.text).toEqual({ x: false, y: false });
+            expect(element.outsideViewport, element.text).toEqual({ x: false, y: false });
+            expect(element.clippingAncestors.filter((clip) => clip.elementOutside.x || clip.elementOutside.y || clip.textOutside.x || clip.textOutside.y), element.text).toEqual([]);
+          }
+          for (const label of [raw.deadline.visibleText, ...raw.labels, ...raw.responseButtons.flatMap((button) => button.labels)]) {
+            expect(label.text.length).toBeGreaterThan(0);
+            expect(label.textRects.length, label.text).toBeGreaterThan(0);
+            expect(label.textOutsideSelf, label.text).toBe(false);
+            expect(label.textOutsideButton, label.text).toBe(false);
+          }
+          for (const button of raw.responseButtons) {
+            expect(button.box.width).toBeGreaterThanOrEqual(44);
+            expect(button.box.height).toBeGreaterThanOrEqual(44);
+            expect(button.centerHit, button.text).toBe(true);
+            expect(button.labels).toHaveLength(game.id === 'number' ? 1 : 2);
+          }
+          if (game.id === 'number') {
+            expect(raw.responseButtons.map((button) => Number(button.text)).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+            const target = raw.responseButtons.find((button) => button.target)!;
+            expect(target.current).toBe('step');
+            expect(target.label).toBe(target.text + ', 현재 목표');
+            expect(raw.number.banner).toBe('1라운드 점등 숫자, 5문제 중 1번째');
+          } else {
+            expect(raw.responseButtons.map((button) => button.labels.map((label) => label.text))).toEqual([['←', '가위'], ['↓', '바위'], ['→', '보']]);
+            expect(['가위', '바위', '보']).toContain(raw.rps.images[0].alt);
+          }
+        } catch (error) {
+          failed = true;
+          console.log('NUMBER_RPS_FIRST_BOARD_FAILURE', JSON.stringify({ project: testInfo.project.name, gameId: game.id, viewport, textScale, closedNormally, error: String(error) }));
+          // Geometry checks use the preserved first raw after closing; this failure PNG can be HOME, unlike the first-board PNG.
+          await page.content().then((body) => testInfo.attach('number-rps-first-failure.html', { body, contentType: 'text/html' }))
+            .catch((captureError) => console.log('NUMBER_RPS_DOM_CAPTURE_ERROR', String(captureError)));
+          await page.screenshot({ path: testInfo.outputPath('number-rps-first-failure.png') })
+            .catch((captureError) => console.log('NUMBER_RPS_CAPTURE_ERROR', String(captureError)));
+          throw error;
+        } finally {
+          console.log('NUMBER_RPS_FIRST_BOARD_ERRORS', JSON.stringify({ project: testInfo.project.name, gameId: game.id, viewport, textScale, errors }));
+          try {
+            if (!closedNormally && await workspace.count()) await closeCommonHeaderSession(page, workspace, false);
+          } catch (closeError) {
+            if (!failed) throw closeError;
+            console.log('NUMBER_RPS_CLOSE_ERROR', String(closeError));
+          }
+        }
+        expect(errors).toEqual([]);
+      });
+    }
+  }
+}
+
+async function capturePathInitialVisibility(page: Page, testInfo: TestInfo, phase: string) {
+  const raw = await page.locator('.game-workspace.game-path').evaluate((frame) => {
+    const box = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
+    };
+    const outside = (rect: ReturnType<typeof box>, clip: { left: number; right: number; top: number; bottom: number }) => ({
+      x: rect.left < clip.left - 1 || rect.right > clip.right + 1,
+      y: rect.top < clip.top - 1 || rect.bottom > clip.bottom + 1,
+    });
+    const body = frame.querySelector<HTMLElement>('.workspace-body')!;
+    const shell = body.querySelector<HTMLElement>('.path-shell')!;
+    const grid = shell.querySelector<HTMLElement>('.path-grid')!;
+    const panel = frame.closest<HTMLElement>('.stage-panel')!;
+    const backdrop = panel.closest<HTMLElement>('.stage-backdrop')!;
+    const bodyBox = box(body), shellBox = box(shell), gridBox = box(grid);
+    const port = { left: bodyBox.left + body.clientLeft, right: bodyBox.left + body.clientLeft + body.clientWidth,
+      top: bodyBox.top + body.clientTop, bottom: bodyBox.top + body.clientTop + body.clientHeight };
+    const viewport = { left: 0, right: document.documentElement.clientWidth, top: 0, bottom: innerHeight };
+    const visiblePort = { left: Math.max(port.left, viewport.left), right: Math.min(port.right, viewport.right),
+      top: Math.max(port.top, viewport.top), bottom: Math.min(port.bottom, viewport.bottom) };
+    for (let ancestor = body.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      const style = getComputedStyle(ancestor), bounds = ancestor.getBoundingClientRect();
+      if (['hidden', 'clip', 'auto', 'scroll'].includes(style.overflowX)) {
+        visiblePort.left = Math.max(visiblePort.left, bounds.left + ancestor.clientLeft);
+        visiblePort.right = Math.min(visiblePort.right, bounds.left + ancestor.clientLeft + ancestor.clientWidth);
+      }
+      if (['hidden', 'clip', 'auto', 'scroll'].includes(style.overflowY)) {
+        visiblePort.top = Math.max(visiblePort.top, bounds.top + ancestor.clientTop);
+        visiblePort.bottom = Math.min(visiblePort.bottom, bounds.top + ancestor.clientTop + ancestor.clientHeight);
+      }
+      // The fixed backdrop uses the viewport, not the locked background body's shifted box.
+      if (ancestor === backdrop) break;
+    }
+    const deadline = frame.querySelector<HTMLElement>('.workspace-body > .time-strip');
+    const deadlineStyle = deadline ? getComputedStyle(deadline) : null;
+    const deadlineState = deadline && deadlineStyle ? { box: box(deadline), position: deadlineStyle.position, top: deadlineStyle.top,
+      marginBottom: deadlineStyle.marginBottom, display: deadlineStyle.display, visibility: deadlineStyle.visibility } : null;
+    const usablePort = { ...visiblePort };
+    if (deadlineState?.position === 'sticky' && deadlineState.box.height > 0 && deadlineState.box.top < visiblePort.bottom &&
+      deadlineState.box.bottom > visiblePort.top) {
+      usablePort.top = Math.max(usablePort.top, deadlineState.box.bottom + Math.max(0, Number.parseFloat(deadlineState.marginBottom) || 0));
+    }
+    const inspect = (element: HTMLElement) => {
+      const bounds = box(element), style = getComputedStyle(element);
+      const hit = document.elementFromPoint((bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+      return { box: bounds, outsideUsablePort: outside(bounds, usablePort), outsideViewport: outside(bounds, viewport),
+        centerHit: Boolean(hit && (element === hit || element.contains(hit))),
+        hit: hit ? { tag: hit.tagName, className: hit.className } : null,
+        fontSize: style.fontSize, display: style.display, visibility: style.visibility };
+    };
+    const cells = [...grid.querySelectorAll<HTMLElement>('.path-cell')].map((cell, index) => {
+      const cellBox = box(cell);
+      const controls = [...cell.querySelectorAll<HTMLButtonElement>('button')].filter((button) => button.getClientRects().length && getComputedStyle(button).display !== 'none').map((button) => {
+        const geometry = inspect(button), range = document.createRange();
+        range.selectNodeContents(button);
+        const textRects = [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0)
+          .map((rect) => ({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height }));
+        const clippingAncestors = [];
+        for (let ancestor = button.parentElement; ancestor; ancestor = ancestor.parentElement) {
+          const css = getComputedStyle(ancestor), bounds = ancestor.getBoundingClientRect();
+          const axes = outside(geometry.box, { left: bounds.left + ancestor.clientLeft, right: bounds.left + ancestor.clientLeft + ancestor.clientWidth,
+            top: bounds.top + ancestor.clientTop, bottom: bounds.top + ancestor.clientTop + ancestor.clientHeight });
+          const clipsX = ['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowX);
+          const clipsY = ['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowY);
+          if ((clipsX && axes.x) || (clipsY && axes.y)) clippingAncestors.push({ className: ancestor.className,
+            beforeBody: ancestor !== body && body.contains(ancestor), axes,
+            clipsX, clipsY, overflowX: css.overflowX, overflowY: css.overflowY, box: box(ancestor),
+            clientWidth: ancestor.clientWidth, clientHeight: ancestor.clientHeight, scrollTop: ancestor.scrollTop, scrollHeight: ancestor.scrollHeight });
+          if (ancestor === backdrop) break;
+        }
+        return { ...geometry, label: button.getAttribute('aria-label'), cycleCell: button.getAttribute('data-cycle-cell'), focused: document.activeElement === button,
+          outsideCell: outside(geometry.box, cellBox), outsideGrid: outside(geometry.box, gridBox), textRects,
+          textOutsideButton: textRects.filter((rect) => { const axes = outside(rect, geometry.box); return axes.x || axes.y; }), clippingAncestors };
+      });
+      return { index, fence: cell.getAttribute('data-fence'), box: cellBox, outsideGrid: outside(cellBox, gridBox), controls };
+    });
+    const markers = [...shell.querySelectorAll<HTMLElement>('.edge-marker > span')].map((marker) => ({
+      ...inspect(marker), text: marker.textContent, parts: [marker, ...marker.querySelectorAll<HTMLElement>('*')].map((part) => ({
+        box: box(part), outsideUsablePort: outside(box(part), usablePort), outsideViewport: outside(box(part), viewport),
+      })),
+    }));
+    const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    return { capturedAt: new Date().toISOString(), scope: 'Path initial visibility in the sticky-deadline-excluded usable area and native recovery; not simultaneous fit of every control or resize recovery.',
+      viewport: { width: innerWidth, height: innerHeight }, textScale: document.documentElement.dataset.textScale, fonts: document.fonts.status,
+      preparation: Boolean(frame.querySelector('.game-preparation')), progress: frame.querySelector('.workspace-progress span')?.textContent,
+      actions: frame.querySelector('.path-toolbar > span b')?.textContent, cells, markers, shell: shellBox, grid: gridBox,
+      shellOutsideUsablePort: outside(shellBox, usablePort), body: { box: bodyBox, port, visiblePort, usablePort, clientWidth: body.clientWidth, clientHeight: body.clientHeight,
+        scrollTop: body.scrollTop, scrollLeft: body.scrollLeft, scrollHeight: body.scrollHeight },
+      fits: shellBox.width <= usablePort.right - usablePort.left + 1 && shellBox.height <= usablePort.bottom - usablePort.top + 1,
+      deadline: deadlineState,
+      active: active ? { label: active.getAttribute('aria-label') ?? active.textContent?.trim(), cycleCell: active.getAttribute('data-cycle-cell'), ...inspect(active) } : null,
+      external: { windowX: scrollX, windowY: scrollY, rootTop: document.documentElement.scrollTop, rootLeft: document.documentElement.scrollLeft,
+        panelTop: panel.scrollTop, panelLeft: panel.scrollLeft, backdropTop: backdrop.scrollTop, backdropLeft: backdrop.scrollLeft,
+        frameTop: (frame as HTMLElement).scrollTop, frameLeft: (frame as HTMLElement).scrollLeft, fixedTop: document.body.style.top, fixedLeft: document.body.style.left },
+      storage: { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null } };
+  });
+  await testInfo.attach('path-initial-' + phase, { body: JSON.stringify(raw), contentType: 'application/json' });
+  console.log('PATH_INITIAL_VISIBILITY', JSON.stringify({ project: testInfo.project.name, phase, viewport: raw.viewport, textScale: raw.textScale,
+    progress: raw.progress, actions: raw.actions, fits: raw.fits, shell: raw.shell, body: raw.body, deadline: raw.deadline, active: raw.active,
+    external: raw.external, cells: raw.cells.length, ownIssues: raw.cells.flatMap((cell) => cell.controls.filter((control) =>
+      control.box.width < 44 || control.box.height < 44 || control.outsideCell.x || control.outsideCell.y || control.outsideGrid.x || control.outsideGrid.y ||
+      control.textOutsideButton.length || control.clippingAncestors.some((ancestor) => ancestor.clipsX && ancestor.axes.x) ||
+      control.clippingAncestors.some((ancestor) => ancestor.beforeBody && ['hidden', 'clip'].includes(ancestor.overflowY) && ancestor.axes.y)).map((control) => ({ index: cell.index, box: control.box,
+        cell: control.outsideCell, grid: control.outsideGrid, text: control.textOutsideButton.length, clipping: control.clippingAncestors }))),
+    firstRow: raw.cells.slice(0, 5).map((cell) => cell.controls.map((control) => ({ visible: control.outsideUsablePort, hit: control.centerHit }))),
+    lastRow: raw.cells.slice(-5).map((cell) => cell.controls.map((control) => ({ visible: control.outsideUsablePort, hit: control.centerHit }))),
+    generation: raw.storage.generation, resultsCount: raw.storage.resultsRaw ? JSON.parse(raw.storage.resultsRaw).results.length : null }));
+  return raw;
+}
+
+for (const viewport of [{ width: 320, height: 568 }, { width: 385, height: 640 }, { width: 568, height: 320 }, { width: 844, height: 360 }] as const) {
+  for (const textScale of ['standard', 'large'] as const) {
+    test('길 만들기 첫 퍼즐: ' + viewport.width + '×' + viewport.height + ' ' + textScale + ' 글자에서 격자·키보드·본문 스크롤을 유지한다', async ({ page }, testInfo) => {
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+      await page.setViewportSize(viewport);
+      const readStorage = () => page.evaluate(() => {
+        const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+        return { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null };
+      });
+      let failed = false;
+      try {
+        await page.goto('/');
+        await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+        const opener = page.getByRole('button', { name: '길 만들기, 난이도 상, 설정 열기', exact: true });
+        // Establish the actual home position after the native card has been brought into view.
+        await opener.scrollIntoViewIfNeeded();
+        const home = await page.evaluate(() => ({ x: scrollX, y: scrollY }));
+        await opener.click();
+        const panel = page.locator('.stage-panel[data-game="path"]');
+        await panel.getByRole('button', { name: '응시 준비센터 열기', exact: true }).click();
+        const readiness = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+        await readiness.getByRole('button', { name: textScale === 'large' ? '큰 글자' : '기본 크기', exact: true }).click();
+        await readiness.getByRole('button', { name: '설정 저장하고 닫기', exact: true }).click();
+        await expect(readiness).toHaveCount(0);
+        await expect(page.locator('html')).toHaveAttribute('data-text-scale', textScale);
+        await page.evaluate(() => document.fonts.ready);
+        await panel.getByRole('radio', { name: /연습 모드/ }).click();
+        const settings = panel.getByRole('region', { name: '연습 세션 설정', exact: true });
+        await panel.getByRole('button', { name: /내 연습 설정 바로가기/ }).click();
+        await settings.getByRole('button', { name: '기본값', exact: true }).click();
+        await expect(settings.getByLabel('문제 수 현재 값', { exact: true })).toHaveText('3');
+        await expect(settings.getByLabel('문제 제한 현재 값', { exact: true })).toHaveText('60초');
+        await expect(settings.getByRole('checkbox', { name: /시간 제한 없이 연습/ })).not.toBeChecked();
+        const baseline = await readStorage();
+        expect(baseline.generation).not.toBeNull();
+        expect(baseline.resultsRaw).not.toBeNull();
+        expect(JSON.parse(baseline.resultsRaw!).results).toEqual([]);
+        await panel.locator('.stage-start-practice').click();
+        const workspace = panel.locator('.game-workspace.game-path');
+        await expect(workspace.locator('.path-grid')).toBeVisible();
+        // First play geometry is recorded before focus waits, hover, wheel or any test scroll.
+        const initial = await capturePathInitialVisibility(page, testInfo, 'initial');
+        await page.screenshot({ path: testInfo.outputPath('path-initial-raw-before-assert.png') });
+        const check = (raw: typeof initial) => {
+          expect(raw.viewport).toEqual(viewport);
+          expect(raw.textScale).toBe(textScale);
+          expect(raw.fonts).toBe('loaded');
+          expect(raw.preparation).toBe(false);
+          expect(raw.progress).toMatch(/^1 \/ 3/);
+          expect(raw.actions).toBe('0');
+          expect(raw.cells).toHaveLength(25);
+          expect(raw.cells.map((cell) => cell.fence)).toEqual(Array(25).fill('empty'));
+          expect(raw.storage).toEqual(baseline);
+          expect(raw.external).toEqual(initial.external);
+          for (const cell of raw.cells) {
+            expect(cell.outsideGrid).toEqual({ x: false, y: false });
+            expect(cell.controls).toHaveLength(1);
+            for (const control of cell.controls) {
+              expect(control.box.width).toBeGreaterThanOrEqual(44);
+              expect(control.box.height).toBeGreaterThanOrEqual(44);
+              expect(control.outsideCell).toEqual({ x: false, y: false });
+              expect(control.outsideGrid).toEqual({ x: false, y: false });
+              expect(control.textRects.length).toBeGreaterThan(0);
+              expect(control.textOutsideButton).toEqual([]);
+              expect(control.clippingAncestors.filter((ancestor) => ancestor.clipsX && ancestor.axes.x)).toEqual([]);
+              expect(control.clippingAncestors.filter((ancestor) => ancestor.beforeBody && ['hidden', 'clip'].includes(ancestor.overflowY) && ancestor.axes.y)).toEqual([]);
+              expect(control.outsideViewport.x).toBe(false);
+            }
+          }
+        };
+        const rowVisible = (raw: typeof initial, start: number) => {
+          for (const cell of raw.cells.slice(start, start + 5)) for (const control of cell.controls) {
+            expect(control.outsideUsablePort).toEqual({ x: false, y: false });
+            expect(control.outsideViewport).toEqual({ x: false, y: false });
+            expect(control.centerHit, '제한시간 막대 등 겹침으로 실제 칸 중앙이 가려지지 않는다').toBe(true);
+            if (raw.deadline?.position === 'sticky') expect(control.box.top).toBeGreaterThanOrEqual(raw.body.usablePort.top - 1);
+          }
+        };
+        // Local cell/grid clipping and 44px are always checked; oversized rows may require native body scrolling.
+        check(initial);
+        rowVisible(initial, 0);
+        if (initial.fits) {
+          expect(initial.shellOutsideUsablePort).toEqual({ x: false, y: false });
+          for (const marker of initial.markers) for (const part of marker.parts) {
+            expect(part.outsideUsablePort).toEqual({ x: false, y: false });
+            expect(part.outsideViewport).toEqual({ x: false, y: false });
+          }
+          for (let row = 0; row < 25; row += 5) rowVisible(initial, row);
+        }
+        const first = workspace.locator('.path-fence-cycle[data-cycle-cell="0"]');
+        await expect(first).toBeFocused();
+        if (!initial.fits) {
+          const body = workspace.locator('.workspace-body');
+          await body.hover();
+          await page.mouse.wheel(0, Math.ceil(initial.body.scrollHeight + initial.body.clientHeight));
+          await expect(workspace.locator('.path-fence-cycle[data-cycle-cell="24"]')).toBeInViewport({ ratio: 1 });
+          const last = await capturePathInitialVisibility(page, testInfo, 'native-wheel-last-row');
+          check(last);
+          expect(last.body.scrollTop).toBeGreaterThan(initial.body.scrollTop);
+          rowVisible(last, 20);
+          await page.screenshot({ path: testInfo.outputPath('path-native-wheel-last-row.png') });
+          await page.keyboard.press('Control+End');
+          await expect(workspace.locator('.path-fence-cycle[data-cycle-cell="24"]')).toBeFocused();
+          await page.keyboard.press('Control+Home');
+          await expect(first).toBeFocused();
+          await expect(first).toBeInViewport({ ratio: 1 });
+          const restored = await capturePathInitialVisibility(page, testInfo, 'native-home-first-row');
+          check(restored);
+          rowVisible(restored, 0);
+        }
+        for (const [key, name] of [['Shift+Tab', '경로 확인'], ['Shift+Tab', '전체 초기화'], ['Tab', '경로 확인']] as const) {
+          await page.keyboard.press(key);
+          await expect(workspace.getByRole('button', { name, exact: true })).toBeFocused();
+          const focused = await capturePathInitialVisibility(page, testInfo, key + '-' + name);
+          check(focused);
+          expect(focused.active?.label).toBe(name);
+          expect(focused.active?.outsideUsablePort).toEqual({ x: false, y: false });
+          expect(focused.active?.outsideViewport).toEqual({ x: false, y: false });
+          expect(focused.active?.centerHit).toBe(true);
+        }
+        await page.keyboard.press('Tab');
+        await expect(first).toBeFocused();
+        const returned = await capturePathInitialVisibility(page, testInfo, 'native-tab-grid-return');
+        check(returned);
+        rowVisible(returned, 0);
+        await closeCommonHeaderSession(page, workspace, true);
+        expect(await readStorage()).toEqual(baseline);
+        await expect(page.locator('.stage-result')).toHaveCount(0);
+        await expect.poll(() => page.evaluate(() => ({ x: scrollX, y: scrollY }))).toEqual(home);
+        await testInfo.attach('path-initial-closed', { body: JSON.stringify({ viewport, textScale, home, storage: await readStorage(), errors }), contentType: 'application/json' });
+      } catch (error) {
+        failed = true;
+        console.log('PATH_INITIAL_FAILURE', JSON.stringify({ project: testInfo.project.name, viewport, textScale, error: String(error) }));
+        await page.content().then((body) => testInfo.attach('path-initial-first-failure-dom', { body, contentType: 'text/html' }))
+          .catch((captureError) => console.log('PATH_INITIAL_DOM_CAPTURE_ERROR', String(captureError)));
+        await page.screenshot({ path: testInfo.outputPath('path-initial-first-failure.png') })
+          .catch((captureError) => console.log('PATH_INITIAL_CAPTURE_ERROR', String(captureError)));
+        throw error;
+      } finally {
+        console.log('PATH_INITIAL_ERRORS', JSON.stringify({ project: testInfo.project.name, viewport, textScale, errors }));
+        try {
+          const workspace = page.locator('.game-workspace.game-path');
+          if (await workspace.count()) await closeCommonHeaderSession(page, workspace, false);
+        } catch (closeError) {
+          if (!failed) throw closeError;
+          console.log('PATH_INITIAL_CLOSE_ERROR', String(closeError));
+        }
+      }
+      expect(errors).toEqual([]);
+    });
+  }
+}
