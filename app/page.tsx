@@ -20,7 +20,7 @@ import {
   serializeResultsEnvelope,
 } from './lib/result-envelope';
 import { getResultComparisonKey, getResultMode, type ResultMode } from './lib/result-comparison';
-import { formatResultScore, resultErrorLabel, resultScoreLabel } from './lib/result-display';
+import { filterResultHistory, formatResultScore, resultErrorLabel, resultScoreLabel } from './lib/result-display';
 import { isReviewPayloadStructurallyValid } from './lib/practice-backup';
 import { resolveReadinessOverall } from './lib/readiness';
 import { chooseTrainingRecommendation, type RecommendationReason } from './lib/training-recommendation';
@@ -286,6 +286,9 @@ export default function Home() {
   const [results, setResults] = useState<SessionResult[]>([]);
   const [resultsLoaded, setResultsLoaded] = useState(false);
   const [gameOrder, setGameOrder] = useState<GameOrder>('published');
+  const [historyGame, setHistoryGame] = useState<GameId | 'all'>('all');
+  const [historyMode, setHistoryMode] = useState<ResultMode | 'all'>('all');
+  const [historyLimit, setHistoryLimit] = useState(8);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [dataManagementOpen, setDataManagementOpen] = useState(false);
   const [readinessOpen, setReadinessOpen] = useState(false);
@@ -770,6 +773,8 @@ export default function Home() {
   const nextBundleGame = trainingBundle && games.find((game) => game.id === trainingBundle.games[trainingBundle.completed]);
 
   const recentResults = results.slice(0, 8);
+  const filteredHistory = filterResultHistory(results, historyGame, historyMode);
+  const visibleHistory = filteredHistory.slice(0, historyLimit);
   const reviewableResults = results.filter((result) => hasReviewData(result.review));
   const scoredReviewResults = reviewableResults.filter((result) => (result.review?.summary.attemptedCount ?? 0) > 0);
   const recurringErrors = aggregateReviewErrors(scoredReviewResults);
@@ -1098,8 +1103,16 @@ export default function Home() {
             </article>)}
           </div>
           <details className="history-panel">
-            <summary>최근 세션 상세 보기 <span>{recentResults.length}개</span></summary>
-            <div className="record-list">{recentResults.map((result) => { const game = games.find((item) => item.id === result.gameId)!; const modeLabel = resultModeLabels[getResultMode(result)]; return <article key={result.id}><div><span>{game.no}</span><b>{game.title}</b><small>{formatCompletedAt(result.completedAt)} · {modeLabel}</small></div><dl><div><dt>{resultScoreLabel(result)}</dt><dd>{formatResultScore(result)}</dd></div><div><dt>{result.gameId === 'path' ? '경로 연결 중앙시간' : '중앙 반응'}</dt><dd>{result.medianRt ? `${result.medianRt}ms` : '—'}</dd></div><div><dt>{resultErrorLabel(result)}</dt><dd>{result.errors}</dd></div></dl>{hasReviewData(result.review) ? <button type="button" onClick={(event) => openReview(event.currentTarget, result.id)}>{result.review?.attempts.length ? '문항별 복습' : '오류 통계'}</button> : <small className="legacy-review-label">복습 데이터 없음</small>}</article>; })}</div>
+            <summary>최근 세션 상세 보기 <span>저장된 {results.length}개</span></summary>
+            <div className="history-controls">
+              <label>게임<select value={historyGame} onChange={(event) => { setHistoryGame(event.target.value as GameId | 'all'); setHistoryLimit(8); }}><option value="all">전체 게임</option>{games.map((game) => <option key={game.id} value={game.id}>{game.title}</option>)}</select></label>
+              <label>모드<select value={historyMode} onChange={(event) => { setHistoryMode(event.target.value as ResultMode | 'all'); setHistoryLimit(8); }}><option value="all">전체 모드</option><option value="practice">연습</option><option value="simulation">실전형</option><option value="unknown">이전 기록 · 모드 정보 없음</option></select></label>
+              <button type="button" onClick={() => { setHistoryGame('all'); setHistoryMode('all'); setHistoryLimit(8); }}>필터 초기화</button>
+              <p role="status">저장된 {results.length}개 중 {filteredHistory.length}개 일치 · {visibleHistory.length}개 표시</p>
+            </div>
+            <div className="record-list">{visibleHistory.map((result) => { const game = games.find((item) => item.id === result.gameId)!; const modeLabel = resultModeLabels[getResultMode(result)]; return <article key={result.id}><div><span>{game.no}</span><b>{game.title}</b><small>{formatCompletedAt(result.completedAt)} · {modeLabel}</small></div><dl><div><dt>{resultScoreLabel(result)}</dt><dd>{formatResultScore(result)}</dd></div><div><dt>{result.gameId === 'path' ? '경로 연결 중앙시간' : '중앙 반응'}</dt><dd>{result.medianRt ? `${result.medianRt}ms` : '—'}</dd></div><div><dt>{resultErrorLabel(result)}</dt><dd>{result.errors}</dd></div></dl>{hasReviewData(result.review) ? <button type="button" onClick={(event) => openReview(event.currentTarget, result.id)}>{result.review?.attempts.length ? '문항별 복습' : '오류 통계'}</button> : <small className="legacy-review-label">복습 데이터 없음</small>}</article>; })}</div>
+            {!filteredHistory.length && <p className="history-empty">이 조건의 기록이 없습니다. 다른 게임·모드를 선택하거나 필터를 초기화하세요.</p>}
+            {visibleHistory.length < filteredHistory.length && <button type="button" className="history-more" onClick={() => setHistoryLimit((limit) => limit + 8)}>기록 더 보기 ({filteredHistory.length - visibleHistory.length}개 남음)</button>}
           </details>
         </> : <div className="records-empty" role={resultsLoaded ? undefined : 'status'}><Image className="records-empty-coach" src="/assets/mori-coach-hero-v2-800.webp" alt="" width={800} height={700} sizes="(max-width: 620px) 66px, 86px" /><div><b>{resultsLoaded ? '첫 기록을 만들어 볼까요?' : '연습 기록을 불러오고 있어요.'}</b><span>{resultsLoaded ? '게임 하나를 끝내면 최근 점수와 자주 틀린 이유를 여기서 확인할 수 있어요.' : '이 브라우저에 저장된 점수와 복습 기록을 확인하는 중입니다.'}</span>{resultsLoaded && <button type="button" onPointerEnter={preloadGameStage} onPointerDown={preloadGameStage} onFocus={preloadGameStage} onClick={(event) => openGame(featuredGame.id, event.currentTarget)}>추천 게임 시작</button>}</div></div>}
       </section>
