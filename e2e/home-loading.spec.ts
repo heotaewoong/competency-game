@@ -1848,3 +1848,159 @@ for (const viewport of [{ width: 320, height: 568 }, { width: 385, height: 640 }
     });
   }
 }
+
+for (const textScale of ['standard', 'large'] as const) {
+  test('숫자 누르기: ' + textScale + ' 글자에서 같은 첫 문항의 568×320→320×568→568×320 크기 변경을 유지한다', async ({ page }, testInfo) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+    const viewports = [{ width: 568, height: 320 }, { width: 320, height: 568 }, { width: 568, height: 320 }] as const;
+    await page.setViewportSize(viewports[0]);
+    const panel = page.locator('.stage-panel[data-game="number"]');
+    const workspace = panel.locator('.game-workspace.game-number');
+    const readStorage = () => page.evaluate(() => {
+      const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+      return { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null };
+    });
+    let failed = false, closedNormally = false;
+    try {
+      await page.goto('/');
+      await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+      await page.getByRole('navigation', { name: '빠른 메뉴', exact: true }).getByRole('button', { name: '준비', exact: true }).click();
+      const readiness = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+      await readiness.getByRole('button', { name: textScale === 'large' ? '큰 글자' : '기본 크기', exact: true }).click();
+      await readiness.getByRole('button', { name: '설정 저장하고 닫기', exact: true }).click();
+      await expect(readiness).toHaveCount(0);
+      await expect(page.locator('html')).toHaveAttribute('data-text-scale', textScale);
+      await page.evaluate(() => document.fonts.ready);
+      await page.getByRole('button', { name: '숫자 누르기, 난이도 하, 설정 열기', exact: true }).click();
+      await expect(panel).toBeVisible();
+      await panel.getByRole('radio', { name: /연습 모드/ }).click();
+      await expect(panel.locator('output[aria-label="문제 수 현재 값"]')).toHaveText('10');
+      await expect(panel.locator('output[aria-label="문제 제한 현재 값"]')).toHaveText('20초');
+      const pacing = panel.locator('label.accessible-pacing-setting');
+      if (await pacing.locator('input[type="checkbox"]').isChecked()) await pacing.click();
+      await expect(pacing.locator('input[type="checkbox"]')).not.toBeChecked();
+      const baseline = await readStorage();
+      expect(baseline.generation).not.toBeNull();
+      expect(baseline.resultsRaw).not.toBeNull();
+      expect(JSON.parse(baseline.resultsRaw!).results).toEqual([]);
+      await panel.locator('.stage-start-practice').click();
+      const firstFrame = panel.locator('.game-workspace.game-number[data-mode="practice"]:has(.workspace-progress > i[role="progressbar"][aria-valuenow="1"][aria-valuemax="5"]):has(.number-board-pro)');
+      let first: Awaited<ReturnType<typeof captureNumberRpsFirstBoard>> | null = null;
+      let previousRemaining = 20_000;
+      for (const [index, viewport] of viewports.entries()) {
+        if (index > 0) await page.setViewportSize(viewport);
+        // After each resize ACK, preserve the first read without a phase guard that could wait for another question.
+        const raw = await captureNumberRpsFirstBoard(index === 0 ? firstFrame : workspace, 'number');
+        await testInfo.attach('number-live-resize-' + index + '.json', { body: JSON.stringify({ project: testInfo.project.name,
+          requestedViewport: viewport, requestedTextScale: textScale, nativeGameAnswers: 0, errorsAtCapture: [...errors], ...raw }, null, 2), contentType: 'application/json' });
+        console.log('NUMBER_LIVE_RESIZE', JSON.stringify({ project: testInfo.project.name, textScale, index, requestedViewport: viewport,
+          actualViewport: raw.viewport, capturedAt: raw.capturedAt, progress: raw.progress, number: raw.number,
+          remaining: raw.deadline.remaining, duration: raw.deadline.duration, active: raw.deadline.active,
+          numbers: raw.responseButtons.map((button) => button.text), targets: raw.responseButtons.filter((button) => button.target).map((button) => button.label),
+          disabled: raw.responseButtons.map((button) => button.disabled), body: raw.body, generation: raw.storage.generation, errors }));
+        await page.screenshot({ path: testInfo.outputPath('number-live-resize-' + index + '-first-raw.png') });
+        // The native timer keeps running during PNG capture; retain and check this separate later observation.
+        const afterPNG = await workspace.evaluate((frame) => ({ capturedAt: new Date().toISOString(),
+          progress: frame.querySelector('.workspace-progress > i[role="progressbar"]')?.getAttribute('aria-valuenow') ?? null,
+          counter: frame.querySelector('.number-rule > em')?.textContent ?? null,
+          remaining: frame.querySelector('.time-strip')?.getAttribute('aria-valuenow') ?? null,
+          active: frame.querySelector('.time-strip')?.getAttribute('data-deadline-active') ?? null,
+          disabled: [...frame.querySelectorAll<HTMLButtonElement>('.number-board-pro > button')].map((button) => button.disabled) }));
+        await testInfo.attach('number-live-resize-' + index + '-after-png.json', { body: JSON.stringify(afterPNG), contentType: 'application/json' });
+        if (!first) first = raw;
+        expect(raw.progress).toEqual(first.progress);
+        expect(raw.progress).toMatchObject({ current: '1', total: '5' });
+        expect(raw.number).toEqual(first.number);
+        expect(raw.number).toMatchObject({ round: 'ROUND 1 / 2', counter: '입력 0 / 1', banner: '1라운드 점등 숫자, 5문제 중 1번째' });
+        expect(raw.responseButtons).toHaveLength(9);
+        expect(raw.responseButtons.map((button) => button.text)).toEqual(first.responseButtons.map((button) => button.text));
+        expect(raw.responseButtons.map((button) => Number(button.text)).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        expect(raw.responseButtons.map((button) => ({ label: button.label, current: button.current, target: button.target })))
+          .toEqual(first.responseButtons.map((button) => ({ label: button.label, current: button.current, target: button.target })));
+        const targets = raw.responseButtons.filter((button) => button.target);
+        expect(targets).toHaveLength(1);
+        expect(raw.responseButtons.filter((button) => button.current === 'step')).toHaveLength(1);
+        expect(targets[0].current).toBe('step');
+        expect(targets[0].label).toBe(targets[0].text + ', 현재 목표');
+        expect(raw.responseButtons.every((button) => !button.disabled)).toBe(true);
+        expect(raw.mode).toBe('practice');
+        expect(raw.preparationCount).toBe(0);
+        expect(raw.resultCount).toBe(0);
+        expect(raw.guidedCount).toBe(0);
+        expect(raw.feedback?.trim() ?? '').toBe('');
+        expect(raw.storage).toEqual(baseline);
+        expect(raw.textScale).toBe(textScale);
+        expect(raw.fonts).toBe('loaded');
+        expect(raw.mediaCount).toBe(0);
+        expect(raw.viewport).toMatchObject(viewport);
+        expect(raw.viewport.documentWidth).toBeLessThanOrEqual(raw.viewport.clientWidth + 1);
+        expect(raw.viewport.bodyWidth).toBeLessThanOrEqual(raw.viewport.clientWidth + 1);
+        expect(raw.body.scrollLeft).toBe(0);
+        expect(raw.deadline.active).toBe('true');
+        expect(raw.deadline.duration).toBe('20000');
+        expect(raw.deadline.label).toBe(first.deadline.label);
+        expect(raw.deadline.label?.length).toBeGreaterThan(0);
+        const remaining = Number(raw.deadline.remaining);
+        expect(Number.isFinite(remaining)).toBe(true);
+        expect(remaining).toBeGreaterThan(0);
+        expect(remaining).toBeLessThanOrEqual(previousRemaining);
+        previousRemaining = remaining;
+        expect(afterPNG.progress).toBe('1');
+        expect(afterPNG.counter).toBe('입력 0 / 1');
+        expect(afterPNG.active).toBe('true');
+        expect(afterPNG.disabled).toEqual(Array(9).fill(false));
+        const afterPNGRemaining = Number(afterPNG.remaining);
+        expect(Number.isFinite(afterPNGRemaining)).toBe(true);
+        expect(afterPNGRemaining).toBeGreaterThan(0);
+        expect(afterPNGRemaining).toBeLessThanOrEqual(remaining);
+        previousRemaining = afterPNGRemaining;
+        const labels = [raw.deadline.visibleText, ...raw.labels, ...raw.responseButtons.flatMap((button) => button.labels)];
+        const elements = [raw.board, raw.deadline, ...labels, ...raw.responseButtons];
+        for (const element of elements) {
+          expect(element.box.width, element.text).toBeGreaterThan(0);
+          expect(element.box.height, element.text).toBeGreaterThan(0);
+          expect(element.display, element.text).not.toBe('none');
+          expect(element.visibility, element.text).toBe('visible');
+          expect(element.outsideBody, element.text).toEqual({ x: false, y: false });
+          expect(element.outsideViewport, element.text).toEqual({ x: false, y: false });
+          expect(element.clippingAncestors.filter((clip) => clip.elementOutside.x || clip.elementOutside.y || clip.textOutside.x || clip.textOutside.y), element.text).toEqual([]);
+        }
+        for (const label of labels) {
+          expect(label.text.length).toBeGreaterThan(0);
+          expect(label.textRects.length, label.text).toBeGreaterThan(0);
+          expect(label.textOutsideSelf, label.text).toBe(false);
+          expect(label.textOutsideButton, label.text).toBe(false);
+        }
+        for (const button of raw.responseButtons) {
+          expect(button.box.width).toBeGreaterThanOrEqual(44);
+          expect(button.box.height).toBeGreaterThanOrEqual(44);
+          expect(button.centerHit, button.text).toBe(true);
+          expect(button.labels).toHaveLength(1);
+        }
+      }
+      await closeCommonHeaderSession(page, workspace, false);
+      closedNormally = true;
+      expect(await readStorage()).toEqual(baseline);
+      await expect(page.locator('.stage-result')).toHaveCount(0);
+    } catch (error) {
+      failed = true;
+      console.log('NUMBER_LIVE_RESIZE_FAILURE', JSON.stringify({ project: testInfo.project.name, textScale, closedNormally, error: String(error) }));
+      await page.content().then((body) => testInfo.attach('number-live-resize-first-failure.html', { body, contentType: 'text/html' }))
+        .catch((captureError) => console.log('NUMBER_LIVE_RESIZE_DOM_CAPTURE_ERROR', String(captureError)));
+      await page.screenshot({ path: testInfo.outputPath('number-live-resize-first-failure.png') })
+        .catch((captureError) => console.log('NUMBER_LIVE_RESIZE_CAPTURE_ERROR', String(captureError)));
+      throw error;
+    } finally {
+      console.log('NUMBER_LIVE_RESIZE_ERRORS', JSON.stringify({ project: testInfo.project.name, textScale, errors }));
+      try {
+        if (!closedNormally && await workspace.count()) await closeCommonHeaderSession(page, workspace, false);
+      } catch (closeError) {
+        if (!failed) throw closeError;
+        console.log('NUMBER_LIVE_RESIZE_CLOSE_ERROR', String(closeError));
+      }
+    }
+    expect(errors).toEqual([]);
+  });
+}
