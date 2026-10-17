@@ -1467,7 +1467,7 @@ for (const game of [{ id: 'number', title: '숫자 누르기', quantity: '10', p
           const firstFrame = panel.locator('.game-workspace.game-' + game.id + '[data-mode="practice"]:has(.workspace-progress > i[role="progressbar"][aria-valuenow="1"][aria-valuemax="' + game.total + '"]):has(' + boardSelector + ')');
           // Exactly one synchronous first-board read; natural preparation and the default deadline are not replaced.
           const raw = await captureNumberRpsFirstBoard(firstFrame, game.id);
-          await testInfo.attach('number-rps-first-board.json', { body: JSON.stringify({ project: testInfo.project.name, viewport, textScale, errorsAtCapture: [...errors], ...raw }, null, 2), contentType: 'application/json' });
+          await testInfo.attach('number-rps-first-board.json', { body: JSON.stringify({ project: testInfo.project.name, requestedViewport: viewport, requestedTextScale: textScale, errorsAtCapture: [...errors], ...raw }, null, 2), contentType: 'application/json' });
           console.log('NUMBER_RPS_FIRST_BOARD', JSON.stringify({ project: testInfo.project.name, gameId: game.id, viewport, textScale,
             capturedAt: raw.capturedAt, progress: raw.progress, number: raw.number, rps: { round: raw.rps.round, phase: raw.rps.phase },
             deadline: { active: raw.deadline.active, remaining: raw.deadline.remaining, duration: raw.deadline.duration },
