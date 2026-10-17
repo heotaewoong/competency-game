@@ -1,4 +1,4 @@
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 
 test('첫 화면은 Tailwind 빌드 컴파일러를 내려받지 않는다', async ({ page }) => {
   const scripts: import('@playwright/test').Response[] = [];
@@ -728,15 +728,29 @@ for (const game of [
   }
 }
 
-async function captureCountCloudLayout(page: Page, testInfo: TestInfo, textScale: string, phase: string, errors: readonly string[]) {
-  const snapshot = await page.evaluate(() => {
+async function captureCountCloudLayout(page: Page, testInfo: TestInfo, textScale: string, phase: string, errors: readonly string[], phaseRoot?: Locator) {
+  const readSnapshot = () => {
     const epsilon = 1;
     const box = (rect: DOMRect) => ({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height });
     const outside = (rect: ReturnType<typeof box>, boundary: ReturnType<typeof box>) => ({
       x: rect.left < boundary.left - epsilon || rect.right > boundary.right + epsilon,
       y: rect.top < boundary.top - epsilon || rect.bottom > boundary.bottom + epsilon,
     });
+    const readText = (element: HTMLElement) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const rects = [...range.getClientRects()].map(box), bounds = box(range.getBoundingClientRect());
+      const style = getComputedStyle(element);
+      return { text: element.textContent?.trim() ?? '', box: box(element.getBoundingClientRect()), range: bounds, rects,
+        nonzero: bounds.width > 0 && bounds.height > 0 && rects.length > 0 && rects.every((rect) => rect.width > 0 && rect.height > 0),
+        fontSize: style.fontSize, lineHeight: style.lineHeight, display: style.display, visibility: style.visibility };
+    };
     const frame = document.querySelector<HTMLElement>('.game-count');
+    const body = frame?.querySelector<HTMLElement>('.workspace-body');
+    const bodyBox = body ? box(body.getBoundingClientRect()) : null;
+    const board = frame?.querySelector<HTMLElement>('.count-board');
+    const deadline = frame?.querySelector<HTMLElement>('.count-wrap > .time-strip');
+    const deadlineText = deadline?.querySelector<HTMLElement>('.deadline-text');
     const clouds = [...(frame?.querySelectorAll<HTMLElement>('.word-cloud') ?? [])].map((cloud, side) => {
       const button = cloud.closest('button');
       const cloudBox = box(cloud.getBoundingClientRect()), buttonBox = button ? box(button.getBoundingClientRect()) : null;
@@ -796,8 +810,33 @@ async function captureCountCloudLayout(page: Page, testInfo: TestInfo, textScale
       live: [...(frame?.querySelectorAll('[aria-live]') ?? [])].map((node) => node.textContent),
       viewport: { innerWidth, innerHeight, documentClientWidth: document.documentElement.clientWidth,
         documentScrollWidth: document.documentElement.scrollWidth, bodyScrollWidth: document.body.scrollWidth, scrollX, scrollY },
-      mediaCount: document.querySelectorAll('audio,video').length, storage: { generation, resultsRaw }, controls, clouds };
-  });
+      mediaCount: document.querySelectorAll('audio,video').length, storage: { generation, resultsRaw }, controls, clouds,
+      progressValue: frame?.querySelector('.workspace-progress > i[role="progressbar"]')?.getAttribute('aria-valuenow') ?? null,
+      progressMax: frame?.querySelector('.workspace-progress > i[role="progressbar"]')?.getAttribute('aria-valuemax') ?? null,
+      workspace: frame && body && bodyBox ? {
+        box: box(frame.getBoundingClientRect()),
+        body: { box: bodyBox, clipBox: {
+          left: bodyBox.left + body.clientLeft,
+          right: bodyBox.left + body.clientLeft + body.clientWidth,
+          top: bodyBox.top + body.clientTop,
+          bottom: bodyBox.top + body.clientTop + body.clientHeight,
+          width: body.clientWidth, height: body.clientHeight },
+          clientWidth: body.clientWidth, clientHeight: body.clientHeight, scrollWidth: body.scrollWidth,
+          scrollHeight: body.scrollHeight, scrollTop: body.scrollTop, scrollLeft: body.scrollLeft },
+      } : null,
+      board: board ? { box: box(board.getBoundingClientRect()),
+        buttons: [...board.querySelectorAll<HTMLButtonElement>(':scope > button')].map((button) => ({
+          label: button.getAttribute('aria-label'), disabled: button.disabled, box: box(button.getBoundingClientRect()),
+        })) } : null,
+      statuses: [...(frame?.querySelectorAll<HTMLElement>('.stage-sequence > span') ?? [])].map((element) => ({
+        ...readText(element), active: element.classList.contains('active'),
+      })),
+      answerLabels: [...(frame?.querySelectorAll<HTMLElement>('.count-wrap.phase-answer > .count-board > button > span') ?? [])].map(readText),
+      deadline: deadline ? { box: box(deadline.getBoundingClientRect()), label: deadline.getAttribute('aria-label'),
+        duration: deadline.getAttribute('aria-valuemax'), remaining: deadline.getAttribute('aria-valuenow'),
+        active: deadline.getAttribute('data-deadline-active'), text: deadlineText ? readText(deadlineText) : null } : null };
+  };
+  const snapshot = phaseRoot ? await phaseRoot.evaluate(readSnapshot) : await page.evaluate(readSnapshot);
   await testInfo.attach('count-cloud-' + textScale + '-' + phase, { body: JSON.stringify(snapshot, null, 2), contentType: 'application/json' });
   let resultsCount: number | null = null, storageParseError: string | null = null;
   try { resultsCount = snapshot.storage.resultsRaw === null ? null : JSON.parse(snapshot.storage.resultsRaw).results.length; }
@@ -824,6 +863,9 @@ async function captureCountCloudLayout(page: Page, testInfo: TestInfo, textScale
     documentX: { client: snapshot.viewport.documentClientWidth, document: snapshot.viewport.documentScrollWidth, body: snapshot.viewport.bodyScrollWidth },
     controlsBelow44: snapshot.controls.filter((control) => control.box.width < 44 || control.box.height < 44).map((control) => control.label ?? control.text),
     issues, generation: snapshot.storage.generation, resultsCount, storageParseError, errors: [...errors],
+    workspace: snapshot.workspace, board: snapshot.board, statuses: snapshot.statuses,
+    answerLabels: snapshot.answerLabels, deadline: snapshot.deadline,
+    progressValue: snapshot.progressValue, progressMax: snapshot.progressMax,
   };
   console.log('COUNT_CLOUD_LAYOUT', JSON.stringify(summary));
   return snapshot;
@@ -940,3 +982,179 @@ for (const viewport of [{ width: 320, height: 568 }, { width: 568, height: 320 }
     });
   }
 }
+
+for (const viewport of [{ width: 568, height: 320 }, { width: 768, height: 360 }, { width: 844, height: 320 }] as const) {
+  for (const textScale of ['standard', 'large'] as const) {
+    test('개수 비교하기: ' + viewport.width + '×' + viewport.height + ' ' + textScale + ' 글자의 기본 제한시간 제시와 응답 보드가 스크롤 없이 보인다', async ({ page }, testInfo) => {
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+      await page.addInitScript((scale) => {
+        localStorage.setItem('nineflow-accessibility-v1', JSON.stringify({ contrast: 'standard', textScale: scale, motion: 'reduce' }));
+      }, textScale);
+      await page.setViewportSize(viewport);
+      const panel = page.locator('.stage-panel[data-game="count"]');
+      const firstFrame = panel.locator('.game-count:has(.workspace-progress > i[role="progressbar"][aria-valuenow="1"][aria-valuemax="5"])');
+      let failed = false, closedNormally = false;
+      let baseline: { generation: string | null; resultsRaw: string | null } | null = null;
+      try {
+        await page.goto('/');
+        await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+        await expect(page.locator('html')).toHaveAttribute('data-text-scale', textScale);
+        await page.evaluate(() => document.fonts.ready);
+        await page.getByRole('button', { name: '개수 비교하기, 난이도 하, 설정 열기', exact: true }).click();
+        await expect(panel).toBeVisible();
+        await panel.getByRole('radio', { name: /연습 모드/ }).click();
+        const quantity = panel.locator('output[aria-label="문제 수 현재 값"]');
+        for (let step = 0; step < 9; step += 1) {
+          const value = Number(await quantity.textContent());
+          expect(Number.isInteger(value) && value >= 5 && value <= 50 && value % 5 === 0).toBe(true);
+          if (value === 5) break;
+          await panel.getByRole('button', { name: '문제 수 줄이기', exact: true }).click();
+          await expect(quantity).toHaveText(String(value - 5));
+        }
+        await expect(quantity).toHaveText('5');
+        await expect(panel.locator('output[aria-label="단어 제시 현재 값"]')).toHaveText('1초');
+        const pacing = panel.locator('label.accessible-pacing-setting');
+        if (await pacing.locator('input[type="checkbox"]').isChecked()) await pacing.click();
+        await expect(pacing.locator('input[type="checkbox"]')).not.toBeChecked();
+        baseline = await page.evaluate(() => {
+          const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+          return { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null };
+        });
+        expect(baseline.generation).not.toBeNull();
+        expect(baseline.resultsRaw).not.toBeNull();
+        const initialResults = JSON.parse(baseline.resultsRaw!);
+        expect(initialResults).toMatchObject({ version: 4, generation: baseline.generation });
+        expect(initialResults.results).toEqual([]);
+        await panel.locator('.stage-start-practice').click();
+
+        // One read per natural phase: never retry a snapshot whose recorded phase is already late.
+        const shown = await captureCountCloudLayout(page, testInfo, textScale, 'timed-first-show', errors, firstFrame.locator('.count-wrap.phase-show'));
+        expect(shown.phase).toBe('count-wrap phase-show');
+        expect(shown.progressValue).toBe('1');
+        expect(shown.clouds).toHaveLength(2);
+        const counts = shown.clouds.map((cloud) => cloud.words.length);
+        expect(counts.every((count) => count > 0) && counts[0] !== counts[1]).toBe(true);
+        const answerRoot = firstFrame.locator('.count-wrap.phase-answer');
+        const answered = await captureCountCloudLayout(page, testInfo, textScale, 'timed-first-answer', errors, answerRoot);
+        expect(answered.phase).toBe('count-wrap phase-answer');
+        expect(answered.progressValue).toBe('1');
+        // The first-question guard prevents a late native click from answering question two.
+        await answerRoot.getByRole('button', { name: counts[0] > counts[1] ? '왼쪽 선택' : '오른쪽 선택', exact: true }).click();
+        await expect(panel.locator('.game-count .workspace-progress > i[role="progressbar"]')).toHaveAttribute('aria-valuenow', '2');
+        const next = await captureCountCloudLayout(page, testInfo, textScale, 'timed-next-2-of-5', errors);
+        expect(next.progressValue).toBe('2');
+        await panel.locator('.game-count').getByRole('button', { name: '연습 닫기', exact: true }).click();
+        const confirmation = page.getByRole('alertdialog', { name: '이번 세션을 종료할까요?', exact: true });
+        await expect(confirmation).toBeVisible();
+        await confirmation.getByRole('button', { name: '연습창 닫기', exact: true }).click();
+        await expect(panel).toHaveCount(0);
+        closedNormally = true;
+        const closed = await captureCountCloudLayout(page, testInfo, textScale, 'timed-closed-without-result', errors);
+
+        const outside = (rect: { left: number; right: number; top: number; bottom: number }, boundary: { left: number; right: number; top: number; bottom: number }) => ({
+          x: rect.left < boundary.left - 1 || rect.right > boundary.right + 1,
+          y: rect.top < boundary.top - 1 || rect.bottom > boundary.bottom + 1,
+        });
+        for (const [phase, raw] of [['show', shown], ['answer', answered]] as const) {
+          expect(raw.storage).toEqual(baseline);
+          expect(raw.textScale).toBe(textScale);
+          expect(raw.mediaCount).toBe(0);
+          expect(raw.guidedNote).toBeNull();
+          expect(raw.progressMax).toBe('5');
+          expect(raw.workspace).not.toBeNull();
+          expect(raw.board).not.toBeNull();
+          expect(raw.deadline).not.toBeNull();
+          const workspace = raw.workspace!, board = raw.board!, deadline = raw.deadline!;
+          const visibleViewport = { left: 0, right: raw.viewport.innerWidth, top: 0, bottom: raw.viewport.innerHeight };
+          expect(raw.viewport.innerWidth).toBe(viewport.width);
+          expect(raw.viewport.innerHeight).toBe(viewport.height);
+          expect(raw.viewport.documentScrollWidth).toBeLessThanOrEqual(raw.viewport.documentClientWidth + 1);
+          expect(workspace.body.scrollWidth).toBeLessThanOrEqual(workspace.body.clientWidth + 1);
+          expect(workspace.body.scrollHeight).toBeLessThanOrEqual(workspace.body.clientHeight + 1);
+          expect(outside(board.box, workspace.body.clipBox), phase + ': board/body').toEqual({ x: false, y: false });
+          expect(outside(board.box, workspace.box), phase + ': board/workspace').toEqual({ x: false, y: false });
+          expect(outside(board.box, visibleViewport), phase + ': board/viewport').toEqual({ x: false, y: false });
+          expect(board.buttons).toHaveLength(2);
+          for (const button of board.buttons) {
+            expect(button.box.width).toBeGreaterThanOrEqual(44);
+            expect(button.box.height).toBeGreaterThanOrEqual(44);
+            expect(button.disabled).toBe(phase === 'show');
+            expect(outside(button.box, board.box), phase + ': button/board').toEqual({ x: false, y: false });
+          }
+          for (const control of raw.controls) {
+            expect(control.box.width).toBeGreaterThanOrEqual(44);
+            expect(control.box.height).toBeGreaterThanOrEqual(44);
+          }
+          expect(raw.statuses.map((status) => status.text)).toEqual(['준비', '제시', '응답']);
+          expect(raw.statuses.filter((status) => status.active).map((status) => status.text)).toEqual([phase === 'show' ? '제시' : '응답']);
+          expect(deadline.label).toBe(phase === 'show' ? '단어 제시시간' : '응답 제한시간');
+          expect(deadline.duration).toBe(phase === 'show' ? '1000' : '3000');
+          expect(deadline.active).toBe('true');
+          expect(deadline.text).not.toBeNull();
+          expect(outside(deadline.box, workspace.body.clipBox), phase + ': deadline/body').toEqual({ x: false, y: false });
+          for (const text of [...raw.statuses, deadline.text!, ...raw.answerLabels]) {
+            expect(text.nonzero).toBe(true);
+            expect(text.display).not.toBe('none');
+            expect(text.visibility).not.toBe('hidden');
+            expect(outside(text.range, text.box), phase + ': text/own').toEqual({ x: false, y: false });
+            expect(outside(text.range, workspace.body.clipBox), phase + ': text/body').toEqual({ x: false, y: false });
+            expect(outside(text.range, visibleViewport), phase + ': text/viewport').toEqual({ x: false, y: false });
+          }
+          if (phase === 'show') {
+            expect(raw.clouds).toHaveLength(2);
+            for (const cloud of raw.clouds) {
+              const label = (cloud.side === 'left' ? '왼쪽' : '오른쪽') + ' 자극: ' + cloud.words.map((word) => word.text).join(' ');
+              expect(cloud.label).toBe(label);
+              expect(cloud.words.length).toBeGreaterThan(0);
+              for (const word of cloud.words) {
+                expect(word.nonzero).toBe(true);
+                expect(word.ownCloudOutside).toEqual({ x: false, y: false });
+                expect(word.ownButtonOutside).toEqual({ x: false, y: false });
+                // Timed stimuli must fit every clipping viewport, including outerHiddenY and scrollY.
+                expect(word.ancestors.filter((ancestor) => ancestor.axes.x || ancestor.axes.y)).toEqual([]);
+                expect(outside(word.range, workspace.body.clipBox)).toEqual({ x: false, y: false });
+                expect(outside(word.range, visibleViewport)).toEqual({ x: false, y: false });
+              }
+            }
+            expect(raw.answerLabels).toEqual([]);
+          } else {
+            expect(raw.clouds).toEqual([]);
+            expect(board.buttons.map((button) => button.label)).toEqual(['왼쪽 선택', '오른쪽 선택']);
+            expect(raw.answerLabels.map((label) => label.text)).toEqual(['← 왼쪽', '오른쪽 →']);
+          }
+        }
+        expect(next.storage).toEqual(baseline);
+        expect(next.progressMax).toBe('5');
+        expect(closed.storage).toEqual(baseline);
+        await expect(page.locator('.stage-result')).toHaveCount(0);
+      } catch (error) {
+        failed = true;
+        console.log('COUNT_TIMED_FAILURE_CONTEXT', JSON.stringify({ project: testInfo.project.name, viewport, textScale, closedNormally, error: String(error) }));
+        await page.content().then((body) => testInfo.attach('count-timed-' + textScale + '-first-failure.html', { body, contentType: 'text/html' }))
+          .catch((captureError) => console.log('COUNT_TIMED_DOM_CAPTURE_ERROR', String(captureError)));
+        await page.screenshot({ path: testInfo.outputPath('count-timed-' + textScale + '-first-failure.png') })
+          .catch((captureError) => console.log('COUNT_TIMED_CAPTURE_ERROR', String(captureError)));
+        throw error;
+      } finally {
+        console.log('COUNT_TIMED_ERRORS', JSON.stringify({ project: testInfo.project.name, viewport, textScale, errors }));
+        try {
+          if (!closedNormally) {
+            if (!failed) await expect(panel.locator('.game-count')).toHaveCount(1);
+            const confirmation = page.getByRole('alertdialog', { name: '이번 세션을 종료할까요?', exact: true });
+            if (!await confirmation.count() && await panel.locator('.game-count').count()) {
+              await panel.locator('.game-count').getByRole('button', { name: '연습 닫기', exact: true }).click();
+            }
+            if (await confirmation.count()) await confirmation.getByRole('button', { name: '연습창 닫기', exact: true }).click();
+          }
+        } catch (closeError) {
+          if (!failed) throw closeError;
+          console.log('COUNT_TIMED_CLOSE_ERROR', String(closeError));
+        }
+      }
+      expect(errors).toEqual([]);
+    });
+  }
+}
+

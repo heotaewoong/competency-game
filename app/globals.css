@@ -1126,7 +1126,7 @@ html[data-text-scale="large"] .result-time-note p { font-size: 14px; }
 .home-review-ranking > button { min-width: 0; min-height: 116px; padding: 13px; display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: start; gap: 10px; border: 1px solid #dce2ed; border-radius: 13px; color: #263249; background: rgba(255,255,255,.9); text-align: left; }.home-review-ranking > button:hover { border-color: #aeb8da; background: #fff; transform: translateY(-1px); }
 .home-review-ranking > button > span { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; color: #fff; background: var(--brand); font-size: 11px; font-weight: 900; }.home-review-ranking > button > div { min-width: 0; }.home-review-ranking small { color: #7b8799; font-size: 9px; }.home-review-ranking b { display: block; margin-top: 2px; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.home-review-ranking p { margin: 5px 0 0; display: -webkit-box; overflow: hidden; color: #68758a; font-size: 10px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }.home-review-ranking em { padding: 4px 7px; border-radius: 999px; color: #4453b8; background: #eef0ff; font-size: 10px; font-style: normal; font-weight: 850; white-space: nowrap; }
 .home-review-empty { margin-top: 15px; min-height: 68px; padding: 13px 15px; display: grid; align-content: center; gap: 3px; border: 1px dashed #cfd7e4; border-radius: 12px; color: #718096; background: rgba(255,255,255,.7); }.home-review-empty b { color: #3b485e; font-size: 12px; }.home-review-empty span { font-size: 11px; }
-.game-record-actions { grid-column: 2; grid-row: 1; justify-self: end; display: flex !important; flex-wrap: wrap; gap: 5px !important; }.game-record-grid .game-record-actions > button { position: static; grid-column: auto; grid-row: auto; min-height: 44px; white-space: normal; }.game-record-grid .game-record-actions > span { width: auto; height: auto; padding: 0 7px; color: #8b95a6; background: transparent; font-size: 9px; white-space: nowrap; }
+.game-record-actions { grid-column: 2; grid-row: 1; justify-self: end; display: flex !important; flex-wrap: wrap; gap: 5px !important; }.game-record-grid .game-record-actions > button { position: static; grid-column: auto; grid-row: auto; min-width: 44px; min-height: 44px; white-space: normal; }.game-record-grid .game-record-actions > span { width: auto; height: auto; padding: 0 7px; color: #8b95a6; background: transparent; font-size: 9px; white-space: nowrap; }
 .record-list > article > button { min-height: 40px; padding: 0 10px; border: 1px solid #cbd3e3; border-radius: 9px; color: #4250ad; background: #f6f7ff; font-size: 10px; font-weight: 850; white-space: nowrap; }.record-list > article > button:hover { color: #fff; background: var(--brand); }.legacy-review-label { color: #98a1b0; font-size: 9px; white-space: nowrap; }
 .result-actions > .result-review-button { min-height: 44px; padding: 12px 17px; border: 1px solid #2b786b; border-radius: 10px; color: #17685b; background: #effaf7; font-weight: 850; }.result-actions > .result-review-button:hover { color: #fff; background: #17685b; }
 .potion-result-detail { border-color: #e9cfdd; background: #fff8fb; }.potion-result-detail > b { color: #a53f70; }
@@ -1186,7 +1186,7 @@ html[data-text-scale="large"] .result-time-note p { font-size: 14px; }
   /* iOS Safari enlarges the viewport when a focused form control is below 16px. */
   .feedback-fields select, .feedback-message textarea, .review-game-head select { font-size: 16px; }
   .home-review-heading { align-items: flex-start; flex-direction: column; gap: 12px; }.home-review-heading > button { width: 100%; justify-content: space-between; }
-  .game-record-actions { grid-column: 1 / -1; grid-row: auto; width: 100%; justify-self: stretch; }.game-record-grid .game-record-actions > button { flex: 1; }.game-record-grid .game-record-actions > span { flex: 1; justify-content: center; }
+  .game-record-actions { grid-column: 1 / -1; grid-row: auto; width: 100%; justify-self: stretch; }.game-record-grid .game-record-actions > button { flex: 1 1 100px; }.game-record-grid .game-record-actions > span { flex: 1; justify-content: center; }
   .record-list > article > button { width: 100%; }
   .review-backdrop { place-items: start center; padding: max(5px, env(safe-area-inset-top)) max(5px, env(safe-area-inset-right)) max(5px, env(safe-area-inset-bottom)) max(5px, env(safe-area-inset-left)); }.review-dialog { height: calc(100dvh - 10px); border-radius: 15px; grid-template-rows: auto auto minmax(0, 1fr) auto; }.review-dialog-header { min-height: 74px; padding: 12px 13px; }.review-dialog-header h2 { font-size: 21px; }.review-dialog-header p { display: none; }
   .review-overview { padding: 9px 11px; grid-template-columns: 1fr auto; }.review-overview > div:first-child p { max-width: 240px; }.review-overview > div:last-child { display: block; }.review-overview > div:last-child > button { min-width: 185px; }.review-overview > div:last-child > button:nth-child(n+2) { display: none; }
@@ -3254,3 +3254,15 @@ html[data-text-scale="large"] .training-bundle .training-bundle-status { font-si
 .public-feedback-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-top: 16px; }
 .public-feedback-actions button { min-height: 48px; margin: 0; padding: 10px 18px; border-radius: 10px; font-size: 13px; font-weight: 800; }
 .public-feedback-actions p { flex: 1 1 260px; margin: 0; }
+
+/* Timed Count stimuli need no scrolling during the unchanged brief show window.
+   Unlimited guided practice keeps its existing layout and scroll policy. */
+@media (max-height: 420px) and (orientation: landscape) {
+  .game-count .count-stage-shell:has(> .count-wrap > .time-strip) > .stage-sequence { margin-bottom: 0; }
+  .game-count .count-stage-shell:has(> .count-wrap > .time-strip) > .stage-sequence span { min-height: 20px; }
+  .game-count .count-wrap:has(> .time-strip) > .time-strip { margin-bottom: 0; padding-block: 2px; }
+  .game-count .count-wrap:has(> .time-strip) > .count-board { height: 150px; }
+  .game-count .count-wrap.phase-show:has(> .time-strip) > .count-board > button { grid-template-rows: 1fr; }
+  .game-count .count-wrap.phase-show:has(> .time-strip) > .count-board > button > span { display: none; }
+}
+
