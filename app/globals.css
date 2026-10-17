@@ -89,7 +89,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 .game-order-toolbar { margin: 0 0 18px; padding: 8px 9px 8px 14px; display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 255, 255, .82); }
 .game-order-toolbar > span { color: #647086; font-size: 12px; font-weight: 800; }
 .game-order-actions { padding: 3px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px; border: 1px solid #dce2eb; border-radius: 10px; background: #f1f3f7; }
-.game-order-actions button { min-width: 0; min-height: 44px; padding: 7px 11px; border: 0; border-radius: 7px; color: #59667b; background: transparent; font-size: 11px; font-weight: 800; }
+.game-order-actions button { display: grid; place-items: center; min-width: 0; min-height: 44px; padding: 7px 11px; border: 0; border-radius: 7px; color: #59667b; background: transparent; font-size: 11px; font-weight: 800; }
 .game-order-actions button[aria-pressed="true"] { color: #fff; background: var(--brand); box-shadow: 0 4px 11px rgba(80, 98, 207, .2); }
 .difficulty-source { position: relative; margin-left: auto; color: #657187; font-size: 11px; }
 .difficulty-source summary { min-height: 44px; padding: 0 9px; display: flex; align-items: center; cursor: pointer; font-weight: 750; }
