@@ -740,7 +740,12 @@ async function captureCountCloudLayout(page: Page, testInfo: TestInfo, textScale
     const clouds = [...(frame?.querySelectorAll<HTMLElement>('.word-cloud') ?? [])].map((cloud, side) => {
       const button = cloud.closest('button');
       const cloudBox = box(cloud.getBoundingClientRect()), buttonBox = button ? box(button.getBoundingClientRect()) : null;
-      const clippers = [];
+      const clippers: {
+        tag: string; className: string; overflowX: string; overflowY: string; afterScrollableY: boolean;
+        box: ReturnType<typeof box>; clipBox: ReturnType<typeof box>;
+        clientWidth: number; scrollWidth: number; clientHeight: number; scrollHeight: number;
+        scrollLeft: number; scrollTop: number;
+      }[] = [];
       let afterScrollableY = false;
       for (let node: HTMLElement | null = cloud; node && node !== document.documentElement; node = node.parentElement) {
         const style = getComputedStyle(node), rect = node.getBoundingClientRect();
