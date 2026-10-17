@@ -515,3 +515,112 @@ test('훈련 묶음은 실제 기록 삭제와 다른 탭의 확정된 세대 �
   }
   expect(errors).toEqual([]);
 });
+
+for (const textScale of ['standard', 'large'] as const) {
+  test(`${textScale} 글자에서 기록이 있는 9개 게임 카드의 내용을 잘라 숨기지 않는다`, async ({ page }, testInfo) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.addInitScript((scale) => {
+      localStorage.setItem('nineflow-accessibility-v1', JSON.stringify({ contrast: 'standard', textScale: scale, motion: 'reduce' }));
+      const generation = 'card-responsive-layout';
+      const results = ['rotation', 'rps', 'appointment', 'path', 'potion', 'nback', 'number', 'count', 'mouse'].map((gameId) => ({
+        id: `responsive-${gameId}`, gameId, completedAt: '2026-10-16T22:00:00.000Z',
+        accuracy: 0, medianRt: 0, stability: 0, errors: 1,
+        detail: { sessionMode: '연습 모드', quantity: 9, paceMs: 4500, practiceFocus: 'full', guidedPacing: '설정 제한시간 적용' },
+      }));
+      localStorage.setItem('nineflow-practice-results-generation-v1', generation);
+      localStorage.setItem(`nineflow-practice-results-v4:${generation}`, JSON.stringify({ version: 4, generation, results }));
+    }, textScale);
+    await page.goto('/');
+    await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+    await expect(page.locator('html')).toHaveAttribute('data-text-scale', textScale);
+    await expect(page.locator('.game-card')).toHaveCount(9);
+    await expect(page.locator('.game-card').filter({ has: page.getByRole('heading', { name: '가위바위보', exact: true }) }).locator('.card-record dd').nth(1)).toHaveText('0%');
+    await page.evaluate(() => document.fonts.ready);
+
+    for (const width of [240, 280, 320, 350, 385, 520, 620, 621, 768, 900, 1024, 1280]) {
+      await page.setViewportSize({ width, height: width === 385 ? 382 : 640 });
+      const issues = await page.locator('.game-card').evaluateAll((cards) => cards.flatMap((card) => {
+        const cardRect = card.getBoundingClientRect();
+        return [...card.querySelectorAll<HTMLElement>('.card-copy h3, .card-copy p, .card-record dt, .card-record dd, .card-action > span, .card-action b')].flatMap((element) => {
+          const rect = element.getBoundingClientRect();
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          const textOutside = [...range.getClientRects()].some((text) =>
+            text.left < rect.left - 1 || text.right > rect.right + 1 ||
+            text.top < rect.top - 1 || text.bottom > rect.bottom + 1);
+          const clipped = element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1;
+          const outsideCard = rect.left < cardRect.left - 1 || rect.right > cardRect.right + 1;
+          return clipped || outsideCard || textOutside ? [{
+            game: card.querySelector('h3')?.textContent,
+            text: element.textContent, clipped, outsideCard, textOutside,
+          }] : [];
+        });
+      }));
+      expect(issues, `${width}px ${textScale}: 카드 내부 잘림`).toEqual([]);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+      if (width === 385 || width === 621) {
+        await page.screenshot({ fullPage: true, path: testInfo.outputPath(`cards-${textScale}-${width}.png`) });
+      }
+    }
+    expect(errors).toEqual([]);
+  });
+}
+
+for (const game of [
+  { id: 'rotation', title: '도형 회전하기', board: '.rotation-comparison', controls: '.rotation-op-grid button, .rotation-submit-row button' },
+  { id: 'potion', title: '마법약 만들기', board: '.potion-workbench', controls: '.potion-actions button' },
+  { id: 'nback', title: '도형 순서 기억하기', board: '.nback-stimulus', controls: '.nback-status button' },
+]) {
+  for (const textScale of ['standard', 'large'] as const) {
+    test(`${game.title}: ${textScale} 글자의 좁은 가로 화면에서도 문제와 조작부가 잘리지 않는다`, async ({ page }, testInfo) => {
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      await page.addInitScript((scale) => {
+        localStorage.setItem('nineflow-accessibility-v1', JSON.stringify({ contrast: 'standard', textScale: scale, motion: 'reduce' }));
+      }, textScale);
+      await page.setViewportSize({ width: 385, height: 382 });
+      await page.goto('/');
+      await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+      await page.getByRole('button', { name: new RegExp(`${game.title}, 난이도 .+, 설정 열기`) }).click();
+      const stage = page.locator(`section[data-game="${game.id}"]`);
+      await stage.locator('.stage-start-practice').click();
+      const workspace = stage.locator('.game-workspace');
+      await expect(workspace).toBeVisible();
+      await expect(page.locator('.game-preparation')).toHaveCount(0);
+      if (game.id === 'nback') await expect(workspace.locator('.nback-countdown')).toHaveCount(0);
+      await expect(workspace.locator(game.board)).toBeVisible();
+
+      for (const viewport of [
+        { width: 385, height: 382 }, { width: 568, height: 320 },
+        { width: 768, height: 360 }, { width: 844, height: 360 }, { width: 320, height: 640 },
+      ]) {
+        await page.setViewportSize(viewport);
+        const issues = await workspace.evaluate((element) => {
+          const bounds = element.getBoundingClientRect();
+          return [...element.querySelectorAll<HTMLElement>('button, h3, p')].filter((item) =>
+            item.getClientRects().length && !item.classList.contains('sr-only') &&
+            getComputedStyle(item).visibility !== 'hidden').flatMap((item) => {
+            const rect = item.getBoundingClientRect();
+            return rect.left < bounds.left - 1 || rect.right > bounds.right + 1 || item.scrollWidth > item.clientWidth + 2
+              ? [{ text: item.textContent, className: item.className, left: rect.left, right: rect.right, bounds: [bounds.left, bounds.right] }]
+              : [];
+          });
+        });
+        expect(issues, `${game.id} ${viewport.width}×${viewport.height}: 문제·조작부 가로 잘림`).toEqual([]);
+        for (const control of await workspace.locator(game.controls).all()) {
+          await expect(control).toBeVisible();
+          const box = await control.boundingBox();
+          expect(box).not.toBeNull();
+          expect(box!.width).toBeGreaterThanOrEqual(44);
+          expect(box!.height).toBeGreaterThanOrEqual(44);
+          if (await control.isEnabled()) await control.click({ trial: true });
+        }
+        if (viewport.width === 385 || viewport.width === 844) {
+          await stage.screenshot({ path: testInfo.outputPath(`${game.id}-${textScale}-${viewport.width}.png`) });
+        }
+      }
+      expect(errors).toEqual([]);
+    });
+  }
+}
