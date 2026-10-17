@@ -2719,7 +2719,8 @@ body {
   .game-path .path-control-panel .path-toolbar .path-type-chip { grid-column: 1; min-height: 44px; }
   .game-path .path-control-panel .path-toolbar > button { grid-column: 2; }
   .game-path .path-control-panel .path-submit { min-height: 92px; grid-column: 2; grid-row: 1; align-self: stretch; }
-  .game-path .path-shell { --edge-size: 10px; width: 242px; }
+  /* Keep the edge labels and their badges inside scrollable content, even at scrollTop 0. */
+  .game-path .path-shell { --edge-size: 10px; width: 242px; padding-block: 10px; }
 }
 
 @media (max-width: 620px) {
