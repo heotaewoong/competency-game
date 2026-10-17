@@ -2285,7 +2285,7 @@ body {
     .rotation-op-grid span { font-size: 10px; line-height: 1.15; }
     .rotation-submit-row { grid-column: 2; grid-row: 2; margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
     .rotation-submit-row > span { display: none; }
-    .rotation-submit-row button, .rotation-submit-row .primary-submit { width: 100%; min-width: 0; min-height: 44px; padding-inline: 4px !important; font-size: 10px; white-space: nowrap; }
+    .rotation-submit-row button, .rotation-submit-row .primary-submit { width: 100%; min-width: 0; min-height: 44px; padding-inline: 4px !important; font-size: 10px; white-space: normal; overflow-wrap: anywhere; }
     .rotation-submit-row kbd { display: none; }
     .rotation-click-meter { grid-column: 1 / -1; grid-row: 4; margin: 0; }
     .operation-sequence { grid-column: 1 / -1; grid-row: 3; margin: 0; grid-template-columns: 1fr; }

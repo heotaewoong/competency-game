@@ -603,7 +603,9 @@ for (const game of [
             getComputedStyle(item).visibility !== 'hidden').flatMap((item) => {
             const rect = item.getBoundingClientRect();
             return rect.left < bounds.left - 1 || rect.right > bounds.right + 1 || item.scrollWidth > item.clientWidth + 2
-              ? [{ text: item.textContent, className: item.className, left: rect.left, right: rect.right, bounds: [bounds.left, bounds.right] }]
+              ? [{ text: item.textContent, className: item.className, left: rect.left, right: rect.right, bounds: [bounds.left, bounds.right],
+                clientWidth: item.clientWidth, scrollWidth: item.scrollWidth,
+                font: getComputedStyle(item).font, whiteSpace: getComputedStyle(item).whiteSpace }]
               : [];
           });
         });
@@ -614,6 +616,21 @@ for (const game of [
           expect(box).not.toBeNull();
           expect(box!.width).toBeGreaterThanOrEqual(44);
           expect(box!.height).toBeGreaterThanOrEqual(44);
+          const textLayout = await control.evaluate((button) => {
+            const bounds = button.getBoundingClientRect();
+            const range = document.createRange();
+            range.selectNodeContents(button);
+            const rects = [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0);
+            return {
+              rectCount: rects.length, clientWidth: button.clientWidth, scrollWidth: button.scrollWidth,
+              font: getComputedStyle(button).font,
+              outside: rects.filter((rect) => rect.left < bounds.left - 1 || rect.right > bounds.right + 1 ||
+                rect.top < bounds.top - 1 || rect.bottom > bounds.bottom + 1)
+                .map((rect) => ({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom })),
+            };
+          });
+          expect(textLayout.rectCount).toBeGreaterThan(0);
+          expect(textLayout.outside, `${game.id} ${viewport.width}px: 버튼 내용 ${JSON.stringify(textLayout)}`).toEqual([]);
           if (await control.isEnabled()) await control.click({ trial: true });
         }
         if (viewport.width === 385 || viewport.width === 844) {
