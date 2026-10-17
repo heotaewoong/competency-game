@@ -558,7 +558,50 @@ for (const textScale of ['standard', 'large'] as const) {
         });
       }));
       expect(issues, `${width}px ${textScale}: 카드 내부 잘림`).toEqual([]);
-      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+      const pageOverflow = await page.evaluate((expectedWidth) => {
+        const firstWidth = document.documentElement.scrollWidth;
+        if (firstWidth <= expectedWidth + 1) return { firstWidth };
+        try {
+          const viewport = {
+            innerWidth: window.innerWidth, documentClientWidth: document.documentElement.clientWidth,
+            bodyClientWidth: document.body.clientWidth, bodyScrollWidth: document.body.scrollWidth,
+            visualViewportWidth: window.visualViewport?.width ?? null, fonts: document.fonts.status,
+          };
+          const offenders = [...document.querySelectorAll('*')].flatMap((element) => {
+            const rect = element.getBoundingClientRect();
+            const outsideViewport = rect.left < -1 || rect.right > viewport.innerWidth + 1;
+            const internalOverflow = element.scrollWidth > element.clientWidth + 1;
+            if (!outsideViewport && !internalOverflow) return [];
+            const style = getComputedStyle(element);
+            const clippingParents = [];
+            for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+              const parentStyle = getComputedStyle(parent);
+              if (!['hidden', 'clip', 'auto', 'scroll'].includes(parentStyle.overflowX)) continue;
+              const parentRect = parent.getBoundingClientRect();
+              clippingParents.push({
+                tag: parent.tagName, id: parent.id, className: parent.getAttribute('class'),
+                left: parentRect.left, right: parentRect.right, overflowX: parentStyle.overflowX,
+              });
+            }
+            return [{
+              tag: element.tagName, id: element.id, className: element.getAttribute('class'),
+              text: element.textContent?.trim().slice(0, 160), left: rect.left, right: rect.right,
+              clientWidth: element.clientWidth, scrollWidth: element.scrollWidth,
+              outsideViewport, internalOverflow, position: style.position, overflowX: style.overflowX,
+              visibility: style.visibility, ariaHidden: element.getAttribute('aria-hidden'), clippingParents,
+            }];
+          });
+          return { firstWidth, viewport, offenders, endWidth: document.documentElement.scrollWidth };
+        } catch (error) {
+          return { firstWidth, diagnosticError: String(error) };
+        }
+      }, width);
+      if (pageOverflow.firstWidth > width + 1) {
+        console.log('RESPONSIVE_PAGE_OVERFLOW', JSON.stringify({
+          project: testInfo.project.name, textScale, requestedViewport: page.viewportSize(), ...pageOverflow,
+        }));
+      }
+      expect(pageOverflow.firstWidth).toBeLessThanOrEqual(width + 1);
       if (width === 385 || width === 621) {
         await page.screenshot({ fullPage: true, path: testInfo.outputPath(`cards-${textScale}-${width}.png`) });
       }
