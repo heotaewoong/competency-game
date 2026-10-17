@@ -899,6 +899,7 @@ html[data-text-scale="large"] .result-time-note p { font-size: 14px; }
 }
 
 @media (max-width: 360px) {
+  .game-order-actions { grid-template-columns: 1fr; }
   .path-shell { --edge-size: 12px; }
   .edge-marker > span { font-size: 11px; }
   .edge-marker .passenger { font-size: 13px; }

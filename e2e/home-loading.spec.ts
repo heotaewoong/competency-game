@@ -622,9 +622,22 @@ for (const textScale of ['standard', 'large'] as const) {
               const outsideContainer = rect.left < boundaryRect.left - 1 || rect.right > boundaryRect.right + 1;
               const outsideViewport = rect.left < -1 || rect.right > window.innerWidth + 1;
               const tooSmall = element.tagName === 'BUTTON' && (rect.width < 44 || rect.height < 44);
-              return textRects.length === 0 || clipped || textOutside || outsideContainer || outsideViewport || tooSmall ? [{
-                text: element.textContent ?? '', textRects: textRects.length, clipped, textOutside, outsideContainer, outsideViewport, tooSmall,
-              }] : [];
+              if (textRects.length === 0 || clipped || textOutside || outsideContainer || outsideViewport || tooSmall) {
+                const style = getComputedStyle(element);
+                return [{
+                  text: element.textContent ?? '', textRects: textRects.length, clipped, textOutside, outsideContainer, outsideViewport, tooSmall,
+                  box: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height },
+                  client: { width: element.clientWidth, height: element.clientHeight },
+                  scroll: { width: element.scrollWidth, height: element.scrollHeight },
+                  textBounds: textRects.map((text) => ({ left: text.left, right: text.right, top: text.top, bottom: text.bottom, width: text.width, height: text.height })),
+                  style: {
+                    display: style.display, gridTemplateColumns: style.gridTemplateColumns, font: style.font,
+                    lineHeight: style.lineHeight, padding: style.padding, whiteSpace: style.whiteSpace,
+                    overflowX: style.overflowX, overflowY: style.overflowY,
+                  },
+                }];
+              }
+              return [];
             });
           }),
         };
@@ -708,6 +721,214 @@ for (const game of [
         }
         if (viewport.width === 385 || viewport.width === 844) {
           await stage.screenshot({ path: testInfo.outputPath(`${game.id}-${textScale}-${viewport.width}.png`) });
+        }
+      }
+      expect(errors).toEqual([]);
+    });
+  }
+}
+
+async function captureCountCloudLayout(page: Page, testInfo: TestInfo, textScale: string, phase: string, errors: readonly string[]) {
+  const snapshot = await page.evaluate(() => {
+    const epsilon = 1;
+    const box = (rect: DOMRect) => ({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height });
+    const outside = (rect: ReturnType<typeof box>, boundary: ReturnType<typeof box>) => ({
+      x: rect.left < boundary.left - epsilon || rect.right > boundary.right + epsilon,
+      y: rect.top < boundary.top - epsilon || rect.bottom > boundary.bottom + epsilon,
+    });
+    const frame = document.querySelector<HTMLElement>('.game-count');
+    const clouds = [...(frame?.querySelectorAll<HTMLElement>('.word-cloud') ?? [])].map((cloud, side) => {
+      const button = cloud.closest('button');
+      const cloudBox = box(cloud.getBoundingClientRect()), buttonBox = button ? box(button.getBoundingClientRect()) : null;
+      const clippers = [];
+      let afterScrollableY = false;
+      for (let node: HTMLElement | null = cloud; node && node !== document.documentElement; node = node.parentElement) {
+        const style = getComputedStyle(node), rect = node.getBoundingClientRect();
+        if (!['hidden', 'clip', 'auto', 'scroll'].includes(style.overflowX) && !['hidden', 'clip', 'auto', 'scroll'].includes(style.overflowY)) continue;
+        clippers.push({
+          tag: node.tagName, className: node.className, overflowX: style.overflowX, overflowY: style.overflowY, afterScrollableY,
+          box: box(rect), clipBox: { left: rect.left + node.clientLeft, right: rect.left + node.clientLeft + node.clientWidth,
+            top: rect.top + node.clientTop, bottom: rect.top + node.clientTop + node.clientHeight,
+            width: node.clientWidth, height: node.clientHeight },
+          clientWidth: node.clientWidth, scrollWidth: node.scrollWidth, clientHeight: node.clientHeight, scrollHeight: node.scrollHeight,
+          scrollLeft: node.scrollLeft, scrollTop: node.scrollTop,
+        });
+        if (['auto', 'scroll'].includes(style.overflowY)) afterScrollableY = true;
+      }
+      const words = [...cloud.querySelectorAll<HTMLElement>('span')].map((word, index) => {
+        const range = document.createRange(), style = getComputedStyle(word);
+        range.selectNodeContents(word);
+        const bounds = box(range.getBoundingClientRect()), rects = [...range.getClientRects()].map(box);
+        const ancestors = clippers.map((clipper, clipperIndex) => {
+          const axes = outside(bounds, clipper.clipBox);
+          return { clipperIndex, axes, afterScrollableY: clipper.afterScrollableY,
+            hardX: ['hidden', 'clip'].includes(clipper.overflowX) && axes.x,
+            hardY: ['hidden', 'clip'].includes(clipper.overflowY) && axes.y && !clipper.afterScrollableY,
+            outerHiddenY: ['hidden', 'clip'].includes(clipper.overflowY) && axes.y && clipper.afterScrollableY,
+            scrollX: ['auto', 'scroll'].includes(clipper.overflowX) && axes.x,
+            scrollY: ['auto', 'scroll'].includes(clipper.overflowY) && axes.y };
+        });
+        return { index, text: word.textContent ?? '', box: box(word.getBoundingClientRect()), range: bounds, rects,
+          nonzero: bounds.width > 0 && bounds.height > 0 && rects.length > 0 && rects.every((rect) => rect.width > 0 && rect.height > 0),
+          font: { size: style.fontSize, family: style.fontFamily, weight: style.fontWeight, lineHeight: style.lineHeight, whiteSpace: style.whiteSpace },
+          left: word.style.left, top: word.style.top,
+          ownCloudOutside: outside(bounds, cloudBox), ownButtonOutside: buttonBox ? outside(bounds, buttonBox) : { x: true, y: true }, ancestors };
+      });
+      return { side: side === 0 ? 'left' : 'right', box: cloudBox,
+        clientWidth: cloud.clientWidth, scrollWidth: cloud.scrollWidth, clientHeight: cloud.clientHeight, scrollHeight: cloud.scrollHeight,
+        label: button?.getAttribute('aria-label'), buttonBox,
+        words, clippers };
+    });
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    const resultsRaw = generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null;
+    const controls = [...(frame?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((button) => ({
+      text: button.textContent, label: button.getAttribute('aria-label'), disabled: button.disabled, box: box(button.getBoundingClientRect()),
+    }));
+    return { capturedAt: new Date().toISOString(), epsilon, phase: frame?.querySelector('.count-wrap')?.className ?? null,
+      progress: frame?.querySelector('.workspace-progress span')?.textContent ?? null,
+      textScale: document.documentElement.dataset.textScale, fonts: document.fonts.status,
+      guidedNote: frame?.querySelector('.guided-pacing-note')?.textContent ?? null,
+      live: [...(frame?.querySelectorAll('[aria-live]') ?? [])].map((node) => node.textContent),
+      viewport: { innerWidth, innerHeight, documentClientWidth: document.documentElement.clientWidth,
+        documentScrollWidth: document.documentElement.scrollWidth, bodyScrollWidth: document.body.scrollWidth, scrollX, scrollY },
+      mediaCount: document.querySelectorAll('audio,video').length, storage: { generation, resultsRaw }, controls, clouds };
+  });
+  await testInfo.attach('count-cloud-' + textScale + '-' + phase, { body: JSON.stringify(snapshot, null, 2), contentType: 'application/json' });
+  let resultsCount: number | null = null, storageParseError: string | null = null;
+  try { resultsCount = snapshot.storage.resultsRaw === null ? null : JSON.parse(snapshot.storage.resultsRaw).results.length; }
+  catch (error) { storageParseError = String(error); }
+  const issues = snapshot.clouds.flatMap((cloud) => cloud.words.flatMap((word) => [
+    ...(!word.nonzero || word.ownCloudOutside.x || word.ownCloudOutside.y || word.ownButtonOutside.x || word.ownButtonOutside.y
+      ? [{ side: cloud.side, index: word.index, kind: 'word', nonzero: word.nonzero, cloud: word.ownCloudOutside, button: word.ownButtonOutside }] : []),
+    ...word.ancestors.filter((ancestor) => ancestor.hardX || ancestor.hardY || ancestor.scrollX)
+      .map((ancestor) => ({ side: cloud.side, index: word.index, kind: 'ancestor', ...ancestor })),
+  ]));
+  const summary = {
+    scope: 'Count cloud/button XY; clipping-ancestor X; hidden/clip Y before first auto/scroll-Y viewport only. Outer hidden Y is observed, not a shared GameFrame accessibility proof.',
+    project: testInfo.project.name, textScale, phase, viewport: { width: snapshot.viewport.innerWidth, height: snapshot.viewport.innerHeight }, progress: snapshot.progress,
+    clouds: snapshot.clouds.map((cloud) => ({ side: cloud.side, count: cloud.words.length, label: cloud.label,
+      minMargin: cloud.words.length ? {
+        x: Math.min(...cloud.words.map((word) => Math.min(word.range.left - cloud.box.left, cloud.box.right - word.range.right))),
+        y: Math.min(...cloud.words.map((word) => Math.min(word.range.top - cloud.box.top, cloud.box.bottom - word.range.bottom))),
+      } : null,
+      scrollYObservations: cloud.words.flatMap((word) => word.ancestors.filter((ancestor) => ancestor.scrollY)
+        .map((ancestor) => ({ index: word.index, clipperIndex: ancestor.clipperIndex, afterScrollableY: ancestor.afterScrollableY }))),
+      outerHiddenYObservations: cloud.words.flatMap((word) => word.ancestors.filter((ancestor) => ancestor.outerHiddenY)
+        .map((ancestor) => ({ index: word.index, clipperIndex: ancestor.clipperIndex, afterScrollableY: ancestor.afterScrollableY, outerHiddenY: ancestor.outerHiddenY }))),
+    })),
+    documentX: { client: snapshot.viewport.documentClientWidth, document: snapshot.viewport.documentScrollWidth, body: snapshot.viewport.bodyScrollWidth },
+    controlsBelow44: snapshot.controls.filter((control) => control.box.width < 44 || control.box.height < 44).map((control) => control.label ?? control.text),
+    issues, generation: snapshot.storage.generation, resultsCount, storageParseError, errors: [...errors],
+  };
+  console.log('COUNT_CLOUD_LAYOUT', JSON.stringify(summary));
+  return snapshot;
+}
+
+for (const viewport of [{ width: 320, height: 568 }, { width: 568, height: 320 }] as const) {
+  for (const textScale of ['standard', 'large'] as const) {
+    test('개수 비교하기: ' + viewport.width + '×' + viewport.height + ' ' + textScale + ' 글자에서 제시 단어 자체와 가로 경계가 잘리지 않는다', async ({ page }, testInfo) => {
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+      await page.addInitScript((scale) => {
+        localStorage.setItem('nineflow-accessibility-v1', JSON.stringify({ contrast: 'standard', textScale: scale, motion: 'reduce' }));
+      }, textScale);
+      await page.setViewportSize(viewport);
+      const panel = page.locator('.stage-panel[data-game="count"]');
+      let failed = false;
+      let baseline: { generation: string | null; resultsRaw: string | null } | null = null;
+      try {
+        await page.goto('/');
+        await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+        await expect(page.locator('html')).toHaveAttribute('data-text-scale', textScale);
+        await page.evaluate(() => document.fonts.ready);
+        await page.getByRole('button', { name: '개수 비교하기, 난이도 하, 설정 열기', exact: true }).click();
+        await expect(panel).toBeVisible();
+        await panel.getByRole('radio', { name: /연습 모드/ }).click();
+        const quantity = panel.locator('output[aria-label="문제 수 현재 값"]');
+        for (let step = 0; step < 9; step += 1) {
+          const value = Number(await quantity.textContent());
+          expect(Number.isInteger(value) && value >= 5 && value <= 50 && value % 5 === 0).toBe(true);
+          if (value === 5) break;
+          await panel.getByRole('button', { name: '문제 수 줄이기', exact: true }).click();
+          await expect(quantity).toHaveText(String(value - 5));
+        }
+        await expect(quantity).toHaveText('5');
+        const pacing = panel.locator('label.accessible-pacing-setting');
+        if (!await pacing.locator('input[type="checkbox"]').isChecked()) await pacing.click();
+        await expect(pacing.locator('input[type="checkbox"]')).toBeChecked();
+        baseline = await page.evaluate(() => {
+          const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+          return { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null };
+        });
+        expect(baseline.generation).not.toBeNull();
+        expect(baseline.resultsRaw).not.toBeNull();
+        expect(JSON.parse(baseline.resultsRaw!).results).toEqual([]);
+        await panel.locator('.stage-start-practice').click();
+        for (let index = 0; index < 5; index += 1) {
+          await expect(panel.locator('.game-count .count-wrap.phase-show')).toBeVisible();
+          await expect(panel.locator('.game-count .workspace-progress span')).toContainText((index + 1) + ' / 5');
+          const raw = await captureCountCloudLayout(page, testInfo, textScale, 'show-' + (index + 1), errors);
+          if ([0, 2, 4].includes(index)) await page.screenshot({ path: testInfo.outputPath('count-cloud-' + textScale + '-show-' + (index + 1) + '.png') });
+          expect(raw.storage).toEqual(baseline);
+          expect(raw.textScale).toBe(textScale);
+          expect(raw.mediaCount).toBe(0);
+          expect(raw.guidedNote).toContain('제시 제한시간 없음');
+          expect(raw.viewport.documentScrollWidth).toBeLessThanOrEqual(raw.viewport.documentClientWidth + 1);
+          expect(raw.viewport.bodyScrollWidth).toBeLessThanOrEqual(raw.viewport.documentClientWidth + 1);
+          expect(raw.clouds).toHaveLength(2);
+          expect(raw.controls.length).toBeGreaterThan(0);
+          for (const control of raw.controls) {
+            expect(control.box.width).toBeGreaterThanOrEqual(44);
+            expect(control.box.height).toBeGreaterThanOrEqual(44);
+          }
+          for (const cloud of raw.clouds) {
+            expect(cloud.words.length).toBeGreaterThan(0);
+            expect(cloud.buttonBox).not.toBeNull();
+            const label = (cloud.side === 'left' ? '왼쪽' : '오른쪽') + ' 자극: ' + cloud.words.map((word) => word.text).join(' ');
+            expect(cloud.label).toBe(label);
+            expect(new Set(cloud.words.map((word) => word.text)).size).toBe(1);
+            for (const word of cloud.words) {
+              expect(word.nonzero).toBe(true);
+              expect(word.ownCloudOutside).toEqual({ x: false, y: false });
+              expect(word.ownButtonOutside).toEqual({ x: false, y: false });
+              expect(word.ancestors.filter((ancestor) => ancestor.hardX || ancestor.hardY)).toEqual([]);
+              expect(word.ancestors.filter((ancestor) => ancestor.scrollX)).toEqual([]);
+              // Outer hidden-Y and scroll-Y crossings remain diagnostic; this is not a shared GameFrame accessibility proof.
+            }
+          }
+          const counts = raw.clouds.map((cloud) => cloud.words.length);
+          expect(counts[0]).not.toBe(counts[1]);
+          expect(raw.clouds[0].words[0].text).not.toBe(raw.clouds[1].words[0].text);
+          if (index === 4) break;
+          await panel.locator('.accessible-next-action').click();
+          await expect(panel.locator('.count-wrap.phase-answer')).toBeVisible();
+          await panel.getByRole('button', { name: counts[0] > counts[1] ? '왼쪽 선택' : '오른쪽 선택', exact: true }).click();
+          // The product's unchanged feedback and blank intervals lead to the next stable guided show.
+        }
+      } catch (error) {
+        failed = true;
+        await page.content().then((body) => testInfo.attach('count-cloud-' + textScale + '-first-failure.html', { body, contentType: 'text/html' }))
+          .catch((captureError) => console.log('COUNT_CLOUD_DOM_CAPTURE_ERROR', String(captureError)));
+        await page.screenshot({ path: testInfo.outputPath('count-cloud-' + textScale + '-first-failure.png') })
+          .catch((captureError) => console.log('COUNT_CLOUD_CAPTURE_ERROR', String(captureError)));
+        throw error;
+      } finally {
+        console.log('COUNT_CLOUD_ERRORS', JSON.stringify({ project: testInfo.project.name, textScale, errors }));
+        try {
+          if (!failed) await expect(panel.locator('.game-count')).toHaveCount(1);
+          if (await panel.locator('.game-count').count()) {
+            await panel.locator('.game-count').getByRole('button', { name: '연습 닫기', exact: true }).click();
+            const confirmation = page.getByRole('alertdialog', { name: '이번 세션을 종료할까요?', exact: true });
+            await expect(confirmation).toBeVisible();
+            await confirmation.getByRole('button', { name: '연습창 닫기', exact: true }).click();
+            await expect(page.locator('.stage-panel')).toHaveCount(0);
+            const closed = await captureCountCloudLayout(page, testInfo, textScale, 'closed-without-result', errors);
+            expect(closed.storage).toEqual(baseline);
+          }
+        } catch (closeError) {
+          if (!failed) throw closeError;
+          console.log('COUNT_CLOUD_CLOSE_ERROR', String(closeError));
         }
       }
       expect(errors).toEqual([]);

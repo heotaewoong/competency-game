@@ -3736,7 +3736,7 @@ function NumberGame({ onFinish, onClose, config }: GameProps & { config: Practic
 
 const COUNT_BLANK_MS = 350;
 function CountCloud({ word, count, offset }: { word: string; count: number; offset: number }) {
-  return <div className="word-cloud">{Array.from({ length: count }, (_, index) => <span key={index} style={{ left: `${6 + ((index * 37 + offset * 11) % 82)}%`, top: `${7 + ((index * 29 + offset * 17) % 82)}%`, fontSize: `${11 + ((index * 7 + offset) % 5) * 3}px`, fontWeight: 500 + ((index + offset) % 3) * 150 }}>{word}</span>)}</div>;
+  return <div className="word-cloud">{Array.from({ length: count }, (_, index) => <span key={index} style={{ left: `clamp(1em, ${6 + ((index * 37 + offset * 11) % 82)}%, calc(100% - 1em))`, top: `clamp(.75em, ${7 + ((index * 29 + offset * 17) % 82)}%, calc(100% - .75em))`, fontSize: `${11 + ((index * 7 + offset) % 5) * 3}px`, fontWeight: 500 + ((index + offset) % 3) * 150 }}>{word}</span>)}</div>;
 }
 
 function CountGame({ onFinish, onClose, config }: GameProps & { config: PracticeConfig }) {
