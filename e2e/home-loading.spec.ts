@@ -602,6 +602,36 @@ for (const textScale of ['standard', 'large'] as const) {
         }));
       }
       expect(pageOverflow.firstWidth).toBeLessThanOrEqual(width + 1);
+      const recordActions = await page.locator('.game-record-grid > article').evaluateAll((articles) => {
+        const order = document.querySelector<HTMLElement>('.game-order-actions');
+        const groups = articles.map((article) => ({ boundary: article, row: article.querySelector<HTMLElement>('.game-record-actions') }));
+        if (order) groups.push({ boundary: order, row: order });
+        return {
+          count: articles.length,
+          orderCount: order?.querySelectorAll('button').length ?? 0,
+          issues: groups.flatMap(({ boundary, row }) => {
+            const boundaryRect = boundary.getBoundingClientRect();
+            if (!row) return [{ text: '기록 버튼 영역 없음', textRects: 0, clipped: false, textOutside: false, outsideContainer: false, outsideViewport: false, tooSmall: false }];
+            return [row, ...row.querySelectorAll<HTMLElement>('button, span')].flatMap((element) => {
+              const rect = element.getBoundingClientRect();
+              const range = document.createRange();
+              range.selectNodeContents(element);
+              const textRects = [...range.getClientRects()].filter((text) => text.width > 0 && text.height > 0);
+              const textOutside = textRects.some((text) => text.left < rect.left - 1 || text.right > rect.right + 1 || text.top < rect.top - 1 || text.bottom > rect.bottom + 1);
+              const clipped = element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1;
+              const outsideContainer = rect.left < boundaryRect.left - 1 || rect.right > boundaryRect.right + 1;
+              const outsideViewport = rect.left < -1 || rect.right > window.innerWidth + 1;
+              const tooSmall = element.tagName === 'BUTTON' && (rect.width < 44 || rect.height < 44);
+              return textRects.length === 0 || clipped || textOutside || outsideContainer || outsideViewport || tooSmall ? [{
+                text: element.textContent ?? '', textRects: textRects.length, clipped, textOutside, outsideContainer, outsideViewport, tooSmall,
+              }] : [];
+            });
+          }),
+        };
+      });
+      expect(recordActions.count).toBe(9);
+      expect(recordActions.orderCount).toBe(2);
+      expect(recordActions.issues, `${width}px ${textScale}: 기록·정렬 버튼 잘림`).toEqual([]);
       if (width === 385 || width === 621) {
         await page.screenshot({ fullPage: true, path: testInfo.outputPath(`cards-${textScale}-${width}.png`) });
       }
