@@ -1,4 +1,5 @@
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
+import { games } from '../app/lib/game-data';
 
 test('첫 화면은 Tailwind 빌드 컴파일러를 내려받지 않는다', async ({ page }) => {
   const scripts: import('@playwright/test').Response[] = [];
@@ -515,3 +516,2421 @@ test('훈련 묶음은 실제 기록 삭제와 다른 탭의 확정된 세대 �
   }
   expect(errors).toEqual([]);
 });
+
+for (const textScale of ['standard', 'large'] as const) {
+  test(`${textScale} 글자에서 기록이 있는 9개 게임 카드의 내용을 잘라 숨기지 않는다`, async ({ page }, testInfo) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.addInitScript((scale) => {
+      localStorage.setItem('nineflow-accessibility-v1', JSON.stringify({ contrast: 'standard', textScale: scale, motion: 'reduce' }));
+      const generation = 'card-responsive-layout';
+      const results = ['rotation', 'rps', 'appointment', 'path', 'potion', 'nback', 'number', 'count', 'mouse'].map((gameId) => ({
+        id: `responsive-${gameId}`, gameId, completedAt: '2026-10-16T22:00:00.000Z',
+        accuracy: 0, medianRt: 0, stability: 0, errors: 1,
+        detail: { sessionMode: '연습 모드', quantity: 9, paceMs: 4500, practiceFocus: 'full', guidedPacing: '설정 제한시간 적용' },
+      }));
+      localStorage.setItem('nineflow-practice-results-generation-v1', generation);
+      localStorage.setItem(`nineflow-practice-results-v4:${generation}`, JSON.stringify({ version: 4, generation, results }));
+    }, textScale);
+    await page.goto('/');
+    await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+    await expect(page.locator('html')).toHaveAttribute('data-text-scale', textScale);
+    await expect(page.locator('.game-card')).toHaveCount(9);
+    await expect(page.locator('.game-card').filter({ has: page.getByRole('heading', { name: '가위바위보', exact: true }) }).locator('.card-record dd').nth(1)).toHaveText('0%');
+    await page.evaluate(() => document.fonts.ready);
+
+    for (const width of [240, 280, 320, 350, 385, 520, 620, 621, 768, 900, 1024, 1280]) {
+      await page.setViewportSize({ width, height: width === 385 ? 382 : 640 });
+      const issues = await page.locator('.game-card').evaluateAll((cards) => cards.flatMap((card) => {
+        const cardRect = card.getBoundingClientRect();
+        return [...card.querySelectorAll<HTMLElement>('.card-copy h3, .card-copy p, .card-record dt, .card-record dd, .card-action > span, .card-action b')].flatMap((element) => {
+          const rect = element.getBoundingClientRect();
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          const textOutside = [...range.getClientRects()].some((text) =>
+            text.left < rect.left - 1 || text.right > rect.right + 1 ||
+            text.top < rect.top - 1 || text.bottom > rect.bottom + 1);
+          const clipped = element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1;
+          const outsideCard = rect.left < cardRect.left - 1 || rect.right > cardRect.right + 1;
+          return clipped || outsideCard || textOutside ? [{
+            game: card.querySelector('h3')?.textContent,
+            text: element.textContent, clipped, outsideCard, textOutside,
+          }] : [];
+        });
+      }));
+      expect(issues, `${width}px ${textScale}: 카드 내부 잘림`).toEqual([]);
+      const pageOverflow = await page.evaluate((expectedWidth) => {
+        const firstWidth = document.documentElement.scrollWidth;
+        if (firstWidth <= expectedWidth + 1) return { firstWidth };
+        try {
+          const viewport = {
+            innerWidth: window.innerWidth, documentClientWidth: document.documentElement.clientWidth,
+            bodyClientWidth: document.body.clientWidth, bodyScrollWidth: document.body.scrollWidth,
+            visualViewportWidth: window.visualViewport?.width ?? null, fonts: document.fonts.status,
+          };
+          const offenders = [...document.querySelectorAll('*')].flatMap((element) => {
+            const rect = element.getBoundingClientRect();
+            const outsideViewport = rect.left < -1 || rect.right > viewport.innerWidth + 1;
+            const internalOverflow = element.scrollWidth > element.clientWidth + 1;
+            if (!outsideViewport && !internalOverflow) return [];
+            const style = getComputedStyle(element);
+            const clippingParents = [];
+            for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+              const parentStyle = getComputedStyle(parent);
+              if (!['hidden', 'clip', 'auto', 'scroll'].includes(parentStyle.overflowX)) continue;
+              const parentRect = parent.getBoundingClientRect();
+              clippingParents.push({
+                tag: parent.tagName, id: parent.id, className: parent.getAttribute('class'),
+                left: parentRect.left, right: parentRect.right, overflowX: parentStyle.overflowX,
+              });
+            }
+            return [{
+              tag: element.tagName, id: element.id, className: element.getAttribute('class'),
+              text: element.textContent?.trim().slice(0, 160), left: rect.left, right: rect.right,
+              clientWidth: element.clientWidth, scrollWidth: element.scrollWidth,
+              outsideViewport, internalOverflow, position: style.position, overflowX: style.overflowX,
+              visibility: style.visibility, ariaHidden: element.getAttribute('aria-hidden'), clippingParents,
+            }];
+          });
+          return { firstWidth, viewport, offenders, endWidth: document.documentElement.scrollWidth };
+        } catch (error) {
+          return { firstWidth, diagnosticError: String(error) };
+        }
+      }, width);
+      if (pageOverflow.firstWidth > width + 1) {
+        console.log('RESPONSIVE_PAGE_OVERFLOW', JSON.stringify({
+          project: testInfo.project.name, textScale, requestedViewport: page.viewportSize(), ...pageOverflow,
+        }));
+      }
+      expect(pageOverflow.firstWidth).toBeLessThanOrEqual(width + 1);
+      const recordActions = await page.locator('.game-record-grid > article').evaluateAll((articles) => {
+        const order = document.querySelector<HTMLElement>('.game-order-actions');
+        const groups = articles.map((article) => ({ boundary: article, row: article.querySelector<HTMLElement>('.game-record-actions') }));
+        if (order) groups.push({ boundary: order, row: order });
+        return {
+          count: articles.length,
+          orderCount: order?.querySelectorAll('button').length ?? 0,
+          issues: groups.flatMap(({ boundary, row }) => {
+            const boundaryRect = boundary.getBoundingClientRect();
+            if (!row) return [{ text: '기록 버튼 영역 없음', textRects: 0, clipped: false, textOutside: false, outsideContainer: false, outsideViewport: false, tooSmall: false }];
+            return [row, ...row.querySelectorAll<HTMLElement>('button, span')].flatMap((element) => {
+              const rect = element.getBoundingClientRect();
+              const range = document.createRange();
+              range.selectNodeContents(element);
+              const textRects = [...range.getClientRects()].filter((text) => text.width > 0 && text.height > 0);
+              const textOutside = textRects.some((text) => text.left < rect.left - 1 || text.right > rect.right + 1 || text.top < rect.top - 1 || text.bottom > rect.bottom + 1);
+              const clipped = element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1;
+              const outsideContainer = rect.left < boundaryRect.left - 1 || rect.right > boundaryRect.right + 1;
+              const outsideViewport = rect.left < -1 || rect.right > window.innerWidth + 1;
+              const tooSmall = element.tagName === 'BUTTON' && (rect.width < 44 || rect.height < 44);
+              if (textRects.length === 0 || clipped || textOutside || outsideContainer || outsideViewport || tooSmall) {
+                const style = getComputedStyle(element);
+                return [{
+                  text: element.textContent ?? '', textRects: textRects.length, clipped, textOutside, outsideContainer, outsideViewport, tooSmall,
+                  box: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height },
+                  client: { width: element.clientWidth, height: element.clientHeight },
+                  scroll: { width: element.scrollWidth, height: element.scrollHeight },
+                  textBounds: textRects.map((text) => ({ left: text.left, right: text.right, top: text.top, bottom: text.bottom, width: text.width, height: text.height })),
+                  style: {
+                    display: style.display, gridTemplateColumns: style.gridTemplateColumns, font: style.font,
+                    lineHeight: style.lineHeight, padding: style.padding, whiteSpace: style.whiteSpace,
+                    overflowX: style.overflowX, overflowY: style.overflowY,
+                  },
+                }];
+              }
+              return [];
+            });
+          }),
+        };
+      });
+      expect(recordActions.count).toBe(9);
+      expect(recordActions.orderCount).toBe(2);
+      expect(recordActions.issues, `${width}px ${textScale}: 기록·정렬 버튼 잘림`).toEqual([]);
+      if (width === 385 || width === 621) {
+        await page.screenshot({ fullPage: true, path: testInfo.outputPath(`cards-${textScale}-${width}.png`) });
+      }
+    }
+    expect(errors).toEqual([]);
+  });
+}
+
+for (const game of [
+  { id: 'rotation', title: '도형 회전하기', board: '.rotation-comparison', controls: '.rotation-op-grid button, .rotation-submit-row button' },
+  { id: 'potion', title: '마법약 만들기', board: '.potion-workbench', controls: '.potion-actions button' },
+  { id: 'nback', title: '도형 순서 기억하기', board: '.nback-stimulus', controls: '.nback-status button' },
+]) {
+  for (const textScale of ['standard', 'large'] as const) {
+    test(`${game.title}: ${textScale} 글자의 좁은 가로 화면에서도 문제와 조작부가 잘리지 않는다`, async ({ page }, testInfo) => {
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      await page.addInitScript((scale) => {
+        localStorage.setItem('nineflow-accessibility-v1', JSON.stringify({ contrast: 'standard', textScale: scale, motion: 'reduce' }));
+      }, textScale);
+      await page.setViewportSize({ width: 385, height: 382 });
+      await page.goto('/');
+      await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+      await page.getByRole('button', { name: new RegExp(`${game.title}, 난이도 .+, 설정 열기`) }).click();
+      const stage = page.locator(`section[data-game="${game.id}"]`);
+      await stage.locator('.stage-start-practice').click();
+      const workspace = stage.locator('.game-workspace');
+      await expect(workspace).toBeVisible();
+      await expect(page.locator('.game-preparation')).toHaveCount(0);
+      if (game.id === 'nback') await expect(workspace.locator('.nback-countdown')).toHaveCount(0);
+      await expect(workspace.locator(game.board)).toBeVisible();
+
+      for (const viewport of [
+        { width: 385, height: 382 }, { width: 568, height: 320 },
+        { width: 768, height: 360 }, { width: 844, height: 360 }, { width: 320, height: 640 },
+      ]) {
+        await page.setViewportSize(viewport);
+        const issues = await workspace.evaluate((element) => {
+          const bounds = element.getBoundingClientRect();
+          return [...element.querySelectorAll<HTMLElement>('button, h3, p')].filter((item) =>
+            item.getClientRects().length && !item.classList.contains('sr-only') &&
+            getComputedStyle(item).visibility !== 'hidden').flatMap((item) => {
+            const rect = item.getBoundingClientRect();
+            return rect.left < bounds.left - 1 || rect.right > bounds.right + 1 || item.scrollWidth > item.clientWidth + 2
+              ? [{ text: item.textContent, className: item.className, left: rect.left, right: rect.right, bounds: [bounds.left, bounds.right],
+                clientWidth: item.clientWidth, scrollWidth: item.scrollWidth,
+                font: getComputedStyle(item).font, whiteSpace: getComputedStyle(item).whiteSpace }]
+              : [];
+          });
+        });
+        expect(issues, `${game.id} ${viewport.width}×${viewport.height}: 문제·조작부 가로 잘림`).toEqual([]);
+        for (const control of await workspace.locator(game.controls).all()) {
+          await expect(control).toBeVisible();
+          const box = await control.boundingBox();
+          expect(box).not.toBeNull();
+          expect(box!.width).toBeGreaterThanOrEqual(44);
+          expect(box!.height).toBeGreaterThanOrEqual(44);
+          const textLayout = await control.evaluate((button) => {
+            const bounds = button.getBoundingClientRect();
+            const range = document.createRange();
+            range.selectNodeContents(button);
+            const rects = [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0);
+            return {
+              rectCount: rects.length, clientWidth: button.clientWidth, scrollWidth: button.scrollWidth,
+              font: getComputedStyle(button).font,
+              outside: rects.filter((rect) => rect.left < bounds.left - 1 || rect.right > bounds.right + 1 ||
+                rect.top < bounds.top - 1 || rect.bottom > bounds.bottom + 1)
+                .map((rect) => ({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom })),
+            };
+          });
+          expect(textLayout.rectCount).toBeGreaterThan(0);
+          expect(textLayout.outside, `${game.id} ${viewport.width}px: 버튼 내용 ${JSON.stringify(textLayout)}`).toEqual([]);
+          if (await control.isEnabled()) await control.click({ trial: true });
+        }
+        if (viewport.width === 385 || viewport.width === 844) {
+          await stage.screenshot({ path: testInfo.outputPath(`${game.id}-${textScale}-${viewport.width}.png`) });
+        }
+      }
+      expect(errors).toEqual([]);
+    });
+  }
+}
+
+async function captureCountCloudLayout(page: Page, testInfo: TestInfo, textScale: string, phase: string, errors: readonly string[], phaseRoot?: Locator) {
+  const readSnapshot = () => {
+    const epsilon = 1;
+    const box = (rect: DOMRect) => ({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height });
+    const outside = (rect: ReturnType<typeof box>, boundary: ReturnType<typeof box>) => ({
+      x: rect.left < boundary.left - epsilon || rect.right > boundary.right + epsilon,
+      y: rect.top < boundary.top - epsilon || rect.bottom > boundary.bottom + epsilon,
+    });
+    const readText = (element: HTMLElement) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const rects = [...range.getClientRects()].map(box), bounds = box(range.getBoundingClientRect());
+      const style = getComputedStyle(element);
+      return { text: element.textContent?.trim() ?? '', box: box(element.getBoundingClientRect()), range: bounds, rects,
+        nonzero: bounds.width > 0 && bounds.height > 0 && rects.length > 0 && rects.every((rect) => rect.width > 0 && rect.height > 0),
+        fontSize: style.fontSize, lineHeight: style.lineHeight, display: style.display, visibility: style.visibility };
+    };
+    const frame = document.querySelector<HTMLElement>('.game-count');
+    const body = frame?.querySelector<HTMLElement>('.workspace-body');
+    const bodyBox = body ? box(body.getBoundingClientRect()) : null;
+    const board = frame?.querySelector<HTMLElement>('.count-board');
+    const deadline = frame?.querySelector<HTMLElement>('.count-wrap > .time-strip');
+    const deadlineText = deadline?.querySelector<HTMLElement>('.deadline-text');
+    const clouds = [...(frame?.querySelectorAll<HTMLElement>('.word-cloud') ?? [])].map((cloud, side) => {
+      const button = cloud.closest('button');
+      const cloudBox = box(cloud.getBoundingClientRect()), buttonBox = button ? box(button.getBoundingClientRect()) : null;
+      const clippers: {
+        tag: string; className: string; overflowX: string; overflowY: string; afterScrollableY: boolean;
+        box: ReturnType<typeof box>; clipBox: ReturnType<typeof box>;
+        clientWidth: number; scrollWidth: number; clientHeight: number; scrollHeight: number;
+        scrollLeft: number; scrollTop: number;
+      }[] = [];
+      let afterScrollableY = false;
+      for (let node: HTMLElement | null = cloud; node && node !== document.documentElement; node = node.parentElement) {
+        const style = getComputedStyle(node), rect = node.getBoundingClientRect();
+        if (!['hidden', 'clip', 'auto', 'scroll'].includes(style.overflowX) && !['hidden', 'clip', 'auto', 'scroll'].includes(style.overflowY)) continue;
+        clippers.push({
+          tag: node.tagName, className: node.className, overflowX: style.overflowX, overflowY: style.overflowY, afterScrollableY,
+          box: box(rect), clipBox: { left: rect.left + node.clientLeft, right: rect.left + node.clientLeft + node.clientWidth,
+            top: rect.top + node.clientTop, bottom: rect.top + node.clientTop + node.clientHeight,
+            width: node.clientWidth, height: node.clientHeight },
+          clientWidth: node.clientWidth, scrollWidth: node.scrollWidth, clientHeight: node.clientHeight, scrollHeight: node.scrollHeight,
+          scrollLeft: node.scrollLeft, scrollTop: node.scrollTop,
+        });
+        if (['auto', 'scroll'].includes(style.overflowY)) afterScrollableY = true;
+      }
+      const words = [...cloud.querySelectorAll<HTMLElement>('span')].map((word, index) => {
+        const range = document.createRange(), style = getComputedStyle(word);
+        range.selectNodeContents(word);
+        const bounds = box(range.getBoundingClientRect()), rects = [...range.getClientRects()].map(box);
+        const ancestors = clippers.map((clipper, clipperIndex) => {
+          const axes = outside(bounds, clipper.clipBox);
+          return { clipperIndex, axes, afterScrollableY: clipper.afterScrollableY,
+            hardX: ['hidden', 'clip'].includes(clipper.overflowX) && axes.x,
+            hardY: ['hidden', 'clip'].includes(clipper.overflowY) && axes.y && !clipper.afterScrollableY,
+            outerHiddenY: ['hidden', 'clip'].includes(clipper.overflowY) && axes.y && clipper.afterScrollableY,
+            scrollX: ['auto', 'scroll'].includes(clipper.overflowX) && axes.x,
+            scrollY: ['auto', 'scroll'].includes(clipper.overflowY) && axes.y };
+        });
+        return { index, text: word.textContent ?? '', box: box(word.getBoundingClientRect()), range: bounds, rects,
+          nonzero: bounds.width > 0 && bounds.height > 0 && rects.length > 0 && rects.every((rect) => rect.width > 0 && rect.height > 0),
+          font: { size: style.fontSize, family: style.fontFamily, weight: style.fontWeight, lineHeight: style.lineHeight, whiteSpace: style.whiteSpace },
+          left: word.style.left, top: word.style.top,
+          ownCloudOutside: outside(bounds, cloudBox), ownButtonOutside: buttonBox ? outside(bounds, buttonBox) : { x: true, y: true }, ancestors };
+      });
+      return { side: side === 0 ? 'left' : 'right', box: cloudBox,
+        clientWidth: cloud.clientWidth, scrollWidth: cloud.scrollWidth, clientHeight: cloud.clientHeight, scrollHeight: cloud.scrollHeight,
+        label: button?.getAttribute('aria-label'), buttonBox,
+        words, clippers };
+    });
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    const resultsRaw = generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null;
+    const controls = [...(frame?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((button) => ({
+      text: button.textContent, label: button.getAttribute('aria-label'), disabled: button.disabled, box: box(button.getBoundingClientRect()),
+    }));
+    return { capturedAt: new Date().toISOString(), epsilon, phase: frame?.querySelector('.count-wrap')?.className ?? null,
+      progress: frame?.querySelector('.workspace-progress span')?.textContent ?? null,
+      textScale: document.documentElement.dataset.textScale, fonts: document.fonts.status,
+      guidedNote: frame?.querySelector('.guided-pacing-note')?.textContent ?? null,
+      live: [...(frame?.querySelectorAll('[aria-live]') ?? [])].map((node) => node.textContent),
+      viewport: { innerWidth, innerHeight, documentClientWidth: document.documentElement.clientWidth,
+        documentScrollWidth: document.documentElement.scrollWidth, bodyScrollWidth: document.body.scrollWidth, scrollX, scrollY },
+      mediaCount: document.querySelectorAll('audio,video').length, storage: { generation, resultsRaw }, controls, clouds,
+      progressValue: frame?.querySelector('.workspace-progress > i[role="progressbar"]')?.getAttribute('aria-valuenow') ?? null,
+      progressMax: frame?.querySelector('.workspace-progress > i[role="progressbar"]')?.getAttribute('aria-valuemax') ?? null,
+      workspace: frame && body && bodyBox ? {
+        box: box(frame.getBoundingClientRect()),
+        body: { box: bodyBox, clipBox: {
+          left: bodyBox.left + body.clientLeft,
+          right: bodyBox.left + body.clientLeft + body.clientWidth,
+          top: bodyBox.top + body.clientTop,
+          bottom: bodyBox.top + body.clientTop + body.clientHeight,
+          width: body.clientWidth, height: body.clientHeight },
+          clientWidth: body.clientWidth, clientHeight: body.clientHeight, scrollWidth: body.scrollWidth,
+          scrollHeight: body.scrollHeight, scrollTop: body.scrollTop, scrollLeft: body.scrollLeft },
+      } : null,
+      board: board ? { box: box(board.getBoundingClientRect()),
+        buttons: [...board.querySelectorAll<HTMLButtonElement>(':scope > button')].map((button) => ({
+          label: button.getAttribute('aria-label'), disabled: button.disabled, box: box(button.getBoundingClientRect()),
+        })) } : null,
+      statuses: [...(frame?.querySelectorAll<HTMLElement>('.stage-sequence > span') ?? [])].map((element) => ({
+        ...readText(element), active: element.classList.contains('active'),
+      })),
+      answerLabels: [...(frame?.querySelectorAll<HTMLElement>('.count-wrap.phase-answer > .count-board > button > span') ?? [])].map(readText),
+      deadline: deadline ? { box: box(deadline.getBoundingClientRect()), label: deadline.getAttribute('aria-label'),
+        duration: deadline.getAttribute('aria-valuemax'), remaining: deadline.getAttribute('aria-valuenow'),
+        active: deadline.getAttribute('data-deadline-active'), text: deadlineText ? readText(deadlineText) : null } : null };
+  };
+  const snapshot = phaseRoot ? await phaseRoot.evaluate(readSnapshot) : await page.evaluate(readSnapshot);
+  await testInfo.attach('count-cloud-' + textScale + '-' + phase, { body: JSON.stringify(snapshot, null, 2), contentType: 'application/json' });
+  let resultsCount: number | null = null, storageParseError: string | null = null;
+  try { resultsCount = snapshot.storage.resultsRaw === null ? null : JSON.parse(snapshot.storage.resultsRaw).results.length; }
+  catch (error) { storageParseError = String(error); }
+  const issues = snapshot.clouds.flatMap((cloud) => cloud.words.flatMap((word) => [
+    ...(!word.nonzero || word.ownCloudOutside.x || word.ownCloudOutside.y || word.ownButtonOutside.x || word.ownButtonOutside.y
+      ? [{ side: cloud.side, index: word.index, kind: 'word', nonzero: word.nonzero, cloud: word.ownCloudOutside, button: word.ownButtonOutside }] : []),
+    ...word.ancestors.filter((ancestor) => ancestor.hardX || ancestor.hardY || ancestor.scrollX)
+      .map((ancestor) => ({ side: cloud.side, index: word.index, kind: 'ancestor', ...ancestor })),
+  ]));
+  const summary = {
+    scope: 'Count cloud/button XY; clipping-ancestor X; hidden/clip Y before first auto/scroll-Y viewport only. Outer hidden Y is observed, not a shared GameFrame accessibility proof.',
+    project: testInfo.project.name, textScale, phase, viewport: { width: snapshot.viewport.innerWidth, height: snapshot.viewport.innerHeight }, progress: snapshot.progress,
+    clouds: snapshot.clouds.map((cloud) => ({ side: cloud.side, count: cloud.words.length, label: cloud.label,
+      minMargin: cloud.words.length ? {
+        x: Math.min(...cloud.words.map((word) => Math.min(word.range.left - cloud.box.left, cloud.box.right - word.range.right))),
+        y: Math.min(...cloud.words.map((word) => Math.min(word.range.top - cloud.box.top, cloud.box.bottom - word.range.bottom))),
+      } : null,
+      scrollYObservations: cloud.words.flatMap((word) => word.ancestors.filter((ancestor) => ancestor.scrollY)
+        .map((ancestor) => ({ index: word.index, clipperIndex: ancestor.clipperIndex, afterScrollableY: ancestor.afterScrollableY }))),
+      outerHiddenYObservations: cloud.words.flatMap((word) => word.ancestors.filter((ancestor) => ancestor.outerHiddenY)
+        .map((ancestor) => ({ index: word.index, clipperIndex: ancestor.clipperIndex, afterScrollableY: ancestor.afterScrollableY, outerHiddenY: ancestor.outerHiddenY }))),
+    })),
+    documentX: { client: snapshot.viewport.documentClientWidth, document: snapshot.viewport.documentScrollWidth, body: snapshot.viewport.bodyScrollWidth },
+    controlsBelow44: snapshot.controls.filter((control) => control.box.width < 44 || control.box.height < 44).map((control) => control.label ?? control.text),
+    issues, generation: snapshot.storage.generation, resultsCount, storageParseError, errors: [...errors],
+    workspace: snapshot.workspace, board: snapshot.board, statuses: snapshot.statuses,
+    answerLabels: snapshot.answerLabels, deadline: snapshot.deadline,
+    progressValue: snapshot.progressValue, progressMax: snapshot.progressMax,
+  };
+  console.log('COUNT_CLOUD_LAYOUT', JSON.stringify(summary));
+  return snapshot;
+}
+
+for (const viewport of [{ width: 320, height: 568 }, { width: 568, height: 320 }] as const) {
+  for (const textScale of ['standard', 'large'] as const) {
+    test('개수 비교하기: ' + viewport.width + '×' + viewport.height + ' ' + textScale + ' 글자에서 제시 단어 자체와 가로 경계가 잘리지 않는다', async ({ page }, testInfo) => {
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+      await page.addInitScript((scale) => {
+        localStorage.setItem('nineflow-accessibility-v1', JSON.stringify({ contrast: 'standard', textScale: scale, motion: 'reduce' }));
+      }, textScale);
+      await page.setViewportSize(viewport);
+      const panel = page.locator('.stage-panel[data-game="count"]');
+      let failed = false;
+      let baseline: { generation: string | null; resultsRaw: string | null } | null = null;
+      try {
+        await page.goto('/');
+        await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+        await expect(page.locator('html')).toHaveAttribute('data-text-scale', textScale);
+        await page.evaluate(() => document.fonts.ready);
+        await page.getByRole('button', { name: '개수 비교하기, 난이도 하, 설정 열기', exact: true }).click();
+        await expect(panel).toBeVisible();
+        await panel.getByRole('radio', { name: /연습 모드/ }).click();
+        const quantity = panel.locator('output[aria-label="문제 수 현재 값"]');
+        for (let step = 0; step < 9; step += 1) {
+          const value = Number(await quantity.textContent());
+          expect(Number.isInteger(value) && value >= 5 && value <= 50 && value % 5 === 0).toBe(true);
+          if (value === 5) break;
+          await panel.getByRole('button', { name: '문제 수 줄이기', exact: true }).click();
+          await expect(quantity).toHaveText(String(value - 5));
+        }
+        await expect(quantity).toHaveText('5');
+        const pacing = panel.locator('label.accessible-pacing-setting');
+        if (!await pacing.locator('input[type="checkbox"]').isChecked()) await pacing.click();
+        await expect(pacing.locator('input[type="checkbox"]')).toBeChecked();
+        baseline = await page.evaluate(() => {
+          const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+          return { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null };
+        });
+        expect(baseline.generation).not.toBeNull();
+        expect(baseline.resultsRaw).not.toBeNull();
+        expect(JSON.parse(baseline.resultsRaw!).results).toEqual([]);
+        await panel.locator('.stage-start-practice').click();
+        for (let index = 0; index < 5; index += 1) {
+          await expect(panel.locator('.game-count .count-wrap.phase-show')).toBeVisible();
+          await expect(panel.locator('.game-count .workspace-progress span')).toContainText((index + 1) + ' / 5');
+          const raw = await captureCountCloudLayout(page, testInfo, textScale, 'show-' + (index + 1), errors);
+          if ([0, 2, 4].includes(index)) await page.screenshot({ path: testInfo.outputPath('count-cloud-' + textScale + '-show-' + (index + 1) + '.png') });
+          expect(raw.storage).toEqual(baseline);
+          expect(raw.textScale).toBe(textScale);
+          expect(raw.mediaCount).toBe(0);
+          expect(raw.guidedNote).toContain('제시 제한시간 없음');
+          expect(raw.viewport.documentScrollWidth).toBeLessThanOrEqual(raw.viewport.documentClientWidth + 1);
+          expect(raw.viewport.bodyScrollWidth).toBeLessThanOrEqual(raw.viewport.documentClientWidth + 1);
+          expect(raw.clouds).toHaveLength(2);
+          expect(raw.controls.length).toBeGreaterThan(0);
+          for (const control of raw.controls) {
+            expect(control.box.width).toBeGreaterThanOrEqual(44);
+            expect(control.box.height).toBeGreaterThanOrEqual(44);
+          }
+          for (const cloud of raw.clouds) {
+            expect(cloud.words.length).toBeGreaterThan(0);
+            expect(cloud.buttonBox).not.toBeNull();
+            const label = (cloud.side === 'left' ? '왼쪽' : '오른쪽') + ' 자극: ' + cloud.words.map((word) => word.text).join(' ');
+            expect(cloud.label).toBe(label);
+            expect(new Set(cloud.words.map((word) => word.text)).size).toBe(1);
+            for (const word of cloud.words) {
+              expect(word.nonzero).toBe(true);
+              expect(word.ownCloudOutside).toEqual({ x: false, y: false });
+              expect(word.ownButtonOutside).toEqual({ x: false, y: false });
+              expect(word.ancestors.filter((ancestor) => ancestor.hardX || ancestor.hardY)).toEqual([]);
+              expect(word.ancestors.filter((ancestor) => ancestor.scrollX)).toEqual([]);
+              // Outer hidden-Y and scroll-Y crossings remain diagnostic; this is not a shared GameFrame accessibility proof.
+            }
+          }
+          const counts = raw.clouds.map((cloud) => cloud.words.length);
+          expect(counts[0]).not.toBe(counts[1]);
+          expect(raw.clouds[0].words[0].text).not.toBe(raw.clouds[1].words[0].text);
+          if (index === 4) break;
+          await panel.locator('.accessible-next-action').click();
+          await expect(panel.locator('.count-wrap.phase-answer')).toBeVisible();
+          await panel.getByRole('button', { name: counts[0] > counts[1] ? '왼쪽 선택' : '오른쪽 선택', exact: true }).click();
+          // The product's unchanged feedback and blank intervals lead to the next stable guided show.
+        }
+      } catch (error) {
+        failed = true;
+        await page.content().then((body) => testInfo.attach('count-cloud-' + textScale + '-first-failure.html', { body, contentType: 'text/html' }))
+          .catch((captureError) => console.log('COUNT_CLOUD_DOM_CAPTURE_ERROR', String(captureError)));
+        await page.screenshot({ path: testInfo.outputPath('count-cloud-' + textScale + '-first-failure.png') })
+          .catch((captureError) => console.log('COUNT_CLOUD_CAPTURE_ERROR', String(captureError)));
+        throw error;
+      } finally {
+        console.log('COUNT_CLOUD_ERRORS', JSON.stringify({ project: testInfo.project.name, textScale, errors }));
+        try {
+          if (!failed) await expect(panel.locator('.game-count')).toHaveCount(1);
+          if (await panel.locator('.game-count').count()) {
+            await panel.locator('.game-count').getByRole('button', { name: '연습 닫기', exact: true }).click();
+            const confirmation = page.getByRole('alertdialog', { name: '이번 세션을 종료할까요?', exact: true });
+            await expect(confirmation).toBeVisible();
+            await confirmation.getByRole('button', { name: '연습창 닫기', exact: true }).click();
+            await expect(page.locator('.stage-panel')).toHaveCount(0);
+            const closed = await captureCountCloudLayout(page, testInfo, textScale, 'closed-without-result', errors);
+            expect(closed.storage).toEqual(baseline);
+          }
+        } catch (closeError) {
+          if (!failed) throw closeError;
+          console.log('COUNT_CLOUD_CLOSE_ERROR', String(closeError));
+        }
+      }
+      expect(errors).toEqual([]);
+    });
+  }
+}
+
+for (const viewport of [{ width: 320, height: 568 }, { width: 385, height: 640 }, { width: 568, height: 320 }, { width: 768, height: 360 }, { width: 844, height: 320 }] as const) {
+  for (const textScale of ['standard', 'large'] as const) {
+    test('개수 비교하기: ' + viewport.width + '×' + viewport.height + ' ' + textScale + ' 글자의 기본 제한시간 제시와 응답 보드가 스크롤 없이 보인다', async ({ page }, testInfo) => {
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+      await page.addInitScript((scale) => {
+        localStorage.setItem('nineflow-accessibility-v1', JSON.stringify({ contrast: 'standard', textScale: scale, motion: 'reduce' }));
+      }, textScale);
+      await page.setViewportSize(viewport);
+      const panel = page.locator('.stage-panel[data-game="count"]');
+      const firstFrame = panel.locator('.game-count:has(.workspace-progress > i[role="progressbar"][aria-valuenow="1"][aria-valuemax="5"])');
+      let failed = false, closedNormally = false;
+      let baseline: { generation: string | null; resultsRaw: string | null } | null = null;
+      try {
+        await page.goto('/');
+        await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+        await expect(page.locator('html')).toHaveAttribute('data-text-scale', textScale);
+        await page.evaluate(() => document.fonts.ready);
+        await page.getByRole('button', { name: '개수 비교하기, 난이도 하, 설정 열기', exact: true }).click();
+        await expect(panel).toBeVisible();
+        await panel.getByRole('radio', { name: /연습 모드/ }).click();
+        const quantity = panel.locator('output[aria-label="문제 수 현재 값"]');
+        for (let step = 0; step < 9; step += 1) {
+          const value = Number(await quantity.textContent());
+          expect(Number.isInteger(value) && value >= 5 && value <= 50 && value % 5 === 0).toBe(true);
+          if (value === 5) break;
+          await panel.getByRole('button', { name: '문제 수 줄이기', exact: true }).click();
+          await expect(quantity).toHaveText(String(value - 5));
+        }
+        await expect(quantity).toHaveText('5');
+        await expect(panel.locator('output[aria-label="단어 제시 현재 값"]')).toHaveText('1초');
+        const pacing = panel.locator('label.accessible-pacing-setting');
+        if (await pacing.locator('input[type="checkbox"]').isChecked()) await pacing.click();
+        await expect(pacing.locator('input[type="checkbox"]')).not.toBeChecked();
+        baseline = await page.evaluate(() => {
+          const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+          return { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null };
+        });
+        expect(baseline.generation).not.toBeNull();
+        expect(baseline.resultsRaw).not.toBeNull();
+        const initialResults = JSON.parse(baseline.resultsRaw!);
+        expect(initialResults).toMatchObject({ version: 4, generation: baseline.generation });
+        expect(initialResults.results).toEqual([]);
+        await panel.locator('.stage-start-practice').click();
+
+        // One read per natural phase: never retry a snapshot whose recorded phase is already late.
+        const shown = await captureCountCloudLayout(page, testInfo, textScale, 'timed-first-show', errors, firstFrame.locator('.count-wrap.phase-show'));
+        expect(shown.phase).toBe('count-wrap phase-show');
+        expect(shown.progressValue).toBe('1');
+        expect(shown.clouds).toHaveLength(2);
+        const counts = shown.clouds.map((cloud) => cloud.words.length);
+        expect(counts.every((count) => count > 0) && counts[0] !== counts[1]).toBe(true);
+        const answerRoot = firstFrame.locator('.count-wrap.phase-answer');
+        const answered = await captureCountCloudLayout(page, testInfo, textScale, 'timed-first-answer', errors, answerRoot);
+        expect(answered.phase).toBe('count-wrap phase-answer');
+        expect(answered.progressValue).toBe('1');
+        // The first-question guard prevents a late native click from answering question two.
+        await answerRoot.getByRole('button', { name: counts[0] > counts[1] ? '왼쪽 선택' : '오른쪽 선택', exact: true }).click();
+        await expect(panel.locator('.game-count .workspace-progress > i[role="progressbar"]')).toHaveAttribute('aria-valuenow', '2');
+        const next = await captureCountCloudLayout(page, testInfo, textScale, 'timed-next-2-of-5', errors);
+        expect(next.progressValue).toBe('2');
+        await panel.locator('.game-count').getByRole('button', { name: '연습 닫기', exact: true }).click();
+        const confirmation = page.getByRole('alertdialog', { name: '이번 세션을 종료할까요?', exact: true });
+        await expect(confirmation).toBeVisible();
+        await confirmation.getByRole('button', { name: '연습창 닫기', exact: true }).click();
+        await expect(panel).toHaveCount(0);
+        closedNormally = true;
+        const closed = await captureCountCloudLayout(page, testInfo, textScale, 'timed-closed-without-result', errors);
+
+        const outside = (rect: { left: number; right: number; top: number; bottom: number }, boundary: { left: number; right: number; top: number; bottom: number }) => ({
+          x: rect.left < boundary.left - 1 || rect.right > boundary.right + 1,
+          y: rect.top < boundary.top - 1 || rect.bottom > boundary.bottom + 1,
+        });
+        for (const [phase, raw] of [['show', shown], ['answer', answered]] as const) {
+          expect(raw.storage).toEqual(baseline);
+          expect(raw.textScale).toBe(textScale);
+          expect(raw.mediaCount).toBe(0);
+          expect(raw.guidedNote).toBeNull();
+          expect(raw.progressMax).toBe('5');
+          expect(raw.workspace).not.toBeNull();
+          expect(raw.board).not.toBeNull();
+          expect(raw.deadline).not.toBeNull();
+          const workspace = raw.workspace!, board = raw.board!, deadline = raw.deadline!;
+          const visibleViewport = { left: 0, right: raw.viewport.innerWidth, top: 0, bottom: raw.viewport.innerHeight };
+          expect(raw.viewport.innerWidth).toBe(viewport.width);
+          expect(raw.viewport.innerHeight).toBe(viewport.height);
+          expect(raw.viewport.documentScrollWidth).toBeLessThanOrEqual(raw.viewport.documentClientWidth + 1);
+          expect(workspace.body.scrollWidth).toBeLessThanOrEqual(workspace.body.clientWidth + 1);
+          expect(workspace.body.scrollHeight).toBeLessThanOrEqual(workspace.body.clientHeight + 1);
+          expect(outside(board.box, workspace.body.clipBox), phase + ': board/body').toEqual({ x: false, y: false });
+          expect(outside(board.box, workspace.box), phase + ': board/workspace').toEqual({ x: false, y: false });
+          expect(outside(board.box, visibleViewport), phase + ': board/viewport').toEqual({ x: false, y: false });
+          expect(board.buttons).toHaveLength(2);
+          for (const button of board.buttons) {
+            expect(button.box.width).toBeGreaterThanOrEqual(44);
+            expect(button.box.height).toBeGreaterThanOrEqual(44);
+            expect(button.disabled).toBe(phase === 'show');
+            expect(outside(button.box, board.box), phase + ': button/board').toEqual({ x: false, y: false });
+          }
+          for (const control of raw.controls) {
+            expect(control.box.width).toBeGreaterThanOrEqual(44);
+            expect(control.box.height).toBeGreaterThanOrEqual(44);
+          }
+          expect(raw.statuses.map((status) => status.text)).toEqual(['준비', '제시', '응답']);
+          expect(raw.statuses.filter((status) => status.active).map((status) => status.text)).toEqual([phase === 'show' ? '제시' : '응답']);
+          expect(deadline.label).toBe(phase === 'show' ? '단어 제시시간' : '응답 제한시간');
+          expect(deadline.duration).toBe(phase === 'show' ? '1000' : '3000');
+          expect(deadline.active).toBe('true');
+          expect(deadline.text).not.toBeNull();
+          expect(outside(deadline.box, workspace.body.clipBox), phase + ': deadline/body').toEqual({ x: false, y: false });
+          for (const text of [...raw.statuses, deadline.text!, ...raw.answerLabels]) {
+            expect(text.nonzero).toBe(true);
+            expect(text.display).not.toBe('none');
+            expect(text.visibility).not.toBe('hidden');
+            expect(outside(text.range, text.box), phase + ': text/own').toEqual({ x: false, y: false });
+            expect(outside(text.range, workspace.body.clipBox), phase + ': text/body').toEqual({ x: false, y: false });
+            expect(outside(text.range, visibleViewport), phase + ': text/viewport').toEqual({ x: false, y: false });
+          }
+          if (phase === 'show') {
+            expect(raw.clouds).toHaveLength(2);
+            for (const cloud of raw.clouds) {
+              const label = (cloud.side === 'left' ? '왼쪽' : '오른쪽') + ' 자극: ' + cloud.words.map((word) => word.text).join(' ');
+              expect(cloud.label).toBe(label);
+              expect(cloud.words.length).toBeGreaterThan(0);
+              for (const word of cloud.words) {
+                expect(word.nonzero).toBe(true);
+                expect(word.ownCloudOutside).toEqual({ x: false, y: false });
+                expect(word.ownButtonOutside).toEqual({ x: false, y: false });
+                // Timed stimuli must fit every clipping viewport, including outerHiddenY and scrollY.
+                expect(word.ancestors.filter((ancestor) => ancestor.axes.x || ancestor.axes.y)).toEqual([]);
+                expect(outside(word.range, workspace.body.clipBox)).toEqual({ x: false, y: false });
+                expect(outside(word.range, visibleViewport)).toEqual({ x: false, y: false });
+              }
+            }
+            expect(raw.answerLabels).toEqual([]);
+          } else {
+            expect(raw.clouds).toEqual([]);
+            expect(board.buttons.map((button) => button.label)).toEqual(['왼쪽 선택', '오른쪽 선택']);
+            expect(raw.answerLabels.map((label) => label.text)).toEqual(['← 왼쪽', '오른쪽 →']);
+          }
+        }
+        expect(next.storage).toEqual(baseline);
+        expect(next.progressMax).toBe('5');
+        expect(closed.storage).toEqual(baseline);
+        await expect(page.locator('.stage-result')).toHaveCount(0);
+      } catch (error) {
+        failed = true;
+        console.log('COUNT_TIMED_FAILURE_CONTEXT', JSON.stringify({ project: testInfo.project.name, viewport, textScale, closedNormally, error: String(error) }));
+        await page.content().then((body) => testInfo.attach('count-timed-' + textScale + '-first-failure.html', { body, contentType: 'text/html' }))
+          .catch((captureError) => console.log('COUNT_TIMED_DOM_CAPTURE_ERROR', String(captureError)));
+        await page.screenshot({ path: testInfo.outputPath('count-timed-' + textScale + '-first-failure.png') })
+          .catch((captureError) => console.log('COUNT_TIMED_CAPTURE_ERROR', String(captureError)));
+        throw error;
+      } finally {
+        console.log('COUNT_TIMED_ERRORS', JSON.stringify({ project: testInfo.project.name, viewport, textScale, errors }));
+        try {
+          if (!closedNormally) {
+            if (!failed) await expect(panel.locator('.game-count')).toHaveCount(1);
+            const confirmation = page.getByRole('alertdialog', { name: '이번 세션을 종료할까요?', exact: true });
+            if (!await confirmation.count() && await panel.locator('.game-count').count()) {
+              await panel.locator('.game-count').getByRole('button', { name: '연습 닫기', exact: true }).click();
+            }
+            if (await confirmation.count()) await confirmation.getByRole('button', { name: '연습창 닫기', exact: true }).click();
+          }
+        } catch (closeError) {
+          if (!failed) throw closeError;
+          console.log('COUNT_TIMED_CLOSE_ERROR', String(closeError));
+        }
+      }
+      expect(errors).toEqual([]);
+    });
+  }
+}
+
+
+async function captureCommonWorkspaceHeader(page: Page, testInfo: TestInfo, gameId: string, textScale: string) {
+  const raw = await page.locator('.game-workspace.game-' + gameId).evaluate((frame) => {
+    const box = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
+    };
+    const header = frame.querySelector<HTMLElement>('.workspace-head')!;
+    const actions = header.querySelector<HTMLElement>('.workspace-actions')!;
+    const viewport = { left: 0, top: 0, right: document.documentElement.clientWidth, bottom: innerHeight };
+    const outside = (rect: ReturnType<typeof box>, clip: { left: number; right: number; top: number; bottom: number }) => ({
+      x: rect.left < clip.left - 1 || rect.right > clip.right + 1,
+      y: rect.top < clip.top - 1 || rect.bottom > clip.bottom + 1,
+    });
+    const buttons = [...actions.querySelectorAll<HTMLButtonElement>(':scope > button')].map((button) => {
+      const bounds = box(button), style = getComputedStyle(button), pseudo = getComputedStyle(button, '::before');
+      const clippingAncestors = [];
+      for (let ancestor = button.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        const css = getComputedStyle(ancestor), rect = ancestor.getBoundingClientRect();
+        const axes = outside(bounds, { left: rect.left + ancestor.clientLeft, right: rect.left + ancestor.clientLeft + ancestor.clientWidth,
+          top: rect.top + ancestor.clientTop, bottom: rect.top + ancestor.clientTop + ancestor.clientHeight });
+        if ((['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowX) && axes.x) ||
+          (['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowY) && axes.y)) {
+          clippingAncestors.push({ tag: ancestor.tagName, className: ancestor.className, axes,
+            overflowX: css.overflowX, overflowY: css.overflowY, box: box(ancestor),
+            clientWidth: ancestor.clientWidth, clientHeight: ancestor.clientHeight, scrollWidth: ancestor.scrollWidth, scrollHeight: ancestor.scrollHeight });
+        }
+      }
+      return { className: button.className, text: button.textContent?.trim(), label: button.getAttribute('aria-label'), disabled: button.disabled,
+        box: bounds, clientWidth: button.clientWidth, clientHeight: button.clientHeight, scrollWidth: button.scrollWidth, scrollHeight: button.scrollHeight,
+        fontSize: style.fontSize, lineHeight: style.lineHeight, display: style.display, visibility: style.visibility,
+        pseudo: { content: pseudo.content, fontSize: pseudo.fontSize, lineHeight: pseudo.lineHeight, display: pseudo.display, visibility: pseudo.visibility },
+        outsideViewport: outside(bounds, viewport), outsideHeader: outside(bounds, box(header)), outsideActions: outside(bounds, box(actions)), clippingAncestors };
+    });
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    return { capturedAt: new Date().toISOString(), scope: 'Common GameFrame header only; preparation may still be active, not nine active-board coverage.',
+      frameClass: frame.className, preparationVisible: Boolean(frame.querySelector('.game-preparation')), progress: frame.querySelector('.workspace-progress span')?.textContent,
+      textScale: document.documentElement.dataset.textScale, fonts: document.fonts.status,
+      viewport: { width: innerWidth, height: innerHeight, clientWidth: document.documentElement.clientWidth },
+      header: box(header), actions: box(actions), buttons,
+      storage: { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null } };
+  });
+  await testInfo.attach('common-header-' + gameId + '-' + textScale, { body: JSON.stringify(raw), contentType: 'application/json' });
+  console.log('COMMON_HEADER_LAYOUT', JSON.stringify({ project: testInfo.project.name, gameId, textScale, viewport: raw.viewport,
+    preparationVisible: raw.preparationVisible, progress: raw.progress,
+    buttons: raw.buttons.map((button) => ({ label: button.label, width: button.box.width, height: button.box.height, font: button.fontSize,
+      pseudo: button.pseudo, viewport: button.outsideViewport, header: button.outsideHeader, actions: button.outsideActions, clipping: button.clippingAncestors.length })),
+    generation: raw.storage.generation, resultsCount: raw.storage.resultsRaw ? JSON.parse(raw.storage.resultsRaw).results.length : null }));
+  return raw;
+}
+
+async function closeCommonHeaderSession(page: Page, workspace: Locator, withKeyboard: boolean) {
+  const confirmation = page.getByRole('alertdialog', { name: '이번 세션을 종료할까요?', exact: true });
+  if (!await confirmation.count()) {
+    const close = workspace.getByRole('button', { name: '연습 닫기', exact: true });
+    if (withKeyboard) {
+      // Separate protocol reads add observation time; they are not atomic focus events or cause proof.
+      const observeFocus = async (observation: string) => {
+        try {
+          const raw = await page.evaluate(() => {
+            const summarize = (node: Element | null) => node ? { tag: node.tagName, id: node.id, className: node.getAttribute('class'),
+              role: node.getAttribute('role'), label: node.getAttribute('aria-label'), text: (node.textContent ?? '').trim().slice(0, 80) } : null;
+            const inertAncestors = (element: Element | null) => {
+              const ancestors: { tag: string; id: string; className: string | null; inert: boolean; attribute: boolean }[] = [];
+              for (let node = element; node; node = node.parentElement) {
+                const inert = node instanceof HTMLElement && node.inert, attribute = node.hasAttribute('inert');
+                if (inert || attribute) ancestors.push({ tag: node.tagName, id: node.id, className: node.getAttribute('class'), inert, attribute });
+              }
+              return ancestors;
+            };
+            const targets = document.querySelectorAll<HTMLButtonElement>(".stage-panel .game-workspace .workspace-actions > button.session-close");
+            const target = targets.length === 1 ? targets[0] : null, active = document.activeElement;
+            return { capturedAt: new Date().toISOString(), ticks: performance.now(), documentHasFocus: document.hasFocus(), visibilityState: document.visibilityState,
+              viewport: { width: innerWidth, height: innerHeight }, textScale: document.documentElement.dataset.textScale,
+              phase: { preparation: Boolean(document.querySelector('.game-preparation')), result: Boolean(document.querySelector('.stage-result')),
+                progress: document.querySelector('.game-workspace .workspace-progress span')?.textContent ?? null },
+              gameId: target?.closest('[data-game]')?.getAttribute('data-game') ?? null, targetCount: targets.length,
+              target: summarize(target), active: summarize(active), targetIsActive: target ? target === active : null,
+              targetIsConnected: target?.isConnected ?? null, activeIsConnected: active?.isConnected ?? null,
+              inertAncestors: { target: inertAncestors(target), active: inertAncestors(active) } };
+          });
+          console.log('FOCUS_BOUNDARY_DIAGNOSTIC', JSON.stringify({ callsite: 'home-close-before-enter', observation, ...raw }));
+        } catch (diagnosticError) {
+          console.log('FOCUS_BOUNDARY_DIAGNOSTIC_ERROR', JSON.stringify({ callsite: 'home-close-before-enter', observation, error: String(diagnosticError) }));
+        }
+      };
+      try {
+        // Explicit native-control focus checks Enter activation, not the complete Tab order.
+        await close.focus();
+        await observeFocus('after-focus');
+        await expect(close).toBeFocused();
+      } catch (error) {
+        await observeFocus('first-focus-failure');
+        throw error;
+      }
+      await close.press('Enter');
+    } else await close.click();
+  }
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole('button', { name: '연습창 닫기', exact: true }).click();
+  await expect(page.locator('.stage-panel')).toHaveCount(0);
+}
+
+for (const viewport of [{ width: 320, height: 568 }, { width: 568, height: 320 }] as const) {
+  for (const textScale of ['standard', 'large'] as const) {
+    test('공통 게임 헤더: ' + viewport.width + '×' + viewport.height + ' ' + textScale + ' 글자에서 9게임의 축약 이름과 닫기를 유지한다', async ({ page }, testInfo) => {
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+      await page.setViewportSize(viewport);
+      const readStorage = () => page.evaluate(() => {
+        const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+        return { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null };
+      });
+      let failed = false, activeGame: string | null = null;
+      try {
+        await page.goto('/');
+        await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+        await page.getByRole('navigation', { name: '빠른 메뉴', exact: true }).getByRole('button', { name: '준비', exact: true }).click();
+        const readiness = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+        await readiness.getByRole('button', { name: textScale === 'large' ? '큰 글자' : '기본 크기', exact: true }).click();
+        await readiness.getByRole('button', { name: '설정 저장하고 닫기', exact: true }).click();
+        await expect(readiness).toHaveCount(0);
+        await expect(page.locator('html')).toHaveAttribute('data-text-scale', textScale);
+        await page.evaluate(() => document.fonts.ready);
+        const baseline = await readStorage();
+        expect(baseline.generation).not.toBeNull();
+        expect(baseline.resultsRaw).not.toBeNull();
+        expect(JSON.parse(baseline.resultsRaw!).results).toEqual([]);
+        expect(games).toHaveLength(9);
+        expect(new Set(games.map((game) => game.id)).size).toBe(9);
+        const completed: string[] = [];
+        for (const game of games) {
+          activeGame = game.id;
+          await page.getByRole('button', { name: game.title + ', 난이도 ' + game.difficulty + ', 설정 열기', exact: true }).click();
+          const panel = page.locator('.stage-panel[data-game="' + game.id + '"]');
+          await expect(panel).toBeVisible();
+          await panel.getByRole('radio', { name: /연습 모드/ }).click();
+          await panel.locator('.stage-start-practice').click();
+          const workspace = panel.locator('.game-workspace.game-' + game.id);
+          await expect(workspace).toBeVisible();
+          // GamePreparation reuses this exact header, so no artificial three-second wait is needed.
+          const raw = await captureCommonWorkspaceHeader(page, testInfo, game.id, textScale);
+          expect(raw.viewport).toMatchObject(viewport);
+          expect(raw.textScale).toBe(textScale);
+          expect(raw.fonts).toBe('loaded');
+          expect(raw.buttons).toHaveLength(3);
+          expect(raw.storage).toEqual(baseline);
+          const labels = ['게임 바꾸기', '문제 신고', '연습 닫기'];
+          const contents = ['"게임"', '"신고"'];
+          for (let index = 0; index < 3; index += 1) {
+            const button = raw.buttons[index], control = workspace.locator('.workspace-actions > button').nth(index);
+            await expect(control).toHaveAccessibleName(labels[index]);
+            await expect(control).toBeEnabled();
+            expect(button.label).toBe(labels[index]);
+            expect(button.disabled).toBe(false);
+            expect(button.box.width).toBeGreaterThanOrEqual(44);
+            expect(button.box.height).toBeGreaterThanOrEqual(44);
+            expect(button.display).not.toBe('none');
+            expect(button.visibility).toBe('visible');
+            expect(button.outsideViewport).toEqual({ x: false, y: false });
+            expect(button.outsideHeader).toEqual({ x: false, y: false });
+            expect(button.outsideActions).toEqual({ x: false, y: false });
+            expect(button.clippingAncestors).toEqual([]);
+            expect(button.fontSize).toBe(index === 2 ? '20px' : '0px');
+            if (index < 2) {
+              // Generated text has no DOM Range; retain full ARIA and inspect its computed line box.
+              expect(button.text).toBe(labels[index]);
+              expect(button.pseudo.content).toBe(contents[index]);
+              expect(button.pseudo.fontSize).toBe(textScale === 'large' ? '14px' : '9px');
+              expect(button.pseudo.display).not.toBe('none');
+              expect(button.pseudo.visibility).toBe('visible');
+              const lineHeight = Number.parseFloat(button.pseudo.lineHeight);
+              expect(Number.isFinite(lineHeight)).toBe(true);
+              expect(lineHeight).toBeGreaterThan(0);
+              expect(lineHeight).toBeLessThanOrEqual(button.clientHeight);
+            } else expect(button.text).toBe('×');
+          }
+          // Keep the frame open through all assertions; failure evidence is captured before finally closes it.
+          await closeCommonHeaderSession(page, workspace, true);
+          expect(await readStorage()).toEqual(baseline);
+          await expect(page.locator('.stage-result')).toHaveCount(0);
+          completed.push(game.id);
+          activeGame = null;
+        }
+        expect(completed).toEqual(games.map((game) => game.id));
+      } catch (error) {
+        failed = true;
+        console.log('COMMON_HEADER_FAILURE', JSON.stringify({ project: testInfo.project.name, viewport, textScale, activeGame, error: String(error) }));
+        await page.content().then((body) => testInfo.attach('common-header-first-failure.html', { body, contentType: 'text/html' }))
+          .catch((captureError) => console.log('COMMON_HEADER_DOM_CAPTURE_ERROR', String(captureError)));
+        await page.screenshot({ path: testInfo.outputPath('common-header-first-failure.png') })
+          .catch((captureError) => console.log('COMMON_HEADER_CAPTURE_ERROR', String(captureError)));
+        throw error;
+      } finally {
+        console.log('COMMON_HEADER_ERRORS', JSON.stringify({ project: testInfo.project.name, viewport, textScale, activeGame, errors }));
+        try {
+          if (activeGame) {
+            const workspace = page.locator('.game-workspace.game-' + activeGame);
+            if (await workspace.count()) await closeCommonHeaderSession(page, workspace, false);
+          }
+        } catch (closeError) {
+          if (!failed) throw closeError;
+          console.log('COMMON_HEADER_CLOSE_ERROR', String(closeError));
+        }
+      }
+      expect(errors).toEqual([]);
+    });
+  }
+}
+
+async function captureNumberRpsFirstBoard(firstFrame: Locator, gameId: 'number' | 'rps') {
+  return firstFrame.evaluate((frame, id) => {
+    const box = (rect: DOMRect) => ({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height });
+    type Bounds = ReturnType<typeof box>;
+    const outside = (rect: Bounds, boundary: Pick<Bounds, 'left' | 'right' | 'top' | 'bottom'>) => ({
+      x: rect.left < boundary.left - 1 || rect.right > boundary.right + 1,
+      y: rect.top < boundary.top - 1 || rect.bottom > boundary.bottom + 1,
+    });
+    const body = frame.querySelector<HTMLElement>('.workspace-body')!;
+    const bodyBox = box(body.getBoundingClientRect());
+    const viewport = { left: 0, right: document.documentElement.clientWidth, top: 0, bottom: innerHeight };
+    const geometry = (element: HTMLElement, withText: boolean) => {
+      const bounds = box(element.getBoundingClientRect()), style = getComputedStyle(element);
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const textRects = withText ? [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0).map(box) : [];
+      type Clip = { tag: string; className: string; overflowX: string; overflowY: string; clipBox: Bounds;
+        clientWidth: number; clientHeight: number; scrollWidth: number; scrollHeight: number; scrollLeft: number; scrollTop: number;
+        elementOutside: { x: boolean; y: boolean }; textOutside: { x: boolean; y: boolean } };
+      const clippingAncestors: Clip[] = [];
+      for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        const css = getComputedStyle(ancestor);
+        const clipsX = ['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowX);
+        const clipsY = ['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowY);
+        if (!clipsX && !clipsY) continue;
+        const rect = ancestor.getBoundingClientRect();
+        const clipBox = { left: rect.left + ancestor.clientLeft, right: rect.left + ancestor.clientLeft + ancestor.clientWidth,
+          top: rect.top + ancestor.clientTop, bottom: rect.top + ancestor.clientTop + ancestor.clientHeight,
+          width: ancestor.clientWidth, height: ancestor.clientHeight };
+        const elementAxes = outside(bounds, clipBox), textAxes = textRects.map((text) => outside(text, clipBox));
+        clippingAncestors.push({ tag: ancestor.tagName, className: ancestor.className, overflowX: css.overflowX, overflowY: css.overflowY, clipBox,
+          clientWidth: ancestor.clientWidth, clientHeight: ancestor.clientHeight, scrollWidth: ancestor.scrollWidth, scrollHeight: ancestor.scrollHeight,
+          scrollLeft: ancestor.scrollLeft, scrollTop: ancestor.scrollTop,
+          elementOutside: { x: clipsX && elementAxes.x, y: clipsY && elementAxes.y },
+          textOutside: { x: clipsX && textAxes.some((axes) => axes.x), y: clipsY && textAxes.some((axes) => axes.y) } });
+      }
+      const button = element.closest('button');
+      const buttonBox = button ? box(button.getBoundingClientRect()) : null;
+      const hit = document.elementFromPoint((bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+      return { tag: element.tagName, className: element.className, text: element.textContent?.trim() ?? '', box: bounds,
+        font: style.font, lineHeight: style.lineHeight, display: style.display, visibility: style.visibility,
+        clientWidth: element.clientWidth, clientHeight: element.clientHeight, scrollWidth: element.scrollWidth, scrollHeight: element.scrollHeight,
+        textRects, textOutsideSelf: textRects.some((text) => { const axes = outside(text, bounds); return axes.x || axes.y; }),
+        textOutsideButton: buttonBox ? textRects.some((text) => { const axes = outside(text, buttonBox); return axes.x || axes.y; }) : false,
+        outsideBody: outside(bounds, bodyBox), outsideViewport: outside(bounds, viewport), clippingAncestors,
+        centerHit: Boolean(hit && (hit === element || element.contains(hit))), focused: document.activeElement === element };
+    };
+    const board = frame.querySelector<HTMLElement>(id === 'number' ? '.number-board-pro' : '.rps-board')!;
+    const buttons = [...frame.querySelectorAll<HTMLButtonElement>(id === 'number' ? '.number-board-pro > button' : '.rps-actions > button')];
+    const responseButtons = buttons.map((button) => ({ ...geometry(button, id === 'number'), disabled: button.disabled,
+      label: button.getAttribute('aria-label'), current: button.getAttribute('aria-current'), target: button.classList.contains('target'),
+      labels: (id === 'number' ? [button] : [...button.querySelectorAll<HTMLElement>(':scope > span, :scope > b')])
+        .map((label) => geometry(label, true)) }));
+    const labelSelector = id === 'number'
+      ? '.number-round-banner > span, .number-round-banner > b, .number-round-banner > em, .number-rule > span, .number-rule > em'
+      : '.round-label > span, .round-label > b, .rps-board article > span, .rps-board > div > b, .rps-question';
+    // The RPS relationship subtitle is intentionally display:none at these widths; real board names and choice labels remain required.
+    const labels = [...frame.querySelectorAll<HTMLElement>(labelSelector)].map((label) => geometry(label, true));
+    const deadline = frame.querySelector<HTMLElement>('.time-strip')!;
+    const progress = frame.querySelector<HTMLElement>('.workspace-progress > i[role="progressbar"]')!;
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    const active = document.activeElement;
+    return { capturedAt: new Date().toISOString(), gameId: id, mode: frame.getAttribute('data-mode'), preparationCount: frame.querySelectorAll('.game-preparation').length,
+      resultCount: document.querySelectorAll('.stage-result').length, guidedCount: frame.querySelectorAll('.guided-pacing-note').length,
+      progress: { current: progress.getAttribute('aria-valuenow'), total: progress.getAttribute('aria-valuemax'),
+        text: frame.querySelector('.workspace-progress span')?.textContent ?? null },
+      number: { banner: frame.querySelector('.number-round-banner')?.getAttribute('aria-label') ?? null,
+        round: frame.querySelector('.number-round-banner > span')?.textContent ?? null, counter: frame.querySelector('.number-rule > em')?.textContent ?? null },
+      rps: { round: frame.querySelector('.round-label > span')?.textContent ?? null, phase: frame.querySelector('.round-label > b')?.textContent ?? null,
+        questions: frame.querySelectorAll('.rps-question').length,
+        images: [...board.querySelectorAll<HTMLImageElement>('img')].map((image) => ({ ...geometry(image, false),
+          alt: image.alt, complete: image.complete, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight })) },
+      deadline: { ...geometry(deadline, false), duration: deadline.getAttribute('aria-valuemax'), remaining: deadline.getAttribute('aria-valuenow'),
+        active: deadline.getAttribute('data-deadline-active'), label: deadline.getAttribute('aria-label'),
+        visibleText: geometry(deadline.querySelector<HTMLElement>('.deadline-text')!, true) },
+      feedback: frame.querySelector('.workspace-foot > b')?.textContent ?? null,
+      live: [...frame.querySelectorAll('[aria-live]')].map((node) => node.textContent),
+      viewport: { width: innerWidth, height: innerHeight, clientWidth: document.documentElement.clientWidth,
+        documentWidth: document.documentElement.scrollWidth, bodyWidth: document.body.scrollWidth, scrollX, scrollY },
+      body: { box: bodyBox, clientWidth: body.clientWidth, clientHeight: body.clientHeight, scrollWidth: body.scrollWidth,
+        scrollHeight: body.scrollHeight, scrollLeft: body.scrollLeft, scrollTop: body.scrollTop },
+      board: geometry(board, false), responseButtons, labels,
+      focus: { tag: active?.tagName ?? null, className: active?.getAttribute('class') ?? null, label: active?.getAttribute('aria-label') ?? null,
+        text: active?.textContent?.trim().slice(0, 100) ?? null },
+      textScale: document.documentElement.dataset.textScale, fonts: document.fonts.status, mediaCount: document.querySelectorAll('audio,video').length,
+      storage: { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null } };
+  }, gameId);
+}
+
+for (const game of [{ id: 'number', title: '숫자 누르기', quantity: '10', pace: '20초', total: '5', duration: '20000', responses: 9 },
+  { id: 'rps', title: '가위바위보', quantity: '15', pace: '4.5초', total: '15', duration: '4500', responses: 3 }] as const) {
+  for (const viewport of [{ width: 320, height: 568 }, { width: 568, height: 320 }] as const) {
+    for (const textScale of ['standard', 'large'] as const) {
+      test(game.title + ': ' + viewport.width + '×' + viewport.height + ' ' + textScale + ' 글자에서 첫 실제 보드와 응답 이름표를 자르지 않는다', async ({ page }, testInfo) => {
+        const errors: string[] = [];
+        page.on('pageerror', (error) => errors.push(error.message));
+        page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+        await page.setViewportSize(viewport);
+        const readStorage = () => page.evaluate(() => {
+          const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+          return { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null };
+        });
+        const panel = page.locator('.stage-panel[data-game="' + game.id + '"]');
+        // Closing must not depend on progress=1: the unchanged RPS timer may advance while the first PNG is written.
+        const workspace = panel.locator('.game-workspace.game-' + game.id);
+        let failed = false, closedNormally = false;
+        try {
+          await page.goto('/');
+          await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+          await page.getByRole('navigation', { name: '빠른 메뉴', exact: true }).getByRole('button', { name: '준비', exact: true }).click();
+          const readiness = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+          await readiness.getByRole('button', { name: textScale === 'large' ? '큰 글자' : '기본 크기', exact: true }).click();
+          await readiness.getByRole('button', { name: '설정 저장하고 닫기', exact: true }).click();
+          await expect(readiness).toHaveCount(0);
+          await expect(page.locator('html')).toHaveAttribute('data-text-scale', textScale);
+          await page.evaluate(() => document.fonts.ready);
+          await page.getByRole('button', { name: game.title + ', 난이도 하, 설정 열기', exact: true }).click();
+          await expect(panel).toBeVisible();
+          await panel.getByRole('radio', { name: /연습 모드/ }).click();
+          await expect(panel.locator('output[aria-label="문제 수 현재 값"]')).toHaveText(game.quantity);
+          await expect(panel.locator('output[aria-label="문제 제한 현재 값"]')).toHaveText(game.pace);
+          const pacing = panel.locator('label.accessible-pacing-setting');
+          if (await pacing.locator('input[type="checkbox"]').isChecked()) await pacing.click();
+          await expect(pacing.locator('input[type="checkbox"]')).not.toBeChecked();
+          const baseline = await readStorage();
+          expect(baseline.generation).not.toBeNull();
+          expect(baseline.resultsRaw).not.toBeNull();
+          expect(JSON.parse(baseline.resultsRaw!).results).toEqual([]);
+          await panel.locator('.stage-start-practice').click();
+          const boardSelector = game.id === 'number' ? '.number-board-pro' : '.rps-board';
+          const firstFrame = panel.locator('.game-workspace.game-' + game.id + '[data-mode="practice"]:has(.workspace-progress > i[role="progressbar"][aria-valuenow="1"][aria-valuemax="' + game.total + '"]):has(' + boardSelector + ')');
+          // Exactly one synchronous first-board read; natural preparation and the default deadline are not replaced.
+          const raw = await captureNumberRpsFirstBoard(firstFrame, game.id);
+          await testInfo.attach('number-rps-first-board.json', { body: JSON.stringify({ project: testInfo.project.name, requestedViewport: viewport, requestedTextScale: textScale, errorsAtCapture: [...errors], ...raw }, null, 2), contentType: 'application/json' });
+          console.log('NUMBER_RPS_FIRST_BOARD', JSON.stringify({ project: testInfo.project.name, gameId: game.id, viewport, textScale,
+            capturedAt: raw.capturedAt, progress: raw.progress, number: raw.number, rps: { round: raw.rps.round, phase: raw.rps.phase },
+            deadline: { active: raw.deadline.active, remaining: raw.deadline.remaining, duration: raw.deadline.duration },
+            body: raw.body, generation: raw.storage.generation, nativeGameAnswers: 0 }));
+          expect(raw.progress).toMatchObject({ current: '1', total: game.total });
+          expect(raw.preparationCount).toBe(0);
+          expect(raw.responseButtons).toHaveLength(game.responses);
+          expect(raw.responseButtons.every((button) => !button.disabled)).toBe(true);
+          expect(raw.deadline.active).toBe('true');
+          expect(raw.deadline.duration).toBe(game.duration);
+          expect(Number(raw.deadline.remaining)).toBeGreaterThan(0);
+          if (game.id === 'number') {
+            expect(raw.number.round).toBe('ROUND 1 / 2');
+            expect(raw.number.counter).toBe('입력 0 / 1');
+            expect(raw.responseButtons.filter((button) => button.target)).toHaveLength(1);
+            expect(raw.responseButtons.filter((button) => button.current === 'step')).toHaveLength(1);
+          } else {
+            expect(raw.rps.round).toBe('라운드 1 / 3');
+            expect(raw.rps.phase).toBe('내 패 찾기');
+            expect(raw.rps.questions).toBe(1);
+            expect(raw.rps.images).toHaveLength(1);
+            expect(raw.rps.images[0].complete).toBe(true);
+            expect(raw.rps.images[0].naturalWidth).toBeGreaterThan(0);
+          }
+          await page.screenshot({ path: testInfo.outputPath('number-rps-first-board.png') });
+          const afterPNG = await workspace.evaluate((frame) => ({ capturedAt: new Date().toISOString(),
+            progress: frame.querySelector('.workspace-progress > i[role="progressbar"]')?.getAttribute('aria-valuenow'),
+            total: frame.querySelector('.workspace-progress > i[role="progressbar"]')?.getAttribute('aria-valuemax'),
+            numberRound: frame.querySelector('.number-round-banner')?.getAttribute('aria-label') ?? null,
+            rpsRound: frame.querySelector('.round-label > span')?.textContent ?? null,
+            rpsPhase: frame.querySelector('.round-label > b')?.textContent ?? null,
+            deadlineActive: frame.querySelector('.time-strip')?.getAttribute('data-deadline-active') ?? null,
+            numberCounter: frame.querySelector('.number-rule > em')?.textContent ?? null,
+            feedback: frame.querySelector('.workspace-foot > b')?.textContent ?? null,
+            disabled: [...frame.querySelectorAll<HTMLButtonElement>('.number-board-pro > button, .rps-actions > button')].map((button) => button.disabled) }));
+          await testInfo.attach('number-rps-after-first-png.json', { body: JSON.stringify(afterPNG), contentType: 'application/json' });
+          console.log('NUMBER_RPS_FIRST_PNG_PROVENANCE', JSON.stringify({ project: testInfo.project.name, gameId: game.id, viewport, textScale,
+            first: { capturedAt: raw.capturedAt, progress: raw.progress, number: raw.number, rpsRound: raw.rps.round, rpsPhase: raw.rps.phase },
+            afterPNG, sameActiveFirstBoardAfterPNG: afterPNG.progress === '1' && afterPNG.total === game.total && afterPNG.deadlineActive === 'true'
+              && afterPNG.numberCounter === raw.number.counter && afterPNG.rpsRound === raw.rps.round && afterPNG.rpsPhase === raw.rps.phase
+              && afterPNG.disabled.length === game.responses && afterPNG.disabled.every((disabled) => !disabled) }));
+          await closeCommonHeaderSession(page, workspace, false);
+          closedNormally = true;
+          expect(await readStorage()).toEqual(baseline);
+          await expect(page.locator('.stage-result')).toHaveCount(0);
+          expect(raw.storage).toEqual(baseline);
+          expect(raw.mode).toBe('practice');
+          expect(raw.resultCount).toBe(0);
+          expect(raw.guidedCount).toBe(0);
+          expect(raw.textScale).toBe(textScale);
+          expect(raw.fonts).toBe('loaded');
+          expect(raw.mediaCount).toBe(0);
+          expect(raw.viewport).toMatchObject(viewport);
+          expect(raw.viewport.documentWidth).toBeLessThanOrEqual(raw.viewport.clientWidth + 1);
+          expect(raw.viewport.bodyWidth).toBeLessThanOrEqual(raw.viewport.clientWidth + 1);
+          expect(raw.body.scrollLeft).toBe(0);
+          expect(raw.feedback?.trim() ?? '').toBe('');
+          const elements = [raw.board, raw.deadline, raw.deadline.visibleText, ...raw.labels, ...raw.responseButtons,
+            ...raw.responseButtons.flatMap((button) => button.labels), ...raw.rps.images];
+          for (const element of elements) {
+            expect(element.box.width, element.text).toBeGreaterThan(0);
+            expect(element.box.height, element.text).toBeGreaterThan(0);
+            expect(element.display, element.text).not.toBe('none');
+            expect(element.visibility, element.text).toBe('visible');
+            expect(element.outsideBody, element.text).toEqual({ x: false, y: false });
+            expect(element.outsideViewport, element.text).toEqual({ x: false, y: false });
+            expect(element.clippingAncestors.filter((clip) => clip.elementOutside.x || clip.elementOutside.y || clip.textOutside.x || clip.textOutside.y), element.text).toEqual([]);
+          }
+          for (const label of [raw.deadline.visibleText, ...raw.labels, ...raw.responseButtons.flatMap((button) => button.labels)]) {
+            expect(label.text.length).toBeGreaterThan(0);
+            expect(label.textRects.length, label.text).toBeGreaterThan(0);
+            expect(label.textOutsideSelf, label.text).toBe(false);
+            expect(label.textOutsideButton, label.text).toBe(false);
+          }
+          for (const button of raw.responseButtons) {
+            expect(button.box.width).toBeGreaterThanOrEqual(44);
+            expect(button.box.height).toBeGreaterThanOrEqual(44);
+            expect(button.centerHit, button.text).toBe(true);
+            expect(button.labels).toHaveLength(game.id === 'number' ? 1 : 2);
+          }
+          if (game.id === 'number') {
+            expect(raw.responseButtons.map((button) => Number(button.text)).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+            const target = raw.responseButtons.find((button) => button.target)!;
+            expect(target.current).toBe('step');
+            expect(target.label).toBe(target.text + ', 현재 목표');
+            expect(raw.number.banner).toBe('1라운드 점등 숫자, 5문제 중 1번째');
+          } else {
+            expect(raw.responseButtons.map((button) => button.labels.map((label) => label.text))).toEqual([['←', '가위'], ['↓', '바위'], ['→', '보']]);
+            expect(['가위', '바위', '보']).toContain(raw.rps.images[0].alt);
+          }
+        } catch (error) {
+          failed = true;
+          console.log('NUMBER_RPS_FIRST_BOARD_FAILURE', JSON.stringify({ project: testInfo.project.name, gameId: game.id, viewport, textScale, closedNormally, error: String(error) }));
+          // Geometry checks use the preserved first raw after closing; this failure PNG can be HOME, unlike the first-board PNG.
+          await page.content().then((body) => testInfo.attach('number-rps-first-failure.html', { body, contentType: 'text/html' }))
+            .catch((captureError) => console.log('NUMBER_RPS_DOM_CAPTURE_ERROR', String(captureError)));
+          await page.screenshot({ path: testInfo.outputPath('number-rps-first-failure.png') })
+            .catch((captureError) => console.log('NUMBER_RPS_CAPTURE_ERROR', String(captureError)));
+          throw error;
+        } finally {
+          console.log('NUMBER_RPS_FIRST_BOARD_ERRORS', JSON.stringify({ project: testInfo.project.name, gameId: game.id, viewport, textScale, errors }));
+          try {
+            if (!closedNormally && await workspace.count()) await closeCommonHeaderSession(page, workspace, false);
+          } catch (closeError) {
+            if (!failed) throw closeError;
+            console.log('NUMBER_RPS_CLOSE_ERROR', String(closeError));
+          }
+        }
+        expect(errors).toEqual([]);
+      });
+    }
+  }
+}
+
+async function capturePathInitialVisibility(page: Page, testInfo: TestInfo, phase: string) {
+  const raw = await page.locator('.game-workspace.game-path').evaluate((frame) => {
+    const box = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
+    };
+    const outside = (rect: ReturnType<typeof box>, clip: { left: number; right: number; top: number; bottom: number }) => ({
+      x: rect.left < clip.left - 1 || rect.right > clip.right + 1,
+      y: rect.top < clip.top - 1 || rect.bottom > clip.bottom + 1,
+    });
+    const body = frame.querySelector<HTMLElement>('.workspace-body')!;
+    const shell = body.querySelector<HTMLElement>('.path-shell')!;
+    const grid = shell.querySelector<HTMLElement>('.path-grid')!;
+    const panel = frame.closest<HTMLElement>('.stage-panel')!;
+    const backdrop = panel.closest<HTMLElement>('.stage-backdrop')!;
+    const bodyBox = box(body), shellBox = box(shell), gridBox = box(grid);
+    const port = { left: bodyBox.left + body.clientLeft, right: bodyBox.left + body.clientLeft + body.clientWidth,
+      top: bodyBox.top + body.clientTop, bottom: bodyBox.top + body.clientTop + body.clientHeight };
+    const viewport = { left: 0, right: document.documentElement.clientWidth, top: 0, bottom: innerHeight };
+    const visiblePort = { left: Math.max(port.left, viewport.left), right: Math.min(port.right, viewport.right),
+      top: Math.max(port.top, viewport.top), bottom: Math.min(port.bottom, viewport.bottom) };
+    for (let ancestor = body.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      const style = getComputedStyle(ancestor), bounds = ancestor.getBoundingClientRect();
+      if (['hidden', 'clip', 'auto', 'scroll'].includes(style.overflowX)) {
+        visiblePort.left = Math.max(visiblePort.left, bounds.left + ancestor.clientLeft);
+        visiblePort.right = Math.min(visiblePort.right, bounds.left + ancestor.clientLeft + ancestor.clientWidth);
+      }
+      if (['hidden', 'clip', 'auto', 'scroll'].includes(style.overflowY)) {
+        visiblePort.top = Math.max(visiblePort.top, bounds.top + ancestor.clientTop);
+        visiblePort.bottom = Math.min(visiblePort.bottom, bounds.top + ancestor.clientTop + ancestor.clientHeight);
+      }
+      // The fixed backdrop uses the viewport, not the locked background body's shifted box.
+      if (ancestor === backdrop) break;
+    }
+    const deadline = frame.querySelector<HTMLElement>('.workspace-body > .time-strip');
+    const deadlineStyle = deadline ? getComputedStyle(deadline) : null;
+    const deadlineState = deadline && deadlineStyle ? { box: box(deadline), position: deadlineStyle.position, top: deadlineStyle.top,
+      marginBottom: deadlineStyle.marginBottom, display: deadlineStyle.display, visibility: deadlineStyle.visibility } : null;
+    const usablePort = { ...visiblePort };
+    if (deadlineState?.position === 'sticky' && deadlineState.box.height > 0 && deadlineState.box.top < visiblePort.bottom &&
+      deadlineState.box.bottom > visiblePort.top) {
+      usablePort.top = Math.max(usablePort.top, deadlineState.box.bottom + Math.max(0, Number.parseFloat(deadlineState.marginBottom) || 0));
+    }
+    const inspect = (element: HTMLElement) => {
+      const bounds = box(element), style = getComputedStyle(element);
+      const hit = document.elementFromPoint((bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+      return { box: bounds, outsideUsablePort: outside(bounds, usablePort), outsideViewport: outside(bounds, viewport),
+        centerHit: Boolean(hit && (element === hit || element.contains(hit))),
+        hit: hit ? { tag: hit.tagName, className: hit.className } : null,
+        fontSize: style.fontSize, display: style.display, visibility: style.visibility };
+    };
+    const cells = [...grid.querySelectorAll<HTMLElement>('.path-cell')].map((cell, index) => {
+      const cellBox = box(cell);
+      const controls = [...cell.querySelectorAll<HTMLButtonElement>('button')].filter((button) => button.getClientRects().length && getComputedStyle(button).display !== 'none').map((button) => {
+        const geometry = inspect(button), range = document.createRange();
+        range.selectNodeContents(button);
+        const textRects = [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0)
+          .map((rect) => ({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height }));
+        const clippingAncestors = [];
+        for (let ancestor = button.parentElement; ancestor; ancestor = ancestor.parentElement) {
+          const css = getComputedStyle(ancestor), bounds = ancestor.getBoundingClientRect();
+          const axes = outside(geometry.box, { left: bounds.left + ancestor.clientLeft, right: bounds.left + ancestor.clientLeft + ancestor.clientWidth,
+            top: bounds.top + ancestor.clientTop, bottom: bounds.top + ancestor.clientTop + ancestor.clientHeight });
+          const clipsX = ['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowX);
+          const clipsY = ['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowY);
+          if ((clipsX && axes.x) || (clipsY && axes.y)) clippingAncestors.push({ className: ancestor.className,
+            beforeBody: ancestor !== body && body.contains(ancestor), axes,
+            clipsX, clipsY, overflowX: css.overflowX, overflowY: css.overflowY, box: box(ancestor),
+            clientWidth: ancestor.clientWidth, clientHeight: ancestor.clientHeight, scrollTop: ancestor.scrollTop, scrollHeight: ancestor.scrollHeight });
+          if (ancestor === backdrop) break;
+        }
+        return { ...geometry, label: button.getAttribute('aria-label'), cycleCell: button.getAttribute('data-cycle-cell'), focused: document.activeElement === button,
+          outsideCell: outside(geometry.box, cellBox), outsideGrid: outside(geometry.box, gridBox), textRects,
+          textOutsideButton: textRects.filter((rect) => { const axes = outside(rect, geometry.box); return axes.x || axes.y; }), clippingAncestors };
+      });
+      return { index, fence: cell.getAttribute('data-fence'), box: cellBox, outsideGrid: outside(cellBox, gridBox), controls };
+    });
+    const markers = [...shell.querySelectorAll<HTMLElement>('.edge-marker > span')].map((marker) => ({
+      ...inspect(marker), text: marker.textContent, parts: [marker, ...marker.querySelectorAll<HTMLElement>('*')].map((part) => ({
+        box: box(part), outsideUsablePort: outside(box(part), usablePort), outsideViewport: outside(box(part), viewport),
+      })),
+    }));
+    const scrollAncestors = [];
+    for (let ancestor = body.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      scrollAncestors.push({ tag: ancestor.tagName, className: ancestor.className, left: ancestor.scrollLeft, top: ancestor.scrollTop });
+      if (ancestor === backdrop) break;
+    }
+    const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    return { capturedAt: new Date().toISOString(), scope: 'Path initial visibility in the sticky-deadline-excluded usable area and native recovery; not simultaneous fit of every control or resize recovery.',
+      viewport: { width: innerWidth, height: innerHeight }, textScale: document.documentElement.dataset.textScale, fonts: document.fonts.status,
+      preparation: Boolean(frame.querySelector('.game-preparation')), progress: frame.querySelector('.workspace-progress span')?.textContent,
+      actions: frame.querySelector('.path-toolbar > span b')?.textContent, cells, markers, shell: shellBox, grid: gridBox,
+      shellOutsideUsablePort: outside(shellBox, usablePort), body: { box: bodyBox, port, visiblePort, usablePort, clientWidth: body.clientWidth, clientHeight: body.clientHeight,
+        scrollTop: body.scrollTop, scrollLeft: body.scrollLeft, scrollHeight: body.scrollHeight },
+      fits: shellBox.width <= usablePort.right - usablePort.left + 1 && shellBox.height <= usablePort.bottom - usablePort.top + 1,
+      deadline: deadlineState,
+      active: active ? { label: active.getAttribute('aria-label') ?? active.textContent?.trim(), cycleCell: active.getAttribute('data-cycle-cell'), ...inspect(active) } : null,
+      external: { windowX: scrollX, windowY: scrollY, rootTop: document.documentElement.scrollTop, rootLeft: document.documentElement.scrollLeft,
+        panelTop: panel.scrollTop, panelLeft: panel.scrollLeft, backdropTop: backdrop.scrollTop, backdropLeft: backdrop.scrollLeft,
+        frameTop: (frame as HTMLElement).scrollTop, frameLeft: (frame as HTMLElement).scrollLeft, fixedTop: document.body.style.top, fixedLeft: document.body.style.left,
+        ancestors: scrollAncestors },
+      storage: { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null } };
+  });
+  await testInfo.attach('path-initial-' + phase, { body: JSON.stringify(raw), contentType: 'application/json' });
+  console.log('PATH_INITIAL_VISIBILITY', JSON.stringify({ project: testInfo.project.name, phase, viewport: raw.viewport, textScale: raw.textScale,
+    progress: raw.progress, actions: raw.actions, fits: raw.fits, shell: raw.shell, body: raw.body, deadline: raw.deadline, active: raw.active,
+    external: raw.external, cells: raw.cells.length, ownIssues: raw.cells.flatMap((cell) => cell.controls.filter((control) =>
+      control.box.width < 44 || control.box.height < 44 || control.outsideCell.x || control.outsideCell.y || control.outsideGrid.x || control.outsideGrid.y ||
+      control.textOutsideButton.length || control.clippingAncestors.some((ancestor) => ancestor.clipsX && ancestor.axes.x) ||
+      control.clippingAncestors.some((ancestor) => ancestor.beforeBody && ['hidden', 'clip'].includes(ancestor.overflowY) && ancestor.axes.y)).map((control) => ({ index: cell.index, box: control.box,
+        cell: control.outsideCell, grid: control.outsideGrid, text: control.textOutsideButton.length, clipping: control.clippingAncestors }))),
+    firstRow: raw.cells.slice(0, 5).map((cell) => cell.controls.map((control) => ({ visible: control.outsideUsablePort, hit: control.centerHit }))),
+    lastRow: raw.cells.slice(-5).map((cell) => cell.controls.map((control) => ({ visible: control.outsideUsablePort, hit: control.centerHit }))),
+    generation: raw.storage.generation, resultsCount: raw.storage.resultsRaw ? JSON.parse(raw.storage.resultsRaw).results.length : null }));
+  return raw;
+}
+
+for (const viewport of [{ width: 320, height: 568 }, { width: 385, height: 640 }, { width: 568, height: 320 }, { width: 844, height: 360 }] as const) {
+  for (const textScale of ['standard', 'large'] as const) {
+    test('길 만들기 첫 퍼즐: ' + viewport.width + '×' + viewport.height + ' ' + textScale + ' 글자에서 격자·키보드·본문 스크롤을 유지한다', async ({ page, browserName, isMobile }, testInfo) => {
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+      await page.setViewportSize(viewport);
+      const readStorage = () => page.evaluate(() => {
+        const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+        return { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null };
+      });
+      let failed = false;
+      try {
+        await page.goto('/');
+        await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+        // Establish the return position in the same text setting used during play and close.
+        await page.getByRole('navigation', { name: viewport.width <= 620 ? '빠른 메뉴' : '주요 메뉴', exact: true })
+          .getByRole('button', { name: viewport.width <= 620 ? '준비' : '준비센터', exact: true }).click();
+        const readiness = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+        await readiness.getByRole('button', { name: textScale === 'large' ? '큰 글자' : '기본 크기', exact: true }).click();
+        await readiness.getByRole('button', { name: '설정 저장하고 닫기', exact: true }).click();
+        await expect(readiness).toHaveCount(0);
+        await expect(page.locator('html')).toHaveAttribute('data-text-scale', textScale);
+        await page.evaluate(() => document.fonts.ready);
+        const opener = page.getByRole('button', { name: '길 만들기, 난이도 상, 설정 열기', exact: true });
+        await opener.scrollIntoViewIfNeeded();
+        const home = await page.evaluate(() => ({ x: scrollX, y: scrollY }));
+        await testInfo.attach('path-home-baseline', { body: JSON.stringify({ viewport, textScale, home }), contentType: 'application/json' });
+        await opener.click();
+        const panel = page.locator('.stage-panel[data-game="path"]');
+        await panel.getByRole('radio', { name: /연습 모드/ }).click();
+        const settings = panel.getByRole('region', { name: '연습 세션 설정', exact: true });
+        await panel.getByRole('button', { name: /내 연습 설정 바로가기/ }).click();
+        await settings.getByRole('button', { name: '기본값', exact: true }).click();
+        await expect(settings.getByLabel('문제 수 현재 값', { exact: true })).toHaveText('3');
+        await expect(settings.getByLabel('문제 제한 현재 값', { exact: true })).toHaveText('60초');
+        await expect(settings.getByRole('checkbox', { name: /시간 제한 없이 연습/ })).not.toBeChecked();
+        const baseline = await readStorage();
+        expect(baseline.generation).not.toBeNull();
+        expect(baseline.resultsRaw).not.toBeNull();
+        expect(JSON.parse(baseline.resultsRaw!).results).toEqual([]);
+        await panel.locator('.stage-start-practice').click();
+        const workspace = panel.locator('.game-workspace.game-path');
+        await expect(workspace.locator('.path-grid')).toBeVisible();
+        // First play geometry is recorded before focus waits, hover, wheel or any test scroll.
+        const initial = await capturePathInitialVisibility(page, testInfo, 'initial');
+        await page.screenshot({ path: testInfo.outputPath('path-initial-raw-before-assert.png') });
+        const seenMarkerParts = new Set<string>();
+        const check = (raw: typeof initial) => {
+          expect(raw.viewport).toEqual(viewport);
+          expect(raw.textScale).toBe(textScale);
+          expect(raw.fonts).toBe('loaded');
+          expect(raw.preparation).toBe(false);
+          expect(raw.progress).toMatch(/^1 \/ 3/);
+          expect(raw.actions).toBe('0');
+          expect(raw.cells).toHaveLength(25);
+          expect(raw.cells.map((cell) => cell.fence)).toEqual(Array(25).fill('empty'));
+          expect(raw.storage).toEqual(baseline);
+          expect(raw.external).toEqual(initial.external);
+          for (const [markerIndex, marker] of raw.markers.entries()) for (const [partIndex, part] of marker.parts.entries()) {
+            expect(part.outsideUsablePort.x).toBe(false);
+            expect(part.outsideViewport.x).toBe(false);
+            if (!part.outsideUsablePort.y && !part.outsideViewport.y) seenMarkerParts.add(markerIndex + '-' + partIndex);
+          }
+          for (const cell of raw.cells) {
+            expect(cell.outsideGrid).toEqual({ x: false, y: false });
+            expect(cell.controls).toHaveLength(1);
+            for (const control of cell.controls) {
+              expect(control.box.width).toBeGreaterThanOrEqual(44);
+              expect(control.box.height).toBeGreaterThanOrEqual(44);
+              expect(control.outsideCell).toEqual({ x: false, y: false });
+              expect(control.outsideGrid).toEqual({ x: false, y: false });
+              expect(control.textRects.length).toBeGreaterThan(0);
+              expect(control.textOutsideButton).toEqual([]);
+              expect(control.clippingAncestors.filter((ancestor) => ancestor.clipsX && ancestor.axes.x)).toEqual([]);
+              expect(control.clippingAncestors.filter((ancestor) => ancestor.beforeBody && ['hidden', 'clip'].includes(ancestor.overflowY) && ancestor.axes.y)).toEqual([]);
+              expect(control.outsideViewport.x).toBe(false);
+            }
+          }
+        };
+        const rowVisible = (raw: typeof initial, start: number) => {
+          for (const cell of raw.cells.slice(start, start + 5)) for (const control of cell.controls) {
+            expect(control.outsideUsablePort).toEqual({ x: false, y: false });
+            expect(control.outsideViewport).toEqual({ x: false, y: false });
+            expect(control.centerHit, '제한시간 막대 등 겹침으로 실제 칸 중앙이 가려지지 않는다').toBe(true);
+            if (raw.deadline?.position === 'sticky') expect(control.box.top).toBeGreaterThanOrEqual(raw.body.usablePort.top - 1);
+          }
+        };
+        // Local cell/grid clipping and 44px are always checked; oversized rows may require native body scrolling.
+        check(initial);
+        rowVisible(initial, 0);
+        if (initial.fits) {
+          expect(initial.shellOutsideUsablePort).toEqual({ x: false, y: false });
+          for (const marker of initial.markers) for (const part of marker.parts) {
+            expect(part.outsideUsablePort).toEqual({ x: false, y: false });
+            expect(part.outsideViewport).toEqual({ x: false, y: false });
+          }
+          for (let row = 0; row < 25; row += 5) rowVisible(initial, row);
+        }
+        const first = workspace.locator('.path-fence-cycle[data-cycle-cell="0"]');
+        await expect(first).toBeFocused();
+        if (!initial.fits) {
+          const body = workspace.locator('.workspace-body');
+          const platformScroll = browserName === 'webkit' && isMobile;
+          if (platformScroll) {
+            // Scroll the lowest required content, not an arbitrary padding edge; this is not a physical swipe.
+            const bottomPart = initial.markers.flatMap((marker, markerIndex) => marker.parts.map((part, partIndex) => ({ markerIndex, partIndex, ...part })))
+              .sort((a, b) => b.box.bottom - a.box.bottom)[0];
+            let target = workspace.locator('.path-fence-cycle[data-cycle-cell="24"]');
+            if (bottomPart && bottomPart.box.bottom > initial.cells[24].controls[0].box.bottom) {
+              const marker = workspace.locator('.path-shell .edge-marker > span').nth(bottomPart.markerIndex);
+              target = bottomPart.partIndex === 0 ? marker : marker.locator('*').nth(bottomPart.partIndex - 1);
+            }
+            await target.scrollIntoViewIfNeeded();
+          } else {
+            await body.hover();
+            await page.mouse.wheel(0, Math.ceil(initial.body.scrollHeight + initial.body.clientHeight));
+          }
+          await expect(workspace.locator('.path-fence-cycle[data-cycle-cell="24"]')).toBeInViewport({ ratio: 1 });
+          const scrollMethod = platformScroll ? 'platform-autoscroll' : 'native-wheel';
+          const last = await capturePathInitialVisibility(page, testInfo, scrollMethod + '-last-row');
+          check(last);
+          if (platformScroll) {
+            // Already-visible content may be a no-op; complete last-row and marker reachability stay required.
+            expect(last.body.scrollTop).toBeGreaterThanOrEqual(initial.body.scrollTop);
+          } else expect(last.body.scrollTop).toBeGreaterThan(initial.body.scrollTop);
+          rowVisible(last, 20);
+          await page.screenshot({ path: testInfo.outputPath('path-' + scrollMethod + '-last-row.png') });
+          await page.keyboard.press('Control+End');
+          await expect(workspace.locator('.path-fence-cycle[data-cycle-cell="24"]')).toBeFocused();
+          await page.keyboard.press('Control+Home');
+          await expect(first).toBeFocused();
+          await expect(first).toBeInViewport({ ratio: 1 });
+          const restored = await capturePathInitialVisibility(page, testInfo, 'native-home-first-row');
+          check(restored);
+          rowVisible(restored, 0);
+        }
+        for (const [key, name] of [['Shift+Tab', '경로 확인'], ['Shift+Tab', '전체 초기화'], ['Tab', '경로 확인']] as const) {
+          await page.keyboard.press(key);
+          await expect(workspace.getByRole('button', { name, exact: true })).toBeFocused();
+          const focused = await capturePathInitialVisibility(page, testInfo, key + '-' + name);
+          check(focused);
+          expect(focused.active?.label).toBe(name);
+          expect(focused.active?.outsideUsablePort).toEqual({ x: false, y: false });
+          expect(focused.active?.outsideViewport).toEqual({ x: false, y: false });
+          expect(focused.active?.centerHit).toBe(true);
+        }
+        await page.keyboard.press('Tab');
+        await expect(first).toBeFocused();
+        const returned = await capturePathInitialVisibility(page, testInfo, 'native-tab-grid-return');
+        check(returned);
+        rowVisible(returned, 0);
+        const requiredMarkerParts = initial.markers.flatMap((marker, markerIndex) => marker.parts.map((_, partIndex) => markerIndex + '-' + partIndex));
+        console.log('PATH_MARKER_ACCESS', JSON.stringify({ project: testInfo.project.name, viewport, textScale,
+          required: requiredMarkerParts, reached: [...seenMarkerParts] }));
+        expect([...seenMarkerParts].sort(), 'all edge labels and badges remain accessible through native body scrolling').toEqual(requiredMarkerParts.sort());
+        await closeCommonHeaderSession(page, workspace, true);
+        expect(await readStorage()).toEqual(baseline);
+        await expect(page.locator('.stage-result')).toHaveCount(0);
+        await expect.poll(() => page.evaluate(() => ({ x: scrollX, y: scrollY }))).toEqual(home);
+        await testInfo.attach('path-initial-closed', { body: JSON.stringify({ viewport, textScale, home, storage: await readStorage(), errors }), contentType: 'application/json' });
+      } catch (error) {
+        failed = true;
+        console.log('PATH_INITIAL_FAILURE', JSON.stringify({ project: testInfo.project.name, viewport, textScale, error: String(error) }));
+        await page.content().then((body) => testInfo.attach('path-initial-first-failure-dom', { body, contentType: 'text/html' }))
+          .catch((captureError) => console.log('PATH_INITIAL_DOM_CAPTURE_ERROR', String(captureError)));
+        await page.screenshot({ path: testInfo.outputPath('path-initial-first-failure.png') })
+          .catch((captureError) => console.log('PATH_INITIAL_CAPTURE_ERROR', String(captureError)));
+        throw error;
+      } finally {
+        console.log('PATH_INITIAL_ERRORS', JSON.stringify({ project: testInfo.project.name, viewport, textScale, errors }));
+        try {
+          const workspace = page.locator('.game-workspace.game-path');
+          if (await workspace.count()) await closeCommonHeaderSession(page, workspace, false);
+        } catch (closeError) {
+          if (!failed) throw closeError;
+          console.log('PATH_INITIAL_CLOSE_ERROR', String(closeError));
+        }
+      }
+      expect(errors).toEqual([]);
+    });
+  }
+}
+
+for (const textScale of ['standard', 'large'] as const) {
+  test('숫자 누르기: ' + textScale + ' 글자에서 같은 첫 문항의 568×320→320×568→568×320 크기 변경을 유지한다', async ({ page }, testInfo) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+    const viewports = [{ width: 568, height: 320 }, { width: 320, height: 568 }, { width: 568, height: 320 }] as const;
+    await page.setViewportSize(viewports[0]);
+    const panel = page.locator('.stage-panel[data-game="number"]');
+    const workspace = panel.locator('.game-workspace.game-number');
+    const readStorage = () => page.evaluate(() => {
+      const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+      return { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null };
+    });
+    let failed = false, closedNormally = false;
+    try {
+      await page.goto('/');
+      await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+      await page.getByRole('navigation', { name: '빠른 메뉴', exact: true }).getByRole('button', { name: '준비', exact: true }).click();
+      const readiness = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+      await readiness.getByRole('button', { name: textScale === 'large' ? '큰 글자' : '기본 크기', exact: true }).click();
+      await readiness.getByRole('button', { name: '설정 저장하고 닫기', exact: true }).click();
+      await expect(readiness).toHaveCount(0);
+      await expect(page.locator('html')).toHaveAttribute('data-text-scale', textScale);
+      await page.evaluate(() => document.fonts.ready);
+      await page.getByRole('button', { name: '숫자 누르기, 난이도 하, 설정 열기', exact: true }).click();
+      await expect(panel).toBeVisible();
+      await panel.getByRole('radio', { name: /연습 모드/ }).click();
+      await expect(panel.locator('output[aria-label="문제 수 현재 값"]')).toHaveText('10');
+      await expect(panel.locator('output[aria-label="문제 제한 현재 값"]')).toHaveText('20초');
+      const pacing = panel.locator('label.accessible-pacing-setting');
+      if (await pacing.locator('input[type="checkbox"]').isChecked()) await pacing.click();
+      await expect(pacing.locator('input[type="checkbox"]')).not.toBeChecked();
+      const baseline = await readStorage();
+      expect(baseline.generation).not.toBeNull();
+      expect(baseline.resultsRaw).not.toBeNull();
+      expect(JSON.parse(baseline.resultsRaw!).results).toEqual([]);
+      await panel.locator('.stage-start-practice').click();
+      const firstFrame = panel.locator('.game-workspace.game-number[data-mode="practice"]:has(.workspace-progress > i[role="progressbar"][aria-valuenow="1"][aria-valuemax="5"]):has(.number-board-pro)');
+      let first: Awaited<ReturnType<typeof captureNumberRpsFirstBoard>> | null = null;
+      let previousRemaining = 20_000;
+      for (const [index, viewport] of viewports.entries()) {
+        if (index > 0) await page.setViewportSize(viewport);
+        // After each resize ACK, preserve the first read without a phase guard that could wait for another question.
+        const raw = await captureNumberRpsFirstBoard(index === 0 ? firstFrame : workspace, 'number');
+        await testInfo.attach('number-live-resize-' + index + '.json', { body: JSON.stringify({ project: testInfo.project.name,
+          requestedViewport: viewport, requestedTextScale: textScale, nativeGameAnswers: 0, errorsAtCapture: [...errors], ...raw }, null, 2), contentType: 'application/json' });
+        console.log('NUMBER_LIVE_RESIZE', JSON.stringify({ project: testInfo.project.name, textScale, index, requestedViewport: viewport,
+          actualViewport: raw.viewport, capturedAt: raw.capturedAt, progress: raw.progress, number: raw.number,
+          remaining: raw.deadline.remaining, duration: raw.deadline.duration, active: raw.deadline.active,
+          numbers: raw.responseButtons.map((button) => button.text), targets: raw.responseButtons.filter((button) => button.target).map((button) => button.label),
+          disabled: raw.responseButtons.map((button) => button.disabled), body: raw.body, generation: raw.storage.generation, errors }));
+        await page.screenshot({ path: testInfo.outputPath('number-live-resize-' + index + '-first-raw.png') });
+        // The native timer keeps running during PNG capture; retain and check this separate later observation.
+        const afterPNG = await workspace.evaluate((frame) => ({ capturedAt: new Date().toISOString(),
+          progress: frame.querySelector('.workspace-progress > i[role="progressbar"]')?.getAttribute('aria-valuenow') ?? null,
+          counter: frame.querySelector('.number-rule > em')?.textContent ?? null,
+          remaining: frame.querySelector('.time-strip')?.getAttribute('aria-valuenow') ?? null,
+          active: frame.querySelector('.time-strip')?.getAttribute('data-deadline-active') ?? null,
+          disabled: [...frame.querySelectorAll<HTMLButtonElement>('.number-board-pro > button')].map((button) => button.disabled) }));
+        await testInfo.attach('number-live-resize-' + index + '-after-png.json', { body: JSON.stringify(afterPNG), contentType: 'application/json' });
+        if (!first) first = raw;
+        expect(raw.progress).toEqual(first.progress);
+        expect(raw.progress).toMatchObject({ current: '1', total: '5' });
+        expect(raw.number).toEqual(first.number);
+        expect(raw.number).toMatchObject({ round: 'ROUND 1 / 2', counter: '입력 0 / 1', banner: '1라운드 점등 숫자, 5문제 중 1번째' });
+        expect(raw.responseButtons).toHaveLength(9);
+        expect(raw.responseButtons.map((button) => button.text)).toEqual(first.responseButtons.map((button) => button.text));
+        expect(raw.responseButtons.map((button) => Number(button.text)).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        expect(raw.responseButtons.map((button) => ({ label: button.label, current: button.current, target: button.target })))
+          .toEqual(first.responseButtons.map((button) => ({ label: button.label, current: button.current, target: button.target })));
+        const targets = raw.responseButtons.filter((button) => button.target);
+        expect(targets).toHaveLength(1);
+        expect(raw.responseButtons.filter((button) => button.current === 'step')).toHaveLength(1);
+        expect(targets[0].current).toBe('step');
+        expect(targets[0].label).toBe(targets[0].text + ', 현재 목표');
+        expect(raw.responseButtons.every((button) => !button.disabled)).toBe(true);
+        expect(raw.mode).toBe('practice');
+        expect(raw.preparationCount).toBe(0);
+        expect(raw.resultCount).toBe(0);
+        expect(raw.guidedCount).toBe(0);
+        expect(raw.feedback?.trim() ?? '').toBe('');
+        expect(raw.storage).toEqual(baseline);
+        expect(raw.textScale).toBe(textScale);
+        expect(raw.fonts).toBe('loaded');
+        expect(raw.mediaCount).toBe(0);
+        expect(raw.viewport).toMatchObject(viewport);
+        expect(raw.viewport.documentWidth).toBeLessThanOrEqual(raw.viewport.clientWidth + 1);
+        expect(raw.viewport.bodyWidth).toBeLessThanOrEqual(raw.viewport.clientWidth + 1);
+        expect(raw.body.scrollLeft).toBe(0);
+        expect(raw.deadline.active).toBe('true');
+        expect(raw.deadline.duration).toBe('20000');
+        expect(raw.deadline.label).toBe(first.deadline.label);
+        expect(raw.deadline.label?.length).toBeGreaterThan(0);
+        const remaining = Number(raw.deadline.remaining);
+        expect(Number.isFinite(remaining)).toBe(true);
+        expect(remaining).toBeGreaterThan(0);
+        expect(remaining).toBeLessThanOrEqual(previousRemaining);
+        previousRemaining = remaining;
+        expect(afterPNG.progress).toBe('1');
+        expect(afterPNG.counter).toBe('입력 0 / 1');
+        expect(afterPNG.active).toBe('true');
+        expect(afterPNG.disabled).toEqual(Array(9).fill(false));
+        const afterPNGRemaining = Number(afterPNG.remaining);
+        expect(Number.isFinite(afterPNGRemaining)).toBe(true);
+        expect(afterPNGRemaining).toBeGreaterThan(0);
+        expect(afterPNGRemaining).toBeLessThanOrEqual(remaining);
+        previousRemaining = afterPNGRemaining;
+        const labels = [raw.deadline.visibleText, ...raw.labels, ...raw.responseButtons.flatMap((button) => button.labels)];
+        const elements = [raw.board, raw.deadline, ...labels, ...raw.responseButtons];
+        for (const element of elements) {
+          expect(element.box.width, element.text).toBeGreaterThan(0);
+          expect(element.box.height, element.text).toBeGreaterThan(0);
+          expect(element.display, element.text).not.toBe('none');
+          expect(element.visibility, element.text).toBe('visible');
+          expect(element.outsideBody, element.text).toEqual({ x: false, y: false });
+          expect(element.outsideViewport, element.text).toEqual({ x: false, y: false });
+          expect(element.clippingAncestors.filter((clip) => clip.elementOutside.x || clip.elementOutside.y || clip.textOutside.x || clip.textOutside.y), element.text).toEqual([]);
+        }
+        for (const label of labels) {
+          expect(label.text.length).toBeGreaterThan(0);
+          expect(label.textRects.length, label.text).toBeGreaterThan(0);
+          expect(label.textOutsideSelf, label.text).toBe(false);
+          expect(label.textOutsideButton, label.text).toBe(false);
+        }
+        for (const button of raw.responseButtons) {
+          expect(button.box.width).toBeGreaterThanOrEqual(44);
+          expect(button.box.height).toBeGreaterThanOrEqual(44);
+          expect(button.centerHit, button.text).toBe(true);
+          expect(button.labels).toHaveLength(1);
+        }
+      }
+      await closeCommonHeaderSession(page, workspace, false);
+      closedNormally = true;
+      expect(await readStorage()).toEqual(baseline);
+      await expect(page.locator('.stage-result')).toHaveCount(0);
+    } catch (error) {
+      failed = true;
+      console.log('NUMBER_LIVE_RESIZE_FAILURE', JSON.stringify({ project: testInfo.project.name, textScale, closedNormally, error: String(error) }));
+      await page.content().then((body) => testInfo.attach('number-live-resize-first-failure.html', { body, contentType: 'text/html' }))
+        .catch((captureError) => console.log('NUMBER_LIVE_RESIZE_DOM_CAPTURE_ERROR', String(captureError)));
+      await page.screenshot({ path: testInfo.outputPath('number-live-resize-first-failure.png') })
+        .catch((captureError) => console.log('NUMBER_LIVE_RESIZE_CAPTURE_ERROR', String(captureError)));
+      throw error;
+    } finally {
+      console.log('NUMBER_LIVE_RESIZE_ERRORS', JSON.stringify({ project: testInfo.project.name, textScale, errors }));
+      try {
+        if (!closedNormally && await workspace.count()) await closeCommonHeaderSession(page, workspace, false);
+      } catch (closeError) {
+        if (!failed) throw closeError;
+        console.log('NUMBER_LIVE_RESIZE_CLOSE_ERROR', String(closeError));
+      }
+    }
+    expect(errors).toEqual([]);
+  });
+}
+
+for (const textScale of ['standard', 'large'] as const) {
+  test('고양이 술래잡기: ' + textScale + ' 글자에서 같은 첫 빨강 응답판의 700→699→568→320→700px 크기 변경을 유지한다', async ({ page, browserName, isMobile }, testInfo) => {
+    const errors: string[] = [], stimuli: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+    const viewports = [{ width: 700, height: 360 }, { width: 699, height: 360 }, { width: 568, height: 320 },
+      { width: 320, height: 568 }, { width: 700, height: 360 }] as const;
+    await page.setViewportSize(viewports[0]);
+    const panel = page.locator('.stage-panel[data-game="mouse"]');
+    const workspace = panel.locator('.game-workspace.game-mouse');
+    const body = workspace.locator('.workspace-body');
+    const readStorage = () => page.evaluate(() => {
+      const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+      return { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null };
+    });
+    // Number/RPS's capture requires their board and deadline; this local read keeps Mouse's guided DOM intact.
+    const capture = () => workspace.evaluate((frame) => {
+      const box = (rect: DOMRect) => ({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height });
+      type Bounds = ReturnType<typeof box>;
+      const outside = (rect: Bounds, boundary: Pick<Bounds, 'left' | 'right' | 'top' | 'bottom'>) => ({
+        x: rect.left < boundary.left - 1 || rect.right > boundary.right + 1,
+        y: rect.top < boundary.top - 1 || rect.bottom > boundary.bottom + 1,
+      });
+      const scrollBody = frame.querySelector<HTMLElement>('.workspace-body')!;
+      const bodyRect = scrollBody.getBoundingClientRect();
+      const bodyBox = { left: bodyRect.left + scrollBody.clientLeft, right: bodyRect.left + scrollBody.clientLeft + scrollBody.clientWidth,
+        top: bodyRect.top + scrollBody.clientTop, bottom: bodyRect.top + scrollBody.clientTop + scrollBody.clientHeight,
+        width: scrollBody.clientWidth, height: scrollBody.clientHeight };
+      const viewportBox = { left: 0, right: document.documentElement.clientWidth, top: 0, bottom: innerHeight };
+      const backdrop = frame.closest<HTMLElement>('.stage-backdrop');
+      const geometry = (element: HTMLElement, key: string, kind: 'text' | 'figure' | 'button') => {
+        const bounds = box(element.getBoundingClientRect()), style = getComputedStyle(element);
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const textRects = kind === 'text' ? [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0).map(box) : [];
+        const clippingAncestors = [];
+        let afterScrollableY = false;
+        for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+          const css = getComputedStyle(ancestor), clipsX = ['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowX);
+          const clipsY = ['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowY);
+          if (clipsX || clipsY) {
+            const rect = ancestor.getBoundingClientRect();
+            const clipBox = { left: rect.left + ancestor.clientLeft, right: rect.left + ancestor.clientLeft + ancestor.clientWidth,
+              top: rect.top + ancestor.clientTop, bottom: rect.top + ancestor.clientTop + ancestor.clientHeight,
+              width: ancestor.clientWidth, height: ancestor.clientHeight };
+            const elementAxes = outside(bounds, clipBox), textAxes = textRects.map((text) => outside(text, clipBox));
+            const elementOutside = { x: clipsX && elementAxes.x, y: clipsY && elementAxes.y };
+            const textOutside = { x: clipsX && textAxes.some((axes) => axes.x), y: clipsY && textAxes.some((axes) => axes.y) };
+            clippingAncestors.push({ tag: ancestor.tagName, className: ancestor.className, overflowX: css.overflowX, overflowY: css.overflowY,
+              clipBox, clientWidth: ancestor.clientWidth, clientHeight: ancestor.clientHeight, scrollWidth: ancestor.scrollWidth,
+              scrollHeight: ancestor.scrollHeight, scrollLeft: ancestor.scrollLeft, scrollTop: ancestor.scrollTop, afterScrollableY,
+              elementOutside, textOutside, hardY: !afterScrollableY && ['hidden', 'clip'].includes(css.overflowY) && (elementOutside.y || textOutside.y),
+              outerHiddenY: afterScrollableY && ['hidden', 'clip'].includes(css.overflowY) && (elementOutside.y || textOutside.y) });
+          }
+          if (['auto', 'scroll'].includes(css.overflowY)) afterScrollableY = true;
+          // The fixed overlay is clipped by its viewport, not the shifted locked background body.
+          if (ancestor === backdrop) break;
+        }
+        const button = element.closest('button'), buttonBox = button ? box(button.getBoundingClientRect()) : null;
+        const hit = document.elementFromPoint((bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+        return { key, kind, text: element.textContent?.trim() ?? '', box: bounds, font: style.font, lineHeight: style.lineHeight,
+          display: style.display, visibility: style.visibility, clientWidth: element.clientWidth, clientHeight: element.clientHeight,
+          scrollWidth: element.scrollWidth, scrollHeight: element.scrollHeight, textRects,
+          textOutsideSelf: textRects.some((text) => { const axes = outside(text, bounds); return axes.x || axes.y; }),
+          textOutsideButton: buttonBox ? textRects.some((text) => { const axes = outside(text, buttonBox); return axes.x || axes.y; }) : false,
+          outsideBody: outside(bounds, bodyBox), outsideViewport: outside(bounds, viewportBox), clippingAncestors,
+          centerHit: Boolean(hit && (hit === element || element.contains(hit))) };
+      };
+      const scrollAncestors = [];
+      for (let ancestor = scrollBody.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        scrollAncestors.push({ tag: ancestor.tagName, className: ancestor.className, left: ancestor.scrollLeft, top: ancestor.scrollTop });
+        if (ancestor === backdrop) break;
+      }
+      const controls = [...frame.querySelectorAll<HTMLButtonElement>('.cat-decision .decision-groups button')];
+      const buttons = controls.map((button, index) => ({ ...geometry(button, 'button-' + index, 'button'), label: button.getAttribute('aria-label'),
+        disabled: button.disabled, keyText: button.querySelector(':scope > span')?.textContent?.trim() ?? '',
+        labels: [...button.querySelectorAll<HTMLElement>(':scope > b, :scope > span')].map((label, child) => geometry(label, 'button-' + index + '-label-' + child, 'text')) }));
+      const labels = [...frame.querySelectorAll<HTMLElement>('.cat-decision > .guided-pacing-note, .cat-decision .target-cat > span, .cat-decision .target-cat > h3, .cat-decision .decision-groups > section > b')]
+        .map((label, index) => geometry(label, 'label-' + index, 'text'));
+      const figures = [...frame.querySelectorAll<HTMLElement>('.cat-decision .target-cat > div, .cat-decision .target-cat > div > .animal-marker, .cat-decision .target-cat .animal-card')]
+        .map((figure, index) => geometry(figure, 'figure-' + index, 'figure'));
+      const progress = frame.querySelector('.workspace-progress > i[role="progressbar"]');
+      const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+      return { capturedAt: new Date().toISOString(), mode: frame.getAttribute('data-mode'), decision: frame.querySelector('.cat-decision')?.className ?? null,
+        progress: { current: progress?.getAttribute('aria-valuenow') ?? null, total: progress?.getAttribute('aria-valuemax') ?? null,
+          text: frame.querySelector('.workspace-progress span')?.textContent ?? null },
+        target: frame.querySelector('.target-cat > span')?.textContent ?? null, question: frame.querySelector('.target-cat > h3')?.textContent ?? null,
+        guidance: frame.querySelector('.cat-decision > .guided-pacing-note')?.textContent ?? null,
+        redMarkerCount: frame.querySelectorAll('.cat-decision .target-cat .animal-marker.cat-marker.is-red').length,
+        preparationCount: frame.querySelectorAll('.game-preparation').length, presentationCount: frame.querySelectorAll('.mouse-layout').length,
+        deadlineCount: frame.querySelectorAll('.time-strip').length, resultCount: document.querySelectorAll('.stage-result').length,
+        feedback: frame.querySelector('.workspace-foot > b')?.textContent?.trim() ?? '',
+        live: [...frame.querySelectorAll('[aria-live]')].map((element) => element.textContent),
+        buttons, labels, figures, items: [...labels, ...figures, ...buttons.flatMap((button) => [button, ...button.labels])],
+        focus: { choiceIndex: controls.indexOf(document.activeElement as HTMLButtonElement), label: document.activeElement?.getAttribute('aria-label') ?? null },
+        viewport: { width: innerWidth, height: innerHeight, clientWidth: document.documentElement.clientWidth, documentWidth: document.documentElement.scrollWidth,
+          bodyWidth: document.body.scrollWidth, scrollX, scrollY },
+        body: { box: bodyBox, scrollTop: scrollBody.scrollTop, scrollLeft: scrollBody.scrollLeft, clientHeight: scrollBody.clientHeight, scrollHeight: scrollBody.scrollHeight },
+        outerScroll: { panel: frame.closest('.stage-panel')?.scrollTop ?? null, windowX: scrollX, windowY: scrollY, ancestors: scrollAncestors },
+        fonts: document.fonts.status, textScale: document.documentElement.dataset.textScale, mediaCount: document.querySelectorAll('audio,video').length,
+        storage: { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null } };
+    });
+    type Snapshot = Awaited<ReturnType<typeof capture>>;
+    let failed = false, closedNormally = false;
+    try {
+      await page.goto('/');
+      await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+      await page.getByRole('navigation', { name: '주요 메뉴', exact: true }).getByRole('button', { name: '준비센터', exact: true }).click();
+      const readiness = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+      await readiness.getByRole('button', { name: textScale === 'large' ? '큰 글자' : '기본 크기', exact: true }).click();
+      await readiness.getByRole('button', { name: '설정 저장하고 닫기', exact: true }).click();
+      await expect(readiness).toHaveCount(0);
+      await expect(page.locator('html')).toHaveAttribute('data-text-scale', textScale);
+      await page.evaluate(() => document.fonts.ready);
+      await page.getByRole('button', { name: '고양이 술래잡기, 난이도 중, 설정 열기', exact: true }).click();
+      await panel.getByRole('radio', { name: /연습 모드/ }).click();
+      await expect(panel.getByLabel('라운드 수 현재 값', { exact: true })).toHaveText('5');
+      await expect(panel.getByLabel('생쥐 제시 현재 값', { exact: true })).toHaveText('1초');
+      const pacing = panel.locator('label.accessible-pacing-setting');
+      if (!await pacing.locator('input[type="checkbox"]').isChecked()) await pacing.click();
+      await expect(pacing.locator('input[type="checkbox"]')).toBeChecked();
+      const baseline = await readStorage();
+      expect(baseline.generation).not.toBeNull();
+      expect(baseline.resultsRaw).not.toBeNull();
+      expect(JSON.parse(baseline.resultsRaw!).results).toEqual([]);
+      await panel.locator('.stage-start-practice').click();
+      for (let step = 1; step <= 4; step += 1) {
+        await expect(workspace.locator('.stage-sequence')).toHaveAttribute('aria-label', '위치 확인 단계 ' + step + ' / 4');
+        const next = workspace.getByRole('button', { name: /^내용을 들었어요 · 다음 단계/ });
+        await expect(next).toHaveAttribute('aria-disabled', 'false');
+        const stimulus = await workspace.locator('.mouse-board-pro').getAttribute('aria-label');
+        expect(stimulus).not.toBeNull();
+        stimuli.push(stimulus!);
+        await next.click();
+      }
+      const choices = workspace.locator('.cat-decision.red .decision-groups button');
+      await expect(choices).toHaveCount(8);
+      await expect(choices.first()).toBeFocused();
+      let first: Snapshot | null = null;
+      for (const [index, viewport] of viewports.entries()) {
+        if (index > 0) await page.setViewportSize(viewport);
+        // Preserve the first resize-ACK observation before hover, focus, wheel, or any corrective geometry wait.
+        let raw = await capture();
+        const save = async (phase: string, snapshot: Snapshot) => {
+          await testInfo.attach('mouse-guided-live-resize-' + phase + '.json', { body: JSON.stringify({ project: testInfo.project.name,
+            requestedViewport: viewport, requestedTextScale: textScale, nativeGameAnswers: 0, stimuli, errorsAtCapture: [...errors], ...snapshot }, null, 2), contentType: 'application/json' });
+          console.log('MOUSE_GUIDED_LIVE_RESIZE', JSON.stringify({ project: testInfo.project.name, textScale, phase, requestedViewport: viewport,
+            actualViewport: snapshot.viewport, progress: snapshot.progress, decision: snapshot.decision, focus: snapshot.focus, body: snapshot.body,
+            labels: snapshot.buttons.map((button) => button.label), disabled: snapshot.buttons.map((button) => button.disabled),
+            hardClip: snapshot.items.filter((item) => item.clippingAncestors.some((clip) => clip.hardY || clip.elementOutside.x || clip.textOutside.x)).map((item) => item.key),
+            outerHiddenY: snapshot.items.filter((item) => item.clippingAncestors.some((clip) => clip.outerHiddenY)).map((item) => item.key),
+            offscreenY: snapshot.items.filter((item) => item.outsideBody.y || item.outsideViewport.y).map((item) => item.key), generation: snapshot.storage.generation, errors }));
+        };
+        await save(index + '-first-ack', raw);
+        await page.screenshot({ path: testInfo.outputPath('mouse-guided-live-resize-' + index + '-first-ack.png') });
+        if (!first) first = raw;
+        const seen = new Set<string>();
+        const check = (snapshot: Snapshot) => {
+          expect(snapshot.progress).toEqual(first!.progress);
+          expect(snapshot.progress).toMatchObject({ current: '1', total: '5' });
+          expect(snapshot.decision).toBe('cat-decision red');
+          expect(snapshot.mode).toBe('practice');
+          expect(snapshot.target).toBe('빨간 고양이');
+          expect(snapshot.question).toBe('생쥐를 찾았나요? 확신도까지 선택하세요.');
+          expect(snapshot.guidance).toBe('음성 안내 직접 진행 중 · 응답 제한시간 없음');
+          expect(snapshot.redMarkerCount).toBe(1);
+          expect([snapshot.preparationCount, snapshot.presentationCount, snapshot.deadlineCount, snapshot.resultCount]).toEqual([0, 0, 0, 0]);
+          expect(snapshot.feedback).toBe('');
+          expect(snapshot.live).toEqual(first!.live);
+          expect(snapshot.storage).toEqual(baseline);
+          expect(snapshot.focus).toEqual(first!.focus);
+          expect(snapshot.focus.choiceIndex).toBe(0);
+          expect(snapshot.textScale).toBe(textScale);
+          expect(snapshot.fonts).toBe('loaded');
+          expect(snapshot.mediaCount).toBe(0);
+          expect(snapshot.viewport).toMatchObject(viewport);
+          expect(snapshot.viewport.documentWidth).toBeLessThanOrEqual(snapshot.viewport.clientWidth + 1);
+          expect(snapshot.viewport.bodyWidth).toBeLessThanOrEqual(snapshot.viewport.clientWidth + 1);
+          expect(snapshot.body.scrollLeft).toBe(0);
+          expect(snapshot.labels.map((label) => label.text)).toEqual(['음성 안내 직접 진행 중 · 응답 제한시간 없음', '빨간 고양이',
+            '생쥐를 찾았나요? 확신도까지 선택하세요.', '놓쳤다', '찾았다']);
+          expect(snapshot.figures).toHaveLength(3);
+          expect(snapshot.buttons).toHaveLength(8);
+          expect(snapshot.buttons.map((button) => button.label)).toEqual(first!.buttons.map((button) => button.label));
+          expect(snapshot.buttons.map((button) => button.keyText)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8']);
+          for (const [buttonIndex, button] of snapshot.buttons.entries()) {
+            expect(button.disabled).toBe(false);
+            expect(button.box.width, button.label ?? '').toBeGreaterThanOrEqual(44);
+            expect(button.box.height, button.label ?? '').toBeGreaterThanOrEqual(44);
+            expect(button.labels).toHaveLength(2);
+            expect(button.label, button.key).toBe((buttonIndex < 4 ? '놓쳤다' : '찾았다') + ', ' + button.labels[0].text + ', 단축키 ' + button.keyText);
+          }
+          // Own/local clipping and every X boundary stay hard failures; outer Y is recoverable only through the real scroll body.
+          for (const item of snapshot.items) {
+            expect(item.box.width, item.key).toBeGreaterThan(0);
+            expect(item.box.height, item.key).toBeGreaterThan(0);
+            expect(item.display, item.key).not.toBe('none');
+            expect(item.visibility, item.key).toBe('visible');
+            expect(item.outsideBody.x, item.key).toBe(false);
+            expect(item.outsideViewport.x, item.key).toBe(false);
+            expect(item.clippingAncestors.filter((clip) => clip.elementOutside.x || clip.textOutside.x || clip.hardY), item.key).toEqual([]);
+            if (item.kind === 'text') {
+              expect(item.text.length, item.key).toBeGreaterThan(0);
+              expect(item.textRects.length, item.key).toBeGreaterThan(0);
+              expect(item.textOutsideSelf, item.key).toBe(false);
+              expect(item.textOutsideButton, item.key).toBe(false);
+            }
+            if (!item.outsideBody.y && !item.outsideViewport.y && !item.clippingAncestors.some((clip) => clip.elementOutside.y || clip.textOutside.y)
+              && (item.kind !== 'button' || item.centerHit)) seen.add(item.key);
+          }
+        };
+        check(raw);
+        // This checks actual guided-red reachability, not simultaneous fit or timed/blue-board safety.
+        for (let recovery = 0; recovery < raw.items.length && seen.size < raw.items.length; recovery += 1) {
+          const before = await capture();
+          await save(index + '-before-native-scroll-' + recovery, before);
+          expect(before.outerScroll).toEqual(raw.outerScroll);
+          check(before);
+          raw = before;
+          if (seen.size === before.items.length) break;
+          const wanted = before.items.find((item) => !seen.has(item.key))!;
+          expect(before.body.scrollHeight).toBeGreaterThan(before.body.clientHeight);
+          const delta = (wanted.box.top + wanted.box.bottom - before.body.box.top - before.body.box.bottom) / 2;
+          expect(Math.abs(delta), wanted.key + ' cannot be reached by body scrolling').toBeGreaterThan(0);
+          if (browserName === 'webkit' && isMobile) {
+            // Keep the ACK capture and focus intact; this is platform autoscroll, not a touch gesture.
+            const [kind, itemIndex] = wanted.key.split('-');
+            const target = kind === 'button' ? workspace.locator('.cat-decision .decision-groups button').nth(Number(itemIndex))
+              : kind === 'label' ? workspace.locator('.cat-decision > .guided-pacing-note, .cat-decision .target-cat > span, .cat-decision .target-cat > h3, .cat-decision .decision-groups > section > b').nth(Number(itemIndex))
+              : workspace.locator('.cat-decision .target-cat > div, .cat-decision .target-cat > div > .animal-marker, .cat-decision .target-cat .animal-card').nth(Number(itemIndex));
+            await target.scrollIntoViewIfNeeded();
+          } else {
+            await page.mouse.move((before.body.box.left + before.body.box.right) / 2, (before.body.box.top + before.body.box.bottom) / 2);
+            await page.mouse.wheel(0, delta);
+          }
+          await expect.poll(() => body.evaluate((element) => element.scrollTop)).not.toBe(before.body.scrollTop);
+          raw = await capture();
+          await save(index + '-native-scroll-' + recovery, raw);
+          expect(raw.outerScroll).toEqual(before.outerScroll);
+          check(raw);
+        }
+        expect([...seen].sort(), 'all required figures, labels, and 8 choices must remain reachable').toEqual(raw.items.map((item) => item.key).sort());
+      }
+      await expect(workspace).toHaveCount(1);
+      await closeCommonHeaderSession(page, workspace, false);
+      closedNormally = true;
+      expect(await readStorage()).toEqual(baseline);
+      await expect(page.locator('.stage-result')).toHaveCount(0);
+      await testInfo.attach('mouse-guided-live-resize-closed.json', { body: JSON.stringify({ storage: await readStorage(), nativeGameAnswers: 0, errors }), contentType: 'application/json' });
+    } catch (error) {
+      failed = true;
+      console.log('MOUSE_GUIDED_LIVE_RESIZE_FAILURE', JSON.stringify({ project: testInfo.project.name, textScale, closedNormally, error: String(error) }));
+      await page.content().then((content) => testInfo.attach('mouse-guided-live-resize-first-failure.html', { body: content, contentType: 'text/html' }))
+        .catch((captureError) => console.log('MOUSE_GUIDED_LIVE_RESIZE_DOM_CAPTURE_ERROR', String(captureError)));
+      await page.screenshot({ path: testInfo.outputPath('mouse-guided-live-resize-first-failure.png') })
+        .catch((captureError) => console.log('MOUSE_GUIDED_LIVE_RESIZE_CAPTURE_ERROR', String(captureError)));
+      throw error;
+    } finally {
+      console.log('MOUSE_GUIDED_LIVE_RESIZE_ERRORS', JSON.stringify({ project: testInfo.project.name, textScale, errors }));
+      try {
+        if (!closedNormally && await workspace.count()) await closeCommonHeaderSession(page, workspace, false);
+      } catch (closeError) {
+        if (!failed) throw closeError;
+        console.log('MOUSE_GUIDED_LIVE_RESIZE_CLOSE_ERROR', String(closeError));
+      }
+    }
+    expect(errors).toEqual([]);
+  });
+}
+for (const textScale of ['standard', 'large'] as const) {
+  test('개수 비교하기: ' + textScale + ' 글자의 같은 첫 가이드 응답은 크기 변경 뒤에도 본문 스크롤로 접근할 수 있다', async ({ page, browserName, isMobile }, testInfo) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+    const viewports = [{ width: 320, height: 568 }, { width: 568, height: 320 }, { width: 320, height: 568 }] as const;
+    await page.setViewportSize(viewports[0]);
+    const panel = page.locator('.stage-panel[data-game="count"]');
+    const workspace = panel.locator('.game-workspace.game-count');
+    const readStorage = () => page.evaluate(() => {
+      const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+      return { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null };
+    });
+    const readAnswer = (root: Locator = workspace) => root.evaluate((frame) => {
+      const box = (rect: DOMRect) => ({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height });
+      type Bounds = ReturnType<typeof box>;
+      const outside = (rect: Bounds, boundary: Pick<Bounds, 'left' | 'right' | 'top' | 'bottom'>) => ({
+        x: rect.left < boundary.left - 1 || rect.right > boundary.right + 1,
+        y: rect.top < boundary.top - 1 || rect.bottom > boundary.bottom + 1,
+      });
+      const body = frame.querySelector<HTMLElement>('.workspace-body')!;
+      const bodyBox = box(body.getBoundingClientRect());
+      const port = { left: bodyBox.left + body.clientLeft, right: bodyBox.left + body.clientLeft + body.clientWidth,
+        top: bodyBox.top + body.clientTop, bottom: bodyBox.top + body.clientTop + body.clientHeight };
+      const viewport = { left: 0, right: document.documentElement.clientWidth, top: 0, bottom: innerHeight };
+      const backdrop = frame.closest<HTMLElement>('.stage-backdrop');
+      const inspect = (element: HTMLElement, owner: Bounds, withText: boolean) => {
+        const bounds = box(element.getBoundingClientRect()), style = getComputedStyle(element);
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const textRects: Bounds[] = withText ? [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0).map(box) : [];
+        const content = withText ? box(range.getBoundingClientRect()) : bounds;
+        const hit = document.elementFromPoint((bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+        const clippers: { tag: string; className: string; overflowX: string; overflowY: string; afterScrollableY: boolean; clipBox: Bounds;
+          axes: { x: boolean; y: boolean }; hardX: boolean; hardY: boolean; scrollX: boolean; scrollY: boolean; outerHiddenY: boolean }[] = [];
+        let afterScrollableY = false;
+        for (let node: HTMLElement | null = element; node; node = node.parentElement) {
+          const css = getComputedStyle(node), rect = node.getBoundingClientRect();
+          const clipBox = { left: rect.left + node.clientLeft, right: rect.left + node.clientLeft + node.clientWidth,
+            top: rect.top + node.clientTop, bottom: rect.top + node.clientTop + node.clientHeight, width: node.clientWidth, height: node.clientHeight };
+          const axes = outside(content, clipBox);
+          if (['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowX) || ['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowY)) {
+            clippers.push({ tag: node.tagName, className: node.className, overflowX: css.overflowX, overflowY: css.overflowY, afterScrollableY, clipBox, axes,
+              hardX: ['hidden', 'clip'].includes(css.overflowX) && axes.x,
+              hardY: ['hidden', 'clip'].includes(css.overflowY) && axes.y && !afterScrollableY,
+              scrollX: ['auto', 'scroll'].includes(css.overflowX) && axes.x, scrollY: ['auto', 'scroll'].includes(css.overflowY) && axes.y,
+              outerHiddenY: ['hidden', 'clip'].includes(css.overflowY) && axes.y && afterScrollableY });
+            if (['auto', 'scroll'].includes(css.overflowY)) afterScrollableY = true;
+          }
+          // Match the existing Path helper: the fixed stage uses the viewport, not the shifted background body.
+          if (node === backdrop) break;
+        }
+        return { text: element.textContent?.trim() ?? '', box: bounds, textRects, nonzeroText: textRects.length > 0 && content.width > 0 && content.height > 0,
+          textOutsideSelf: withText && textRects.some((rect) => { const axes = outside(rect, bounds); return axes.x || axes.y; }),
+          outsideOwner: outside(content, owner), outsideBody: outside(bounds, port), outsideViewport: outside(bounds, viewport),
+          contentOutsideBody: outside(content, port), contentOutsideViewport: outside(content, viewport),
+          display: style.display, visibility: style.visibility, font: style.font, lineHeight: style.lineHeight,
+          centerHit: Boolean(hit && (hit === element || element.contains(hit))), focused: document.activeElement === element, clippers };
+      };
+      const scrollAncestors = [];
+      for (let ancestor = body.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        scrollAncestors.push({ tag: ancestor.tagName, className: ancestor.className, left: ancestor.scrollLeft, top: ancestor.scrollTop });
+        if (ancestor === backdrop) break;
+      }
+      const board = frame.querySelector<HTMLElement>('.count-wrap.phase-answer > .count-board');
+      const buttons = [...(board?.querySelectorAll<HTMLButtonElement>(':scope > button') ?? [])].map((button) => {
+        const bounds = box(button.getBoundingClientRect()), label = button.querySelector<HTMLElement>(':scope > span');
+        return { ...inspect(button, bounds, false), label: button.getAttribute('aria-label'), disabled: button.disabled,
+          hiddenText: button.querySelector('.count-hidden')?.textContent ?? null, nameplate: label ? inspect(label, bounds, true) : null };
+      });
+      const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+      const active = document.activeElement;
+      return { capturedAt: new Date().toISOString(), phase: frame.querySelector('.count-wrap')?.className ?? null,
+        progress: frame.querySelector('.workspace-progress > i[role="progressbar"]')?.getAttribute('aria-valuenow') ?? null,
+        total: frame.querySelector('.workspace-progress > i[role="progressbar"]')?.getAttribute('aria-valuemax') ?? null,
+        mode: frame.getAttribute('data-mode'), preparationCount: frame.querySelectorAll('.game-preparation').length,
+        guidedNote: frame.querySelector('.guided-pacing-note')?.textContent ?? null, deadlineCount: frame.querySelectorAll('.time-strip').length,
+        statuses: [...frame.querySelectorAll('.stage-sequence > span')].map((node) => ({ text: node.textContent, active: node.classList.contains('active') })),
+        signals: [...frame.querySelectorAll('.answer-signal')].map((node) => node.textContent), feedback: frame.querySelector('.workspace-foot > b')?.textContent ?? null,
+        resultCount: document.querySelectorAll('.stage-result').length, textScale: document.documentElement.dataset.textScale, fonts: document.fonts.status,
+        viewport: { width: innerWidth, height: innerHeight, clientWidth: document.documentElement.clientWidth,
+          documentWidth: document.documentElement.scrollWidth, bodyWidth: document.body.scrollWidth },
+        external: { x: scrollX, y: scrollY, documentLeft: document.documentElement.scrollLeft, documentTop: document.documentElement.scrollTop, ancestors: scrollAncestors },
+        body: { box: bodyBox, port, clientWidth: body.clientWidth, clientHeight: body.clientHeight, scrollWidth: body.scrollWidth,
+          scrollHeight: body.scrollHeight, scrollLeft: body.scrollLeft, scrollTop: body.scrollTop },
+        board: board ? box(board.getBoundingClientRect()) : null, buttons,
+        focus: { tag: active?.tagName ?? null, className: active?.getAttribute('class') ?? null, label: active?.getAttribute('aria-label') ?? null },
+        mediaCount: document.querySelectorAll('audio,video').length,
+        storage: { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null } };
+    });
+    let failed = false, closedNormally = false, nativeWheels = 0;
+    let shown: { capturedAt: string; counts: number[]; words: string[]; labels: (string | null | undefined)[] } | null = null;
+    const capture = async (phase: string, requestedViewport: { width: number; height: number }, root: Locator = workspace) => {
+      const raw = await readAnswer(root);
+      await testInfo.attach('count-guided-answer-' + phase + '.json', { body: JSON.stringify({ project: testInfo.project.name,
+        requestedViewport, requestedTextScale: textScale, priorNativeWheels: nativeWheels, nativeGameAnswers: 0, shown, errorsAtCapture: [...errors], ...raw }, null, 2), contentType: 'application/json' });
+      console.log('COUNT_GUIDED_ANSWER_RESIZE', JSON.stringify({ project: testInfo.project.name, phase, requestedViewport, requestedTextScale: textScale,
+        capturedAt: raw.capturedAt, actualViewport: raw.viewport, progress: raw.progress, total: raw.total, answerPhase: raw.phase, body: raw.body,
+        buttons: raw.buttons.map((button) => ({ label: button.label, disabled: button.disabled, outsideBody: button.outsideBody, hit: button.centerHit,
+          nameplate: button.nameplate ? { text: button.nameplate.text, outsideBody: button.nameplate.contentOutsideBody, hit: button.nameplate.centerHit,
+            scrollY: button.nameplate.clippers.filter((clip) => clip.scrollY), outerHiddenY: button.nameplate.clippers.filter((clip) => clip.outerHiddenY) } : null })),
+        external: raw.external, generation: raw.storage.generation, priorNativeWheels: nativeWheels, nativeGameAnswers: 0, errors }));
+      return raw;
+    };
+    try {
+      await page.goto('/');
+      await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+      await page.getByRole('navigation', { name: '빠른 메뉴', exact: true }).getByRole('button', { name: '준비', exact: true }).click();
+      const readiness = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+      await readiness.getByRole('button', { name: textScale === 'large' ? '큰 글자' : '기본 크기', exact: true }).click();
+      await readiness.getByRole('button', { name: '설정 저장하고 닫기', exact: true }).click();
+      await expect(readiness).toHaveCount(0);
+      await expect(page.locator('html')).toHaveAttribute('data-text-scale', textScale);
+      await page.evaluate(() => document.fonts.ready);
+      await page.getByRole('button', { name: '개수 비교하기, 난이도 하, 설정 열기', exact: true }).click();
+      await expect(panel).toBeVisible();
+      await panel.getByRole('radio', { name: /연습 모드/ }).click();
+      await expect(panel.getByLabel('단어 제시 현재 값', { exact: true })).toHaveText('1초');
+      const quantity = panel.getByLabel('문제 수 현재 값', { exact: true });
+      for (let step = 0; step < 9; step += 1) {
+        const value = Number(await quantity.textContent());
+        expect(Number.isInteger(value) && value >= 5 && value <= 50 && value % 5 === 0).toBe(true);
+        if (value === 5) break;
+        await panel.getByRole('button', { name: '문제 수 줄이기', exact: true }).click();
+        await expect(quantity).toHaveText(String(value - 5));
+      }
+      await expect(quantity).toHaveText('5');
+      const pacing = panel.locator('label.accessible-pacing-setting');
+      if (!await pacing.locator('input[type="checkbox"]').isChecked()) await pacing.click();
+      await expect(pacing.locator('input[type="checkbox"]')).toBeChecked();
+      const baseline = await readStorage();
+      expect(baseline.generation).not.toBeNull();
+      expect(baseline.resultsRaw).not.toBeNull();
+      const envelope = JSON.parse(baseline.resultsRaw!);
+      expect(envelope.version).toBe(4);
+      expect(envelope.generation).toBe(baseline.generation);
+      expect(envelope.results).toEqual([]);
+      await panel.locator('.stage-start-practice').click();
+      const showRoot = panel.locator('.game-count:has(.workspace-progress > i[role="progressbar"][aria-valuenow="1"][aria-valuemax="5"]):has(.count-wrap.phase-show)');
+      const show = await captureCountCloudLayout(page, testInfo, textScale, 'guided-answer-resize-first-show', errors, showRoot);
+      expect(show.phase).toBe('count-wrap phase-show');
+      expect(show.guidedNote).toContain('제시 제한시간 없음');
+      expect(show.progressValue).toBe('1');
+      expect(show.progressMax).toBe('5');
+      expect(show.clouds).toHaveLength(2);
+      for (const cloud of show.clouds) {
+        expect(cloud.words.length).toBeGreaterThan(0);
+        expect(cloud.words.every((word) => word.nonzero && word.text.length > 0)).toBe(true);
+        expect(new Set(cloud.words.map((word) => word.text)).size).toBe(1);
+      }
+      shown = { capturedAt: show.capturedAt, counts: show.clouds.map((cloud) => cloud.words.length),
+        words: show.clouds.map((cloud) => cloud.words[0].text), labels: show.clouds.map((cloud) => cloud.label) };
+      expect(shown.counts[0]).not.toBe(shown.counts[1]);
+      expect(shown.words[0]).not.toBe(shown.words[1]);
+      expect(show.storage).toEqual(baseline);
+      expect(show.deadline).toBeNull();
+      await workspace.locator('.accessible-next-action').click();
+      const firstAnswer = panel.locator('.game-count:has(.workspace-progress > i[role="progressbar"][aria-valuenow="1"][aria-valuemax="5"]):has(.count-wrap.phase-answer)');
+      const check = (raw: Awaited<ReturnType<typeof readAnswer>>, viewport: { width: number; height: number }) => {
+        expect(raw.phase).toBe('count-wrap phase-answer');
+        expect(raw.progress).toBe('1');
+        expect(raw.total).toBe('5');
+        expect(raw.mode).toBe('practice');
+        expect(raw.preparationCount).toBe(0);
+        expect(raw.guidedNote).toContain('응답 제한시간 없음');
+        expect(raw.deadlineCount).toBe(0);
+        expect(raw.statuses.filter((status) => status.active).map((status) => status.text)).toEqual(['응답']);
+        expect(raw.signals).toEqual([]);
+        expect(raw.feedback?.trim() ?? '').toBe('');
+        expect(raw.resultCount).toBe(0);
+        expect(raw.storage).toEqual(baseline);
+        expect(raw.textScale).toBe(textScale);
+        expect(raw.fonts).toBe('loaded');
+        expect(raw.mediaCount).toBe(0);
+        expect(raw.viewport).toMatchObject(viewport);
+        expect(raw.viewport.documentWidth).toBeLessThanOrEqual(raw.viewport.clientWidth + 1);
+        expect(raw.viewport.bodyWidth).toBeLessThanOrEqual(raw.viewport.clientWidth + 1);
+        expect(raw.body.scrollLeft).toBe(0);
+        expect(raw.board).not.toBeNull();
+        expect(raw.buttons).toHaveLength(2);
+        expect(raw.buttons.map((button) => button.label)).toEqual(['왼쪽 선택', '오른쪽 선택']);
+        expect(raw.buttons.map((button) => button.disabled)).toEqual([false, false]);
+        expect(raw.buttons.map((button) => button.hiddenText)).toEqual(['?', '?']);
+        for (const button of raw.buttons) {
+          expect(button.box.width).toBeGreaterThanOrEqual(44);
+          expect(button.box.height).toBeGreaterThanOrEqual(44);
+          expect(button.nameplate).not.toBeNull();
+          const nameplate = button.nameplate!;
+          expect(nameplate.nonzeroText).toBe(true);
+          expect(nameplate.textOutsideSelf).toBe(false);
+          expect(nameplate.outsideOwner).toEqual({ x: false, y: false });
+          for (const part of [button, nameplate]) {
+            expect(part.display).not.toBe('none');
+            expect(part.visibility).toBe('visible');
+            expect(part.outsideViewport.x).toBe(false);
+            expect(part.contentOutsideViewport.x).toBe(false);
+            expect(part.clippers.filter((clip) => clip.hardX || clip.hardY || clip.scrollX)).toEqual([]);
+          }
+        }
+        expect(raw.buttons.map((button) => button.nameplate?.text)).toEqual(['← 왼쪽', '오른쪽 →']);
+        // Auto/scroll-Y and hidden ancestors beyond that viewport are initial observations, not a simultaneous-fit assertion.
+      };
+      for (const [index, viewport] of viewports.entries()) {
+        if (index > 0) await page.setViewportSize(viewport);
+        const raw = await capture('resize-ack-' + index, viewport, index === 0 ? firstAnswer : workspace);
+        await page.screenshot({ path: testInfo.outputPath('count-guided-answer-resize-ack-' + index + '-before-wheel.png') });
+        const afterPNG = await workspace.evaluate((frame) => ({ capturedAt: new Date().toISOString(),
+          phase: frame.querySelector('.count-wrap')?.className ?? null,
+          progress: frame.querySelector('.workspace-progress > i[role="progressbar"]')?.getAttribute('aria-valuenow') ?? null,
+          bodyScrollTop: frame.querySelector('.workspace-body')?.scrollTop ?? null,
+          disabled: [...frame.querySelectorAll<HTMLButtonElement>('.count-board > button')].map((button) => button.disabled) }));
+        await testInfo.attach('count-guided-answer-resize-ack-' + index + '-after-png.json', { body: JSON.stringify(afterPNG), contentType: 'application/json' });
+        check(raw, viewport);
+        expect(afterPNG.phase).toBe('count-wrap phase-answer');
+        expect(afterPNG.progress).toBe('1');
+        expect(afterPNG.disabled).toEqual([false, false]);
+        const body = workspace.locator('.workspace-body');
+        await body.hover();
+        const wheelStart = await body.evaluate((element) => ({ capturedAt: new Date().toISOString(), scrollTop: element.scrollTop,
+          clientHeight: element.clientHeight, scrollHeight: element.scrollHeight,
+          external: { x: scrollX, y: scrollY, documentLeft: document.documentElement.scrollLeft, documentTop: document.documentElement.scrollTop,
+            ancestors: (() => {
+              const ancestors = [], backdrop = element.closest('.stage-backdrop');
+              for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+                ancestors.push({ tag: ancestor.tagName, className: ancestor.className, left: ancestor.scrollLeft, top: ancestor.scrollTop });
+                if (ancestor === backdrop) break;
+              }
+              return ancestors;
+            })() } }));
+        await testInfo.attach('count-guided-answer-resize-' + index + '-wheel-start.json', { body: JSON.stringify(wheelStart), contentType: 'application/json' });
+        expect(wheelStart.external).toEqual(raw.external);
+        if (browserName === 'webkit' && isMobile) {
+          // Expose both complete answers; no-op is valid when already visible. This is not a physical swipe.
+          await workspace.locator('.count-wrap.phase-answer > .count-board').scrollIntoViewIfNeeded();
+        } else {
+          await page.mouse.wheel(0, Math.ceil(wheelStart.scrollHeight + wheelStart.clientHeight));
+          nativeWheels += 1;
+          if (wheelStart.scrollTop + wheelStart.clientHeight < wheelStart.scrollHeight - 1) {
+            await expect.poll(() => body.evaluate((element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 1)).toBe(true);
+          }
+        }
+        const recovered = await capture((browserName === 'webkit' && isMobile ? 'platform-autoscroll-' : 'native-wheel-') + index, viewport);
+        check(recovered, viewport);
+        const nameplates = workspace.locator('.count-wrap.phase-answer > .count-board > button > span');
+        await expect(nameplates).toHaveCount(2);
+        await expect(nameplates.nth(0)).toBeInViewport({ ratio: 1 });
+        await expect(nameplates.nth(1)).toBeInViewport({ ratio: 1 });
+        expect(recovered.external).toEqual(wheelStart.external);
+        for (const button of recovered.buttons) for (const part of [button, button.nameplate!]) {
+          expect(part.outsideBody).toEqual({ x: false, y: false });
+          expect(part.outsideViewport).toEqual({ x: false, y: false });
+          expect(part.contentOutsideBody).toEqual({ x: false, y: false });
+          expect(part.contentOutsideViewport).toEqual({ x: false, y: false });
+          expect(part.centerHit).toBe(true);
+          expect(part.clippers.filter((clip) => clip.hardX || clip.hardY || clip.scrollX || clip.scrollY || clip.outerHiddenY)).toEqual([]);
+        }
+        await page.screenshot({ path: testInfo.outputPath('count-guided-answer-resize-' + index + '-native-wheel.png') });
+      }
+      expect(errors).toEqual([]);
+      await closeCommonHeaderSession(page, workspace, false);
+      closedNormally = true;
+      expect(await readStorage()).toEqual(baseline);
+      await expect(page.locator('.stage-result')).toHaveCount(0);
+    } catch (error) {
+      failed = true;
+      console.log('COUNT_GUIDED_ANSWER_RESIZE_FAILURE', JSON.stringify({ project: testInfo.project.name, textScale, closedNormally, nativeWheels, error: String(error) }));
+      try {
+        if (await workspace.count()) await capture('first-failure-observation', page.viewportSize() ?? viewports[0]);
+      } catch (captureError) {
+        console.log('COUNT_GUIDED_ANSWER_RAW_CAPTURE_ERROR', String(captureError));
+      }
+      await page.content().then((body) => testInfo.attach('count-guided-answer-first-failure.html', { body, contentType: 'text/html' }))
+        .catch((captureError) => console.log('COUNT_GUIDED_ANSWER_DOM_CAPTURE_ERROR', String(captureError)));
+      await page.screenshot({ path: testInfo.outputPath('count-guided-answer-first-failure.png') })
+        .catch((captureError) => console.log('COUNT_GUIDED_ANSWER_CAPTURE_ERROR', String(captureError)));
+      throw error;
+    } finally {
+      console.log('COUNT_GUIDED_ANSWER_RESIZE_ERRORS', JSON.stringify({ project: testInfo.project.name, textScale, errors }));
+      try {
+        if (!closedNormally && await workspace.count()) await closeCommonHeaderSession(page, workspace, false);
+      } catch (closeError) {
+        if (!failed) throw closeError;
+        console.log('COUNT_GUIDED_ANSWER_CLOSE_ERROR', String(closeError));
+      }
+    }
+    expect(errors).toEqual([]);
+  });
+}
+for (const textScale of ['standard', 'large'] as const) {
+  test('도형 순서 기억하기: ' + textScale + ' 글자에서 같은 첫 2·3-back 답안의 568×320→320×568→568×320 크기 변경을 유지한다', async ({ page, browserName, isMobile }, testInfo) => {
+    const errors: string[] = [], warmupGlyphs: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+    const viewports = [{ width: 568, height: 320 }, { width: 320, height: 568 }, { width: 568, height: 320 }] as const;
+    await page.setViewportSize(viewports[0]);
+    const panel = page.locator('.stage-panel[data-game="nback"]');
+    const workspace = panel.locator('.game-workspace.game-nback');
+    const body = workspace.locator('.workspace-body');
+    const actions = workspace.locator('.nback-actions.three-options > button');
+    const readStorage = () => page.evaluate(() => {
+      const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+      return { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null };
+    });
+    // Existing captures require another game's DOM; keep this guided-answer read local and independent of unapplied drafts.
+    const capture = () => workspace.evaluate((frame) => {
+      const box = (rect: DOMRect) => ({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height });
+      type Bounds = ReturnType<typeof box>;
+      const outside = (rect: Bounds, boundary: Pick<Bounds, 'left' | 'right' | 'top' | 'bottom'>) => ({
+        x: rect.left < boundary.left - 1 || rect.right > boundary.right + 1,
+        y: rect.top < boundary.top - 1 || rect.bottom > boundary.bottom + 1,
+      });
+      const scrollBody = frame.querySelector<HTMLElement>('.workspace-body')!;
+      const bodyRect = scrollBody.getBoundingClientRect();
+      const bodyBox = { left: bodyRect.left + scrollBody.clientLeft, right: bodyRect.left + scrollBody.clientLeft + scrollBody.clientWidth,
+        top: bodyRect.top + scrollBody.clientTop, bottom: bodyRect.top + scrollBody.clientTop + scrollBody.clientHeight,
+        width: scrollBody.clientWidth, height: scrollBody.clientHeight };
+      const viewportBox = { left: 0, right: document.documentElement.clientWidth, top: 0, bottom: innerHeight };
+      const backdrop = frame.closest<HTMLElement>('.stage-backdrop');
+      const geometry = (element: HTMLElement, key: string, kind: 'text' | 'figure' | 'button') => {
+        const bounds = box(element.getBoundingClientRect()), style = getComputedStyle(element);
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const textRects = kind === 'text' ? [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0).map(box) : [];
+        const clippingAncestors = [];
+        let afterScrollableY = false;
+        for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+          const css = getComputedStyle(ancestor), clipsX = ['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowX);
+          const clipsY = ['hidden', 'clip', 'auto', 'scroll'].includes(css.overflowY);
+          if (clipsX || clipsY) {
+            const rect = ancestor.getBoundingClientRect();
+            const clipBox = { left: rect.left + ancestor.clientLeft, right: rect.left + ancestor.clientLeft + ancestor.clientWidth,
+              top: rect.top + ancestor.clientTop, bottom: rect.top + ancestor.clientTop + ancestor.clientHeight,
+              width: ancestor.clientWidth, height: ancestor.clientHeight };
+            const elementAxes = outside(bounds, clipBox), textAxes = textRects.map((text) => outside(text, clipBox));
+            const elementOutside = { x: clipsX && elementAxes.x, y: clipsY && elementAxes.y };
+            const textOutside = { x: clipsX && textAxes.some((axes) => axes.x), y: clipsY && textAxes.some((axes) => axes.y) };
+            clippingAncestors.push({ tag: ancestor.tagName, className: ancestor.className, overflowX: css.overflowX, overflowY: css.overflowY,
+              clipBox, clientWidth: ancestor.clientWidth, clientHeight: ancestor.clientHeight, scrollWidth: ancestor.scrollWidth,
+              scrollHeight: ancestor.scrollHeight, scrollLeft: ancestor.scrollLeft, scrollTop: ancestor.scrollTop, afterScrollableY,
+              elementOutside, textOutside, hardY: !afterScrollableY && ['hidden', 'clip'].includes(css.overflowY) && (elementOutside.y || textOutside.y),
+              outerHiddenY: afterScrollableY && ['hidden', 'clip'].includes(css.overflowY) && (elementOutside.y || textOutside.y) });
+          }
+          if (['auto', 'scroll'].includes(css.overflowY)) afterScrollableY = true;
+          // The fixed overlay is clipped by its viewport, not the shifted locked background body.
+          if (ancestor === backdrop) break;
+        }
+        const button = element.closest('button'), buttonBox = button ? box(button.getBoundingClientRect()) : null;
+        const hit = document.elementFromPoint((bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+        return { key, kind, text: element.textContent?.trim() ?? '', box: bounds, font: style.font, lineHeight: style.lineHeight,
+          display: style.display, visibility: style.visibility, clientWidth: element.clientWidth, clientHeight: element.clientHeight,
+          scrollWidth: element.scrollWidth, scrollHeight: element.scrollHeight, textRects,
+          textOutsideSelf: textRects.some((text) => { const axes = outside(text, bounds); return axes.x || axes.y; }),
+          textOutsideButton: buttonBox ? textRects.some((text) => { const axes = outside(text, buttonBox); return axes.x || axes.y; }) : false,
+          outsideBody: outside(bounds, bodyBox), outsideViewport: outside(bounds, viewportBox), clippingAncestors,
+          centerHit: Boolean(hit && (hit === element || element.contains(hit))) };
+      };
+      const scrollAncestors = [];
+      for (let ancestor = scrollBody.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        scrollAncestors.push({ tag: ancestor.tagName, className: ancestor.className, left: ancestor.scrollLeft, top: ancestor.scrollTop });
+        if (ancestor === backdrop) break;
+      }
+      const controls = [...frame.querySelectorAll<HTMLButtonElement>('.nback-actions.three-options > button')];
+      const buttons = controls.map((button, index) => ({ ...geometry(button, 'button-' + index, 'button'), disabled: button.disabled,
+        aria: { label: button.getAttribute('aria-label'), labelledby: button.getAttribute('aria-labelledby'), pressed: button.getAttribute('aria-pressed'),
+          hidden: button.getAttribute('aria-hidden') },
+        labels: [...button.querySelectorAll<HTMLElement>(':scope > b, :scope > span')].map((label, child) => geometry(label, 'button-' + index + '-label-' + child, 'text')) }));
+      const labels = [...frame.querySelectorAll<HTMLElement>('.nback-status > div > b, .nback-stage > .guided-pacing-note, .nback-lag-map li > span, .nback-lag-map li > i, .nback-name > span, .nback-name > b')]
+        .map((label, index) => geometry(label, 'label-' + index, 'text'));
+      const figures = [...frame.querySelectorAll<HTMLElement>('.nback-stimulus, .nback-stimulus canvas[role="img"]')]
+        .map((figure, index) => geometry(figure, 'figure-' + index, 'figure'));
+      const glyph = frame.querySelector<HTMLCanvasElement>('.nback-stimulus canvas[role="img"]');
+      const progress = frame.querySelector('.workspace-progress > i[role="progressbar"]');
+      const next = frame.querySelector<HTMLButtonElement>('.nback-stage > .accessible-next-action');
+      const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+      const active = document.activeElement;
+      return { capturedAt: new Date().toISOString(), mode: frame.getAttribute('data-mode'),
+        progress: { current: progress?.getAttribute('aria-valuenow') ?? null, total: progress?.getAttribute('aria-valuemax') ?? null,
+          text: frame.querySelector('.workspace-progress span')?.textContent ?? null, label: progress?.getAttribute('aria-label') ?? null,
+          valueText: progress?.getAttribute('aria-valuetext') ?? null },
+        status: frame.querySelector('.nback-status > div')?.textContent ?? null, task: frame.querySelector('.nback-status > div > b')?.textContent ?? null,
+        lag: frame.querySelector('.nback-lag-map')?.getAttribute('aria-label') ?? null,
+        names: [...frame.querySelectorAll('.nback-name > span, .nback-name > b')].map((node) => node.textContent),
+        guidance: frame.querySelector('.nback-stage > .guided-pacing-note')?.textContent ?? null,
+        glyph: glyph ? { label: glyph.getAttribute('aria-label'), width: glyph.width, height: glyph.height, markup: glyph.outerHTML } : null,
+        preparationCount: frame.querySelectorAll('.game-preparation, .nback-countdown').length,
+        deadlineCount: frame.querySelectorAll('.time-strip').length, resultCount: document.querySelectorAll('.stage-result').length,
+        signalCount: frame.querySelectorAll('.answer-signal').length, feedback: frame.querySelector('.workspace-foot > b')?.textContent?.trim() ?? '',
+        live: [...frame.querySelectorAll('[aria-live]')].map((node) => node.textContent),
+        next: next ? { text: next.textContent?.trim() ?? '', disabled: next.disabled } : null,
+        buttons, labels, figures, items: [...labels, ...figures, ...buttons.flatMap((button) => [button, ...button.labels])],
+        focus: { workspace: active === frame, tag: active?.tagName ?? null, label: active?.getAttribute('aria-label') ?? null,
+          labelledby: active?.getAttribute('aria-labelledby') ?? null },
+        viewport: { width: innerWidth, height: innerHeight, clientWidth: document.documentElement.clientWidth,
+          documentWidth: document.documentElement.scrollWidth, bodyWidth: document.body.scrollWidth, scrollX, scrollY },
+        body: { box: bodyBox, scrollTop: scrollBody.scrollTop, scrollLeft: scrollBody.scrollLeft, clientHeight: scrollBody.clientHeight, scrollHeight: scrollBody.scrollHeight },
+        outerScroll: { panel: frame.closest('.stage-panel')?.scrollTop ?? null, windowX: scrollX, windowY: scrollY, ancestors: scrollAncestors },
+        fonts: document.fonts.status, textScale: document.documentElement.dataset.textScale, mediaCount: document.querySelectorAll('audio,video').length,
+        storage: { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null } };
+    });
+    type Snapshot = Awaited<ReturnType<typeof capture>>;
+    let failed = false, closedNormally = false;
+    try {
+      await page.goto('/');
+      await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+      await page.getByRole('navigation', { name: '빠른 메뉴', exact: true }).getByRole('button', { name: '준비', exact: true }).click();
+      const readiness = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+      await readiness.getByRole('button', { name: textScale === 'large' ? '큰 글자' : '기본 크기', exact: true }).click();
+      await readiness.getByRole('button', { name: '설정 저장하고 닫기', exact: true }).click();
+      await expect(readiness).toHaveCount(0);
+      await expect(page.locator('html')).toHaveAttribute('data-text-scale', textScale);
+      await page.evaluate(() => document.fonts.ready);
+      await page.getByRole('button', { name: '도형 순서 기억하기, 난이도 상, 설정 열기', exact: true }).click();
+      await panel.getByRole('radio', { name: /연습 모드/ }).click();
+      await expect(panel.getByLabel('문제 수 현재 값', { exact: true })).toHaveText('20');
+      await expect(panel.getByLabel('문제 간격 현재 값', { exact: true })).toHaveText('3초');
+      await panel.locator('.practice-advanced-settings > summary').click();
+      const task = panel.getByRole('radiogroup', { name: '도형 순서 난이도', exact: true }).getByRole('radio', { name: /^2·3-back/ });
+      await task.click();
+      await expect(task).toHaveAttribute('aria-checked', 'true');
+      const pacing = panel.locator('label.accessible-pacing-setting');
+      if (!await pacing.locator('input[type="checkbox"]').isChecked()) await pacing.click();
+      await expect(pacing.locator('input[type="checkbox"]')).toBeChecked();
+      const baseline = await readStorage();
+      expect(baseline.generation).not.toBeNull();
+      expect(baseline.resultsRaw).not.toBeNull();
+      const envelope = JSON.parse(baseline.resultsRaw!);
+      expect(envelope).toMatchObject({ version: 4, generation: baseline.generation, results: [] });
+      await panel.locator('.stage-start-practice').click();
+      const lagMap = workspace.locator('.nback-lag-map');
+      for (let step = 1; step <= 3; step += 1) {
+        await expect(lagMap).toHaveAttribute('aria-label', '기억 채우기 ' + step + '/3');
+        const next = workspace.getByRole('button', { name: /^기억했어요 · 다음 도형/ });
+        await expect(next).toBeEnabled();
+        const glyph = await workspace.locator('.nback-stimulus').getByRole('img').getAttribute('aria-label');
+        expect(glyph).toBeTruthy();
+        warmupGlyphs.push(glyph!);
+        await next.click();
+      }
+      await expect(lagMap).toHaveAttribute('aria-label', '현재 N을 N-2·N-3과 비교');
+      await expect(actions).toHaveCount(3);
+      for (const action of await actions.all()) await expect(action).toBeEnabled();
+      await expect(workspace).toBeFocused();
+      let first: Snapshot | null = null;
+      for (const [index, viewport] of viewports.entries()) {
+        if (index > 0) await page.setViewportSize(viewport);
+        // Keep the first resize-ACK read and PNG before hover, focus, wheel, or any corrective geometry assertion.
+        let raw = await capture();
+        const save = async (phase: string, snapshot: Snapshot) => {
+          await testInfo.attach('nback-guided-answer-resize-' + phase + '.json', { body: JSON.stringify({ project: testInfo.project.name,
+            requestedViewport: viewport, requestedTextScale: textScale, nativeScoredAnswers: 0, warmupGlyphs, errorsAtCapture: [...errors], ...snapshot }, null, 2), contentType: 'application/json' });
+          console.log('NBACK_GUIDED_ANSWER_RESIZE', JSON.stringify({ project: testInfo.project.name, textScale, phase, requestedViewport: viewport,
+            actualViewport: snapshot.viewport, progress: snapshot.progress, task: snapshot.task, glyph: snapshot.glyph?.label, focus: snapshot.focus, body: snapshot.body,
+            buttons: snapshot.buttons.map((button) => ({ labels: button.labels.map((label) => label.text), disabled: button.disabled, aria: button.aria })),
+            hardClip: snapshot.items.filter((item) => item.clippingAncestors.some((clip) => clip.hardY || clip.elementOutside.x || clip.textOutside.x)).map((item) => item.key),
+            outerHiddenY: snapshot.items.filter((item) => item.clippingAncestors.some((clip) => clip.outerHiddenY)).map((item) => item.key),
+            offscreenY: snapshot.items.filter((item) => item.outsideBody.y || item.outsideViewport.y).map((item) => item.key),
+            generation: snapshot.storage.generation, nativeScoredAnswers: 0, errors }));
+        };
+        await save(index + '-first-ack', raw);
+        await page.screenshot({ path: testInfo.outputPath('nback-guided-answer-resize-' + index + '-first-ack.png') });
+        if (!first) first = raw;
+        const seen = new Set<string>();
+        const check = (snapshot: Snapshot) => {
+          expect(snapshot.mode).toBe('practice');
+          expect(snapshot.progress).toEqual(first!.progress);
+          expect(snapshot.progress).toMatchObject({ current: '1', total: '20' });
+          expect(snapshot.status).toEqual(first!.status);
+          expect(snapshot.task).toBe('2·3-back · 비교 판단');
+          expect(snapshot.lag).toBe('현재 N을 N-2·N-3과 비교');
+          expect(snapshot.names).toEqual(first!.names);
+          expect(snapshot.guidance).toBe('시간 제한 없이 연습 중 · 기억·응답 후 직접 다음 도형으로 이동하세요');
+          expect(snapshot.glyph).not.toBeNull();
+          expect(snapshot.names).toHaveLength(2);
+          expect(snapshot.names[0]).toBe(snapshot.glyph!.label);
+          expect(snapshot.glyph).toEqual(first!.glyph);
+          expect(snapshot.glyph!.label).toBeTruthy();
+          expect(snapshot.glyph!.width).toBeGreaterThan(0);
+          expect(snapshot.glyph!.height).toBeGreaterThan(0);
+          expect([snapshot.preparationCount, snapshot.deadlineCount, snapshot.resultCount, snapshot.signalCount]).toEqual([0, 0, 0, 0]);
+          expect(snapshot.feedback).toBe('');
+          expect(snapshot.live).toEqual(first!.live);
+          expect(snapshot.storage).toEqual(baseline);
+          expect(snapshot.focus).toEqual(first!.focus);
+          expect(snapshot.focus.workspace).toBe(true);
+          expect(snapshot.next).toEqual(first!.next);
+          expect(snapshot.next?.disabled).toBe(true);
+          expect(snapshot.next?.text).toMatch(/^응답 완료 · 다음 도형/);
+          expect(snapshot.textScale).toBe(textScale);
+          expect(snapshot.fonts).toBe('loaded');
+          expect(snapshot.mediaCount).toBe(0);
+          expect(snapshot.viewport).toMatchObject(viewport);
+          expect(snapshot.viewport.documentWidth).toBeLessThanOrEqual(snapshot.viewport.clientWidth + 1);
+          expect(snapshot.viewport.bodyWidth).toBeLessThanOrEqual(snapshot.viewport.clientWidth + 1);
+          expect(snapshot.body.scrollLeft).toBe(0);
+          expect(snapshot.figures).toHaveLength(2);
+          expect(snapshot.labels).toHaveLength(12);
+          expect(snapshot.labels.map((label) => label.text)).toEqual(first!.labels.map((label) => label.text));
+          expect(snapshot.buttons).toHaveLength(3);
+          expect(snapshot.buttons.map((button) => button.labels.map((label) => label.text))).toEqual([
+            ['2번째 전과 같음', '←'], ['3번째 전과 같음', '→'], ['둘 다 다름', 'Space'] ]);
+          expect(snapshot.buttons.map((button) => button.aria)).toEqual(first!.buttons.map((button) => button.aria));
+          for (const button of snapshot.buttons) {
+            expect(button.disabled).toBe(false);
+            expect(button.aria.pressed).toBe('false');
+            expect(button.aria.hidden).toBeNull();
+            expect(button.box.width).toBeGreaterThanOrEqual(44);
+            expect(button.box.height).toBeGreaterThanOrEqual(44);
+            expect(button.labels).toHaveLength(2);
+          }
+          expect(Math.abs(snapshot.figures[1].box.width - snapshot.figures[1].box.height)).toBeLessThanOrEqual(1);
+          // Hard local XY and every X boundary remain failures; outer Y is only accepted after real body-scroll reachability.
+          for (const item of snapshot.items) {
+            expect(item.box.width, item.key).toBeGreaterThan(0);
+            expect(item.box.height, item.key).toBeGreaterThan(0);
+            expect(item.display, item.key).not.toBe('none');
+            expect(item.visibility, item.key).toBe('visible');
+            expect(item.outsideBody.x, item.key).toBe(false);
+            expect(item.outsideViewport.x, item.key).toBe(false);
+            expect(item.clippingAncestors.filter((clip) => clip.elementOutside.x || clip.textOutside.x || clip.hardY), item.key).toEqual([]);
+            if (item.kind === 'text') {
+              expect(item.text.length, item.key).toBeGreaterThan(0);
+              expect(item.textRects.length, item.key).toBeGreaterThan(0);
+              expect(item.textOutsideSelf, item.key).toBe(false);
+              expect(item.textOutsideButton, item.key).toBe(false);
+            }
+            if (!item.outsideBody.y && !item.outsideViewport.y && !item.clippingAncestors.some((clip) => clip.elementOutside.y || clip.textOutside.y)
+              && (item.kind !== 'button' || item.centerHit)) seen.add(item.key);
+          }
+        };
+        check(raw);
+        for (const [buttonIndex, name] of ['2번째 전과 같음\\s*←', '3번째 전과 같음\\s*→', '둘 다 다름\\s*Space'].entries()) {
+          await expect(actions.nth(buttonIndex)).toHaveAccessibleName(new RegExp('^' + name + '$'));
+        }
+        for (let recovery = 0; recovery < raw.items.length && seen.size < raw.items.length; recovery += 1) {
+          const before = await capture();
+          await save(index + '-before-native-scroll-' + recovery, before);
+          expect(before.outerScroll).toEqual(raw.outerScroll);
+          check(before);
+          raw = before;
+          if (seen.size === before.items.length) break;
+          const wanted = before.items.find((item) => !seen.has(item.key))!;
+          expect(before.body.scrollHeight).toBeGreaterThan(before.body.clientHeight);
+          const delta = (wanted.box.top + wanted.box.bottom - before.body.box.top - before.body.box.bottom) / 2;
+          expect(Math.abs(delta), wanted.key + ' cannot be reached by body scrolling').toBeGreaterThan(0);
+          if (browserName === 'webkit' && isMobile) {
+            // Keep the ACK capture and focus intact; this is platform autoscroll, not a touch gesture.
+            const [kind, itemIndex] = wanted.key.split('-');
+            const target = kind === 'button' ? workspace.locator('.nback-actions.three-options > button').nth(Number(itemIndex))
+              : kind === 'label' ? workspace.locator('.nback-status > div > b, .nback-stage > .guided-pacing-note, .nback-lag-map li > span, .nback-lag-map li > i, .nback-name > span, .nback-name > b').nth(Number(itemIndex))
+              : workspace.locator('.nback-stimulus, .nback-stimulus canvas[role="img"]').nth(Number(itemIndex));
+            await target.scrollIntoViewIfNeeded();
+          } else {
+            await page.mouse.move((before.body.box.left + before.body.box.right) / 2, (before.body.box.top + before.body.box.bottom) / 2);
+            await page.mouse.wheel(0, delta);
+          }
+          await expect.poll(() => body.evaluate((element) => element.scrollTop)).not.toBe(before.body.scrollTop);
+          raw = await capture();
+          await save(index + '-native-scroll-' + recovery, raw);
+          expect(raw.outerScroll).toEqual(before.outerScroll);
+          check(raw);
+        }
+        expect([...seen].sort(), 'all three answers and required names/glyph must remain reachable').toEqual(raw.items.map((item) => item.key).sort());
+      }
+      await expect(workspace).toHaveCount(1);
+      await closeCommonHeaderSession(page, workspace, false);
+      closedNormally = true;
+      expect(await readStorage()).toEqual(baseline);
+      await expect(page.locator('.stage-result')).toHaveCount(0);
+      await testInfo.attach('nback-guided-answer-resize-closed.json', { body: JSON.stringify({ storage: await readStorage(), nativeScoredAnswers: 0, errors }), contentType: 'application/json' });
+    } catch (error) {
+      failed = true;
+      console.log('NBACK_GUIDED_ANSWER_RESIZE_FAILURE', JSON.stringify({ project: testInfo.project.name, textScale, closedNormally, error: String(error) }));
+      await page.content().then((content) => testInfo.attach('nback-guided-answer-resize-first-failure.html', { body: content, contentType: 'text/html' }))
+        .catch((captureError) => console.log('NBACK_GUIDED_ANSWER_RESIZE_DOM_CAPTURE_ERROR', String(captureError)));
+      await page.screenshot({ path: testInfo.outputPath('nback-guided-answer-resize-first-failure.png') })
+        .catch((captureError) => console.log('NBACK_GUIDED_ANSWER_RESIZE_CAPTURE_ERROR', String(captureError)));
+      throw error;
+    } finally {
+      console.log('NBACK_GUIDED_ANSWER_RESIZE_ERRORS', JSON.stringify({ project: testInfo.project.name, textScale, errors }));
+      try {
+        if (!closedNormally && await workspace.count()) await closeCommonHeaderSession(page, workspace, false);
+      } catch (closeError) {
+        if (!failed) throw closeError;
+        console.log('NBACK_GUIDED_ANSWER_RESIZE_CLOSE_ERROR', String(closeError));
+      }
+    }
+    expect(errors).toEqual([]);
+  });
+}

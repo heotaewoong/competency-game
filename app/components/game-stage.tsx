@@ -1775,7 +1775,33 @@ function GameFrame({ gameId, current, total, children, helper, simulationHelper,
   const liveMessage = `${progressText}${liveDetail ? `. ${liveDetail}` : ''}`;
   const footerHelper = mode === 'practice' ? helper : simulationHelper ?? '고정 설정으로 진행 중';
   useLayoutEffect(() => {
-    bodyRef.current?.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    const body = bodyRef.current;
+    if (!body) return;
+    const previousPadding = { value: body.style.getPropertyValue('scroll-padding-block-start'), priority: body.style.getPropertyPriority('scroll-padding-block-start') };
+    const shell = gameId === 'path' && current > 0 ? body.querySelector<HTMLElement>('.path-shell') : null;
+    let top = 0;
+    if (shell && body.clientHeight > 0) {
+      const origin = body.getBoundingClientRect().top + body.clientTop;
+      const bounds = [shell, ...shell.querySelectorAll<HTMLElement>('.edge-marker > span, .edge-marker > span b')]
+        .map((element) => element.getBoundingClientRect()).filter((rect) => rect.width > 0 && rect.height > 0);
+      const contentTop = Math.min(...bounds.map((rect) => rect.top)) - origin + body.scrollTop;
+      const contentBottom = Math.max(...bounds.map((rect) => rect.bottom)) - origin + body.scrollTop;
+      const contentHeight = contentBottom - contentTop;
+      const deadline = body.querySelector<HTMLElement>(':scope > .time-strip');
+      const style = deadline ? getComputedStyle(deadline) : null;
+      const deadlineBounds = deadline?.getBoundingClientRect();
+      const inset = style?.position === 'sticky' && deadlineBounds && deadlineBounds.height > 0
+        ? Math.max(0, deadlineBounds.bottom - origin + Math.max(0, Number.parseFloat(style.marginBottom) || 0)) : 0;
+      // Native focus scrolling uses the same measured reservation; no new focus handler or timer.
+      body.style.setProperty('scroll-padding-block-start', `${inset}px`);
+      const usableHeight = body.clientHeight - inset;
+      if (contentHeight > 0 && usableHeight > 0) {
+        if (contentTop < inset) top = contentTop - inset;
+        else if (contentBottom > body.clientHeight) top = contentHeight <= usableHeight ? contentBottom - body.clientHeight : contentTop - inset;
+      }
+    }
+    body.scrollTo({ top: Math.max(0, Math.min(top, body.scrollHeight - body.clientHeight)), left: 0, behavior: 'auto' });
+    if (gameId === 'path') return () => body.style.setProperty('scroll-padding-block-start', previousPadding.value, previousPadding.priority);
   }, [current, gameId]);
   return (
     <div className={`game-workspace game-${gameId}`} data-mode={mode} role="region" aria-labelledby={`${gameId}-workspace-title`} tabIndex={-1}>
@@ -3736,7 +3762,7 @@ function NumberGame({ onFinish, onClose, config }: GameProps & { config: Practic
 
 const COUNT_BLANK_MS = 350;
 function CountCloud({ word, count, offset }: { word: string; count: number; offset: number }) {
-  return <div className="word-cloud">{Array.from({ length: count }, (_, index) => <span key={index} style={{ left: `${6 + ((index * 37 + offset * 11) % 82)}%`, top: `${7 + ((index * 29 + offset * 17) % 82)}%`, fontSize: `${11 + ((index * 7 + offset) % 5) * 3}px`, fontWeight: 500 + ((index + offset) % 3) * 150 }}>{word}</span>)}</div>;
+  return <div className="word-cloud">{Array.from({ length: count }, (_, index) => <span key={index} style={{ left: `clamp(1em, ${6 + ((index * 37 + offset * 11) % 82)}%, calc(100% - 1em))`, top: `clamp(.75em, ${7 + ((index * 29 + offset * 17) % 82)}%, calc(100% - .75em))`, fontSize: `${11 + ((index * 7 + offset) % 5) * 3}px`, fontWeight: 500 + ((index + offset) % 3) * 150 }}>{word}</span>)}</div>;
 }
 
 function CountGame({ onFinish, onClose, config }: GameProps & { config: PracticeConfig }) {

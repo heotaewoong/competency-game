@@ -23,8 +23,44 @@ for (const origin of ['empty-home', 'completed-session'] as const) {
     }
     const opener = page.getByRole('button', { name: origin === 'empty-home' ? '내 실수 복습' : '문항별 복습', exact: true });
     await expect(opener).toBeEnabled();
-    await opener.focus();
-    await expect(opener).toBeFocused();
+    // Separate protocol reads add observation time; they are not atomic focus events or cause proof.
+    const observeFocus = async (observation: string) => {
+      try {
+        const raw = await page.evaluate(() => {
+          const summarize = (node: Element | null) => node ? { tag: node.tagName, id: node.id, className: node.getAttribute('class'),
+            role: node.getAttribute('role'), label: node.getAttribute('aria-label'), text: (node.textContent ?? '').trim().slice(0, 80) } : null;
+          const inertAncestors = (element: Element | null) => {
+            const ancestors: { tag: string; id: string; className: string | null; inert: boolean; attribute: boolean }[] = [];
+            for (let node = element; node; node = node.parentElement) {
+              const inert = node instanceof HTMLElement && node.inert, attribute = node.hasAttribute('inert');
+              if (inert || attribute) ancestors.push({ tag: node.tagName, id: node.id, className: node.getAttribute('class'), inert, attribute });
+            }
+            return ancestors;
+          };
+          const targets = document.querySelectorAll<HTMLButtonElement>(".stage-result .result-review-button");
+          const target = targets.length === 1 ? targets[0] : null, active = document.activeElement;
+          return { capturedAt: new Date().toISOString(), ticks: performance.now(), documentHasFocus: document.hasFocus(), visibilityState: document.visibilityState,
+            viewport: { width: innerWidth, height: innerHeight }, textScale: document.documentElement.dataset.textScale,
+            phase: { preparation: Boolean(document.querySelector('.game-preparation')), result: Boolean(document.querySelector('.stage-result')),
+              progress: document.querySelector('.game-workspace .workspace-progress span')?.textContent ?? null },
+            gameId: target?.closest('[data-game]')?.getAttribute('data-game') ?? null, targetCount: targets.length,
+            target: summarize(target), active: summarize(active), targetIsActive: target ? target === active : null,
+            targetIsConnected: target?.isConnected ?? null, activeIsConnected: active?.isConnected ?? null,
+            inertAncestors: { target: inertAncestors(target), active: inertAncestors(active) } };
+        });
+        console.log('FOCUS_BOUNDARY_DIAGNOSTIC', JSON.stringify({ callsite: 'completed-session-review-opener', observation, ...raw }));
+      } catch (diagnosticError) {
+        console.log('FOCUS_BOUNDARY_DIAGNOSTIC_ERROR', JSON.stringify({ callsite: 'completed-session-review-opener', observation, error: String(diagnosticError) }));
+      }
+    };
+    try {
+      await opener.focus();
+      if (origin === 'completed-session') await observeFocus('after-focus');
+      await expect(opener).toBeFocused();
+    } catch (error) {
+      if (origin === 'completed-session') await observeFocus('first-focus-failure');
+      throw error;
+    }
     await page.keyboard.down('Enter');
     const dialog = page.getByRole('dialog', { name: origin === 'empty-home' ? '복습 센터' : '내 실수 복습', exact: true });
     await expect(dialog).toBeVisible();
