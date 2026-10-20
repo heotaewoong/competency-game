@@ -536,28 +536,67 @@ for (const textScale of ['standard', 'large'] as const) {
     await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
     await expect(page.locator('html')).toHaveAttribute('data-text-scale', textScale);
     await expect(page.locator('.game-card')).toHaveCount(9);
+    await expect(page.locator('.game-grid .thumb-scene')).toHaveCount(9);
     await expect(page.locator('.game-card').filter({ has: page.getByRole('heading', { name: '가위바위보', exact: true }) }).locator('.card-record dd').nth(1)).toHaveText('0%');
     await page.evaluate(() => document.fonts.ready);
 
-    for (const width of [240, 280, 320, 350, 385, 520, 620, 621, 768, 900, 1024, 1280]) {
+    for (const width of [240, 280, 320, 350, 385, 520, 521, 568, 620, 621, 768, 900, 1024, 1280]) {
       await page.setViewportSize({ width, height: width === 385 ? 382 : 640 });
       const issues = await page.locator('.game-card').evaluateAll((cards) => cards.flatMap((card) => {
         const cardRect = card.getBoundingClientRect();
-        return [...card.querySelectorAll<HTMLElement>('.card-copy h3, .card-copy p, .card-record dt, .card-record dd, .card-action > span, .card-action b')].flatMap((element) => {
+        return [...card.querySelectorAll<HTMLElement>('.card-top > span, .card-badges > *, .card-copy > span, .card-copy h3, .card-copy p, .card-record dt, .card-record dd, .card-action > span, .card-action b')].flatMap((element) => {
           const rect = element.getBoundingClientRect();
           const range = document.createRange();
           range.selectNodeContents(element);
-          const textOutside = [...range.getClientRects()].some((text) =>
+          const textRects = [...range.getClientRects()];
+          const missingText = !textRects.some((text) => text.width > 0 && text.height > 0);
+          const textOutside = textRects.some((text) =>
             text.left < rect.left - 1 || text.right > rect.right + 1 ||
             text.top < rect.top - 1 || text.bottom > rect.bottom + 1);
           const clipped = element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1;
           const outsideCard = rect.left < cardRect.left - 1 || rect.right > cardRect.right + 1;
-          return clipped || outsideCard || textOutside ? [{
+          return missingText || clipped || outsideCard || textOutside ? [{
             game: card.querySelector('h3')?.textContent,
-            text: element.textContent, clipped, outsideCard, textOutside,
+            text: element.textContent, missingText, clipped, outsideCard, textOutside,
           }] : [];
         });
       }));
+      const thumbnailLayout = await page.locator('.game-card').evaluateAll((cards) => cards.map((card) => {
+        const game = card.querySelector('h3')?.textContent;
+        const content = card.querySelector<HTMLElement>('.game-card-content');
+        const thumb = content?.querySelector<HTMLElement>(':scope > .thumb-scene');
+        const copy = content?.querySelector<HTMLElement>(':scope > .card-copy');
+        if (!content || !thumb || !copy) return { game, issue: '카드 그림 또는 문구 영역 없음' };
+        const rect = (element: Element) => {
+          const box = element.getBoundingClientRect();
+          return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, height: box.height };
+        };
+        const cardBox = rect(card), contentBox = rect(content), thumbBox = rect(thumb), copyBox = rect(copy);
+        const style = getComputedStyle(content), thumbStyle = getComputedStyle(thumb), copyStyle = getComputedStyle(copy);
+        const trackWidth = style.display === 'grid' ? Number.parseFloat(style.gridTemplateColumns) : null;
+        const overlapX = Math.max(0, Math.min(thumbBox.right, copyBox.right) - Math.max(thumbBox.left, copyBox.left));
+        const overlapY = Math.max(0, Math.min(thumbBox.bottom, copyBox.bottom) - Math.max(thumbBox.top, copyBox.top));
+        const hidden = thumbStyle.display === 'none' || thumbStyle.visibility === 'hidden' || copyStyle.display === 'none' || copyStyle.visibility === 'hidden' || thumbBox.width <= 0 || thumbBox.height <= 0 || copyBox.width <= 0 || copyBox.height <= 0;
+        const outsideCard = thumbBox.left < cardBox.left - 1 || thumbBox.right > cardBox.right + 1 || thumbBox.top < cardBox.top - 1 || thumbBox.bottom > cardBox.bottom + 1;
+        const outsideTrack = trackWidth !== null && (!Number.isFinite(trackWidth) || trackWidth <= 0 || thumbBox.width > trackWidth + 1);
+        const overlapsCopy = overlapX > 0 && overlapY > 0;
+        return {
+          game, issue: hidden || outsideCard || outsideTrack || overlapsCopy ? '카드 그림 배치 오류' : null,
+          hidden, outsideCard, outsideTrack, overlapsCopy, overlapX, overlapY,
+          card: cardBox, content: contentBox, thumb: thumbBox, copy: copyBox,
+          display: style.display, gridTemplateColumns: style.gridTemplateColumns, trackWidth, thumbPadding: thumbStyle.padding,
+        };
+      }));
+      const thumbnailIssues = thumbnailLayout.filter((item) => item.issue !== null);
+      if (issues.length || thumbnailIssues.length || width === 521 || width === 568) {
+        console.log('RESPONSIVE_CARD_THUMBNAILS', JSON.stringify({
+          project: testInfo.project.name, textScale, requestedViewport: page.viewportSize(), issues, thumbnailLayout,
+        }));
+      }
+      if (issues.length || thumbnailIssues.length || width === 568) {
+        await page.screenshot({ fullPage: true, path: testInfo.outputPath(`cards-thumbnails-${textScale}-${width}.png`) });
+      }
+      expect(thumbnailIssues, `${width}px ${textScale}: 카드 그림·문구 겹침`).toEqual([]);
       expect(issues, `${width}px ${textScale}: 카드 내부 잘림`).toEqual([]);
       const pageOverflow = await page.evaluate((expectedWidth) => {
         const firstWidth = document.documentElement.scrollWidth;
@@ -2137,7 +2176,8 @@ for (const textScale of ['standard', 'large'] as const) {
         const button = element.closest('button'), buttonBox = button ? box(button.getBoundingClientRect()) : null;
         const hit = document.elementFromPoint((bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
         return { key, kind, text: element.textContent?.trim() ?? '', box: bounds, font: style.font, lineHeight: style.lineHeight,
-          display: style.display, visibility: style.visibility, clientWidth: element.clientWidth, clientHeight: element.clientHeight,
+          display: style.display, visibility: style.visibility, computedHeight: style.height, boxSizing: style.boxSizing, transform: style.transform,
+          clientWidth: element.clientWidth, clientHeight: element.clientHeight,
           scrollWidth: element.scrollWidth, scrollHeight: element.scrollHeight, textRects,
           textOutsideSelf: textRects.some((text) => { const axes = outside(text, bounds); return axes.x || axes.y; }),
           textOutsideButton: buttonBox ? textRects.some((text) => { const axes = outside(text, buttonBox); return axes.x || axes.y; }) : false,
@@ -2264,7 +2304,10 @@ for (const textScale of ['standard', 'large'] as const) {
           for (const [buttonIndex, button] of snapshot.buttons.entries()) {
             expect(button.disabled).toBe(false);
             expect(button.box.width, button.label ?? '').toBeGreaterThanOrEqual(44);
-            expect(button.box.height, button.label ?? '').toBeGreaterThanOrEqual(44);
+            expect(button.boxSizing, button.label ?? '').toBe('border-box');
+            expect(Number.parseFloat(button.computedHeight), button.label ?? '').toBeGreaterThanOrEqual(44);
+            // A translating 44px button differed by one observed 2^-16 CSSpx in run180; keep layout 44 strict.
+            expect(button.box.height + 1 / 65536, button.label ?? '').toBeGreaterThanOrEqual(44);
             expect(button.labels).toHaveLength(2);
             expect(button.label, button.key).toBe((buttonIndex < 4 ? '놓쳤다' : '찾았다') + ', ' + button.labels[0].text + ', 단축키 ' + button.keyText);
           }
@@ -2381,7 +2424,7 @@ for (const textScale of ['standard', 'large'] as const) {
         const clippers: { tag: string; className: string; overflowX: string; overflowY: string; afterScrollableY: boolean; clipBox: Bounds;
           axes: { x: boolean; y: boolean }; hardX: boolean; hardY: boolean; scrollX: boolean; scrollY: boolean; outerHiddenY: boolean }[] = [];
         let afterScrollableY = false;
-        for (let node: HTMLElement | null = element; node; node = node.parentElement) {
+        for (let node: HTMLElement | null = withText ? element : element.parentElement; node; node = node.parentElement) {
           const css = getComputedStyle(node), rect = node.getBoundingClientRect();
           const clipBox = { left: rect.left + node.clientLeft, right: rect.left + node.clientLeft + node.clientWidth,
             top: rect.top + node.clientTop, bottom: rect.top + node.clientTop + node.clientHeight, width: node.clientWidth, height: node.clientHeight };
