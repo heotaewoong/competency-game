@@ -1801,9 +1801,25 @@ for (const viewport of [{ width: 320, height: 568 }, { width: 385, height: 640 }
         await page.evaluate(() => document.fonts.ready);
         const opener = page.getByRole('button', { name: '길 만들기, 난이도 상, 설정 열기', exact: true });
         await opener.scrollIntoViewIfNeeded();
-        const home = await page.evaluate(() => ({ x: scrollX, y: scrollY }));
-        await testInfo.attach('path-home-baseline', { body: JSON.stringify({ viewport, textScale, home }), contentType: 'application/json' });
+        const beforeClick = await page.evaluate(() => ({ x: scrollX, y: scrollY }));
+        await opener.evaluate((button) => {
+          button.addEventListener('click', (event) => {
+            const state = window as Window & { __pathOpeningScroll?: { x: number; y: number; trusted: boolean } };
+            state.__pathOpeningScroll = { x: scrollX, y: scrollY, trusted: event.isTrusted };
+          }, { capture: true, once: true });
+        });
         await opener.click();
+        const opening = await page.evaluate(() => {
+          const state = window as Window & { __pathOpeningScroll?: { x: number; y: number; trusted: boolean } };
+          const value = state.__pathOpeningScroll;
+          delete state.__pathOpeningScroll;
+          if (!value) throw new Error('게임을 연 실제 클릭의 스크롤 위치가 기록되지 않았습니다.');
+          return value;
+        });
+        expect(opening.trusted).toBe(true);
+        const home = { x: opening.x, y: opening.y };
+        await testInfo.attach('path-home-baseline', { body: JSON.stringify({ viewport, textScale, beforeClick, home, trusted: opening.trusted }), contentType: 'application/json' });
+        console.log('PATH_OPEN_SCROLL_BOUNDARY', JSON.stringify({ project: testInfo.project.name, viewport, textScale, beforeClick, home, trusted: opening.trusted }));
         const panel = page.locator('.stage-panel[data-game="path"]');
         await panel.getByRole('radio', { name: /연습 모드/ }).click();
         const settings = panel.getByRole('region', { name: '연습 세션 설정', exact: true });
@@ -1822,6 +1838,8 @@ for (const viewport of [{ width: 320, height: 568 }, { width: 385, height: 640 }
         // First play geometry is recorded before focus waits, hover, wheel or any test scroll.
         const initial = await capturePathInitialVisibility(page, testInfo, 'initial');
         await page.screenshot({ path: testInfo.outputPath('path-initial-raw-before-assert.png') });
+        expect(initial.external.fixedTop).toBe(`${-home.y}px`);
+        expect(initial.external.fixedLeft).toBe(`${-home.x}px`);
         const seenMarkerParts = new Set<string>();
         const check = (raw: typeof initial) => {
           expect(raw.viewport).toEqual(viewport);
