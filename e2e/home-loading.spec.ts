@@ -2490,6 +2490,10 @@ for (const textScale of ['standard', 'large'] as const) {
           nameplate: button.nameplate ? { text: button.nameplate.text, outsideBody: button.nameplate.contentOutsideBody, hit: button.nameplate.centerHit,
             scrollY: button.nameplate.clippers.filter((clip) => clip.scrollY), outerHiddenY: button.nameplate.clippers.filter((clip) => clip.outerHiddenY) } : null })),
         external: raw.external, generation: raw.storage.generation, priorNativeWheels: nativeWheels, nativeGameAnswers: 0, errors }));
+      if (phase === 'first-failure-observation') {
+        console.log('COUNT_GUIDED_ANSWER_FAILURE_GEOMETRY', JSON.stringify({ project: testInfo.project.name,
+          capturePhase: phase, requestedViewport, requestedTextScale: textScale, priorNativeWheels: nativeWheels, shown, ...raw }));
+      }
       return raw;
     };
     try {

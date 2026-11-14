@@ -2701,6 +2701,7 @@ body {
   .hero-actions { margin-top: 12px; }
   .hero-primary { min-height: 50px; }
   .game-path { position: relative; }
+  .game-path .workspace-head { padding-block: 3px; }
   /* Reuse decorative outer space for the board without shrinking its controls or edge labels. */
   .stage-backdrop:has(.game-workspace.game-path) { padding-block: max(6px, env(safe-area-inset-top)) max(6px, env(safe-area-inset-bottom)); }
   .stage-panel[data-game="path"]:has(.game-workspace) { min-height: 0; max-height: calc(100dvh - max(6px, env(safe-area-inset-top)) - max(6px, env(safe-area-inset-bottom))); }
