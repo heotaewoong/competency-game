@@ -111,8 +111,10 @@ for (const clipboardFailure of ['missing', 'sync-throw', 'rejected'] as const) {
     await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
     await page.locator('#feedback').getByRole('button', { name: '개선 의견 보내기' }).click();
     const dialog = page.getByRole('dialog', { name: '의견 보내기', exact: true });
+    await expect(dialog.locator('#feedback-public-notice')).toBeFocused();
     const message = dialog.locator('textarea');
     await message.fill('가'.repeat(1000));
+    await expect(message).toHaveValue('가'.repeat(1000));
     await dialog.getByRole('button', { name: /복사 후 GitHub 열기/ }).click();
     await expect(dialog.locator('.feedback-status')).toContainText('자동 복사가 차단됐습니다');
     await expect(message).toHaveValue('가'.repeat(1000));
