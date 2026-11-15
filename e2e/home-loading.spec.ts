@@ -588,7 +588,7 @@ for (const textScale of ['standard', 'large'] as const) {
         };
       }));
       const thumbnailIssues = thumbnailLayout.filter((item) => item.issue !== null);
-      if (issues.length || thumbnailIssues.length || width === 521 || width === 568) {
+      if (issues.length || thumbnailIssues.length || width === 240 || width === 521 || width === 568) {
         console.log('RESPONSIVE_CARD_THUMBNAILS', JSON.stringify({
           project: testInfo.project.name, textScale, requestedViewport: page.viewportSize(), issues, thumbnailLayout,
         }));

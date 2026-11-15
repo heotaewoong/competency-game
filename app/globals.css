@@ -213,7 +213,8 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 .nback-thumb-tags { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .nback-thumb-tags span { color: #5d7976; font-size: clamp(6px, 2.9cqw, 9px); font-weight: 900; letter-spacing: .14em; }
 .nback-thumb-tags b { padding: clamp(4px, 2cqw, 6px) clamp(7px, 4cqw, 11px); border-radius: 999px; color: #17655f; background: #dff3f0; box-shadow: inset 0 0 0 1px #c6e4df; font-size: clamp(6px, 3.1cqw, 9px); letter-spacing: .04em; }
-.number-thumb { padding: 12px 67px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }.number-thumb i { display: grid; place-items: center; border: 1px solid #dce7c9; border-radius: 6px; color: #587c25; background: #fff; font-size: 10px; font-style: normal; font-weight: 800; }
+/* Keep room for the number grid without letting padding widen a narrow card track. */
+.number-thumb { padding: 12px clamp(7px, calc(50% - 34px), 67px); display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }.number-thumb i { display: grid; place-items: center; border: 1px solid #dce7c9; border-radius: 6px; color: #587c25; background: #fff; font-size: 10px; font-style: normal; font-weight: 800; }
 .count-thumb { padding: 10px; display: grid; grid-template-columns: 1fr 1px 1fr; gap: 6px; }.count-thumb > span { background: #d7dce5; }.count-thumb > div { display: flex; align-content: center; justify-content: center; flex-wrap: wrap; gap: 1px 3px; overflow: hidden; }.count-thumb i { color: #87661c; font-size: 7px; font-style: normal; }
 /* Original CSS character set shared by the cat-and-mouse game, thumbnail and review. */
 .animal-marker { --marker-size: 50px; --actor-bg: #eef1f4; --actor-shadow: rgba(44, 55, 73, .16); position: relative; width: var(--marker-size); aspect-ratio: 1; display: inline-grid; flex: 0 0 auto; place-items: center; vertical-align: middle; }
