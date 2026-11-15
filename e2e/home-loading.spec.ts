@@ -1897,21 +1897,23 @@ for (const viewport of [{ width: 320, height: 568 }, { width: 385, height: 640 }
         if (!initial.fits) {
           const body = workspace.locator('.workspace-body');
           const platformScroll = browserName === 'webkit' && isMobile;
+          const bottomPart = initial.markers.flatMap((marker, markerIndex) => marker.parts.map((part, partIndex) => ({ markerIndex, partIndex, ...part })))
+            .sort((a, b) => b.box.bottom - a.box.bottom)[0];
+          let bottomTarget = workspace.locator('.path-fence-cycle[data-cycle-cell="24"]');
+          if (bottomPart && bottomPart.box.bottom > initial.cells[24].controls[0].box.bottom) {
+            const marker = workspace.locator('.path-shell .edge-marker > span').nth(bottomPart.markerIndex);
+            bottomTarget = bottomPart.partIndex === 0 ? marker : marker.locator('*').nth(bottomPart.partIndex - 1);
+          }
           if (platformScroll) {
             // Scroll the lowest required content, not an arbitrary padding edge; this is not a physical swipe.
-            const bottomPart = initial.markers.flatMap((marker, markerIndex) => marker.parts.map((part, partIndex) => ({ markerIndex, partIndex, ...part })))
-              .sort((a, b) => b.box.bottom - a.box.bottom)[0];
-            let target = workspace.locator('.path-fence-cycle[data-cycle-cell="24"]');
-            if (bottomPart && bottomPart.box.bottom > initial.cells[24].controls[0].box.bottom) {
-              const marker = workspace.locator('.path-shell .edge-marker > span').nth(bottomPart.markerIndex);
-              target = bottomPart.partIndex === 0 ? marker : marker.locator('*').nth(bottomPart.partIndex - 1);
-            }
-            await target.scrollIntoViewIfNeeded();
+            await bottomTarget.scrollIntoViewIfNeeded();
           } else {
             await body.hover();
             await page.mouse.wheel(0, Math.ceil(initial.body.scrollHeight + initial.body.clientHeight));
           }
           await expect(workspace.locator('.path-fence-cycle[data-cycle-cell="24"]')).toBeInViewport({ ratio: 1 });
+          // A wheel can still be moving after the last grid cell becomes visible.
+          await expect(bottomTarget).toBeInViewport({ ratio: 1 });
           const scrollMethod = platformScroll ? 'platform-autoscroll' : 'native-wheel';
           const last = await capturePathInitialVisibility(page, testInfo, scrollMethod + '-last-row');
           check(last);
