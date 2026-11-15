@@ -163,6 +163,47 @@ for (const width of [320, 390, 621, 760, 900, 1280]) {
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
     await expect(opener).toBeFocused();
+    const requestsLink = section.getByRole('link', { name: '공개 요청 목록, GitHub 새 창으로 열기', exact: true });
+    await expect(requestsLink).toContainText('공개 요청 목록 (GitHub)');
+    await expect(requestsLink).toHaveAttribute('href', 'https://github.com/heotaewoong/competency-game/issues');
+    await expect(requestsLink).toHaveAttribute('target', '_blank');
+    await expect(requestsLink).toHaveAttribute('rel', 'noopener noreferrer');
+    await expect(requestsLink.locator('span')).toHaveAttribute('aria-hidden', 'true');
+    await page.keyboard.press('Tab');
+    await expect(requestsLink).toBeFocused();
+    const linkLayout = await requestsLink.evaluate((link) => {
+      const box = link.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(link);
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return {
+        box: { left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, height: box.height },
+        viewport: { width: innerWidth, height: innerHeight },
+        textRects: Array.from(range.getClientRects(), ({ left, right, top, bottom, width, height }) => ({ left, right, top, bottom, width, height })).filter((rect) => rect.width > 0 && rect.height > 0),
+        centerHit: hit === link || link.contains(hit),
+        clientWidth: link.clientWidth, scrollWidth: link.scrollWidth, clientHeight: link.clientHeight, scrollHeight: link.scrollHeight,
+      };
+    });
+    await testInfo.attach('public-request-link-layout', { body: JSON.stringify({ project: testInfo.project.name, width, layout: linkLayout }), contentType: 'application/json' });
+    console.log('PUBLIC_REQUEST_LINK_LAYOUT', JSON.stringify({ project: testInfo.project.name, width, layout: linkLayout }));
+    expect(linkLayout.centerHit).toBe(true);
+    expect(linkLayout.box.width).toBeGreaterThanOrEqual(44);
+    expect(linkLayout.box.height).toBeGreaterThanOrEqual(44);
+    expect(linkLayout.box.left).toBeGreaterThanOrEqual(0);
+    expect(linkLayout.box.right).toBeLessThanOrEqual(linkLayout.viewport.width);
+    expect(linkLayout.box.top).toBeGreaterThanOrEqual(0);
+    expect(linkLayout.box.bottom).toBeLessThanOrEqual(linkLayout.viewport.height);
+    expect(linkLayout.textRects.length).toBeGreaterThan(0);
+    expect(linkLayout.scrollWidth).toBeLessThanOrEqual(linkLayout.clientWidth);
+    expect(linkLayout.scrollHeight).toBeLessThanOrEqual(linkLayout.clientHeight);
+    for (const rect of linkLayout.textRects) {
+      expect(rect.left).toBeGreaterThanOrEqual(linkLayout.box.left);
+      expect(rect.right).toBeLessThanOrEqual(linkLayout.box.right);
+      expect(rect.top).toBeGreaterThanOrEqual(linkLayout.box.top);
+      expect(rect.bottom).toBeLessThanOrEqual(linkLayout.box.bottom);
+    }
+    await page.keyboard.press('Shift+Tab');
+    await expect(opener).toBeFocused();
     await expect(page.locator('.site-shell > [inert]')).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     if (width > 620) {

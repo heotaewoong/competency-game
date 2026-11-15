@@ -28,7 +28,7 @@ import { clearTrainingBundleLaunch, completeTrainingBundle, createTrainingBundle
 import { AccessibilityBootstrap, ReadinessCenter, READINESS_STORAGE_KEY, captureCurrentReadinessAssessment, parseSavedReadinessSummary, type SavedReadinessSummary } from './components/readiness-center';
 import type { DataManagementActionResult } from './components/data-management-dialog';
 import { lockDocumentScroll } from './lib/scroll-lock';
-import { publicFeedbackEntries } from './lib/feedback';
+import { FEEDBACK_ISSUES_URL, publicFeedbackEntries } from './lib/feedback';
 
 function StageLoading({ onClose }: { onClose: () => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -1115,7 +1115,7 @@ export default function Home() {
             </article>
           </li>)}
         </ul> : <div className="public-feedback-empty"><h3>아직 홈페이지에 공개한 개선 의견이 없습니다.</h3><p>게임을 하며 불편했던 점이나 바라는 개선을 알려주세요. 검토 후 공개할 내용을 이곳에 안내합니다.</p></div>}
-        <div className="public-feedback-actions"><button type="button" className="feedback-submit" onClick={(event) => openFeedback(event.currentTarget)}>개선 의견 보내기</button><p>제출은 GitHub에서 최종 확인합니다. 이 목록은 선별한 내용을 업데이트할 때 반영되며, 실시간 접수함은 아닙니다.</p></div>
+        <div className="public-feedback-actions"><button type="button" className="feedback-submit" onClick={(event) => openFeedback(event.currentTarget)}>개선 의견 보내기</button><a href={FEEDBACK_ISSUES_URL} target="_blank" rel="noopener noreferrer" aria-label="공개 요청 목록, GitHub 새 창으로 열기">공개 요청 목록 (GitHub) <span aria-hidden="true">↗</span></a><p>제출은 GitHub에서 최종 확인합니다. 이 목록은 선별한 내용을 업데이트할 때 반영되며, 실시간 접수함은 아닙니다.</p></div>
       </section>
 
       <footer>

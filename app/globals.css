@@ -785,8 +785,8 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 /* Count */
 .count-stage-shell { width: min(900px, 100%); display: grid; justify-items: center; }.count-wrap { width: 100%; }.count-wrap > .time-strip { width: 100%; }.count-fixation { width: 88px; height: 88px; display: grid; place-items: center; border: 1px solid #d9dfe8; border-radius: 50%; color: #71809a; background: #fff; font-size: 34px; }.count-board { width: 100%; height: min(460px, 57vh); display: grid; grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr); gap: 12px; }.count-board > i { background: #d7dce4; }.count-board > button { min-width: 0; padding: 0; overflow: hidden; display: grid; grid-template-rows: 1fr 40px; border: 1px solid var(--line); border-radius: 14px; color: #42506a; background: #fff; }.phase-show .count-board > button:disabled { opacity: 1; }.count-board > button > span { display: grid; place-items: center; border-top: 1px solid var(--line); font-size: 10px; }.word-cloud { position: relative; min-width: 0; min-height: 0; overflow: hidden; }.word-cloud span { position: absolute; transform: translate(-50%, -50%); color: #2d3748; white-space: nowrap; }.count-hidden { display: grid; place-items: center; color: #aab2c0; font-size: 48px; background: linear-gradient(145deg, #fbfcfe, #f4f6fa); }
 
-/* Keep answer labels inside WebKit's integer clip on fractional-height boards. */
-.game-count .count-wrap.phase-answer > .count-board > button { padding-bottom: 1px; }
+/* Keep answer labels inside WebKit's integer clip on fractional-size boards. */
+.game-count .count-wrap.phase-answer > .count-board > button { padding-bottom: 1px; padding-inline: 1px; }
 
 /* Mouse */
 .mouse-layout { width: min(900px, 100%); display: grid; grid-template-columns: minmax(300px, 500px) minmax(240px, 1fr); gap: 12px 26px; align-items: center; }.mouse-layout > .stage-sequence, .mouse-layout > .time-strip { width: 100%; grid-column: 1 / -1; margin-bottom: 0; }
@@ -3266,7 +3266,9 @@ html[data-text-scale="large"] .training-bundle .training-bundle-status { font-si
 .public-feedback-response { padding-top: 12px; border-top: 1px solid var(--line); font-size: 12px; }
 .public-feedback-response p { margin-bottom: 0; white-space: pre-wrap; }
 .public-feedback-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-top: 16px; }
-.public-feedback-actions button { min-height: 48px; margin: 0; padding: 10px 18px; border-radius: 10px; font-size: 13px; font-weight: 800; }
+.public-feedback-actions button, .public-feedback-actions a { min-height: 48px; margin: 0; padding: 10px 18px; border-radius: 10px; font-size: 13px; font-weight: 800; }
+.public-feedback-actions a { min-width: 0; max-width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line); color: var(--ink); background: var(--surface); }
+html[data-text-scale="large"] .public-feedback-actions a { font-size: max(13px, .875em); }
 .public-feedback-actions p { flex: 1 1 260px; margin: 0; }
 
 /* Timed Count stimuli need no scrolling during the unchanged brief show window.
