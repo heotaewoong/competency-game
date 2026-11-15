@@ -138,8 +138,16 @@ for (const width of [320, 390, 621, 760, 900, 1280]) {
       if (/(^|\.)(github\.com|githubusercontent\.com)$/.test(new URL(request.url()).hostname)) githubRequests.push(request.url());
     });
     await page.setViewportSize({ width, height: 900 });
-    await page.goto('/#feedback');
+    await page.goto('/');
     await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+    const quickLink = page.getByRole('link', { name: '개선 요청·현황', exact: true });
+    await expect(quickLink).toHaveAttribute('href', '#feedback');
+    await quickLink.press('Shift+Tab');
+    await expect(page.getByRole('button', { name: '공략 보기', exact: true })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(quickLink).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/#feedback$/);
     const section = page.getByRole('region', { name: '개선 의견과 처리 현황' });
     await expect(section.getByRole('heading', { level: 2 })).toBeVisible();
     await expect(section).toContainText('실시간 접수함은 아닙니다.');

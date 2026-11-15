@@ -952,7 +952,7 @@ export default function Home() {
               <b>{featuredGame.title}</b><i aria-hidden="true">→</i>
             </button>
             <button type="button" className="hero-guide" disabled={!resultsLoaded} onClick={() => setGuideGameId(featuredGame.id)}>공략 보기</button>
-            <a href="#games">모든 게임</a>
+            <a href="#feedback">개선 요청·현황</a>
           </div>
           <details className="simulator-note">
             <summary>이 연습 도구의 범위</summary>
