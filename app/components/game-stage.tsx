@@ -672,11 +672,12 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onComplete, onRea
   const [appointmentPreferences, setAppointmentPreferences] = useState<AppointmentPreferences>(DEFAULT_APPOINTMENT_PREFERENCES);
   const [focusedPractice, setFocusedPractice] = useState<FocusedPracticePreferences>(DEFAULT_FOCUSED_PRACTICE);
   const panelRef = useRef<HTMLElement>(null);
+  const preparationActionFocusRef = useRef<{ action: string; run: number } | null>(null);
   const finishedRun = useRef(false);
   const phaseRef = useRef(phase);
   const onCloseRef = useRef(onClose);
   const onSwitchRef = useRef(onSwitch);
-  const overlayWasOpenRef = useRef(false);
+  const overlayWasOpenRef = useRef<'asset' | 'other' | null>(null);
   const reviewReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   const overlayOpenRef = useRef(false);
   const visibilityPausedRef = useRef(false);
@@ -689,7 +690,16 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onComplete, onRea
   useEffect(() => () => { startRequestRef.current += 1; }, []);
 
   usePausableTimeout(
-    () => setPrepCountdown((value) => value === 1 ? null : (value ?? 1) - 1),
+    () => {
+      if (gameId === 'appointment' && prepCountdown === 1) {
+        const active = document.activeElement;
+        const action = active instanceof HTMLButtonElement && panelRef.current?.contains(active) && active.closest('.game-appointment .workspace-actions')
+          ? ['workspace-switch', 'workspace-report', 'session-close'].find((name) => active.classList.contains(name))
+          : undefined;
+        preparationActionFocusRef.current = action ? { action, run } : null;
+      }
+      setPrepCountdown((value) => value === 1 ? null : (value ?? 1) - 1);
+    },
     1000,
     phase === 'play' && prepCountdown !== null,
     `prep-${run}-${prepCountdown ?? 'done'}`,
@@ -736,6 +746,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onComplete, onRea
   useEffect(() => { overlayOpenRef.current = overlayOpen; }, [overlayOpen]);
 
   const stopActiveSession = useCallback(() => {
+    preparationActionFocusRef.current = null;
     visibilityPausedRef.current = false;
     setVisibilityPaused(false);
     setVisibilityPauseCount(0);
@@ -819,12 +830,23 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onComplete, onRea
       if (phase === 'play' && prepCountdown === null) {
         const workspace = panelRef.current?.querySelector<HTMLElement>('.game-workspace');
         const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        const preparationAction = preparationActionFocusRef.current;
+        preparationActionFocusRef.current = null;
+        if (gameId === 'appointment' && overlayOpenRef.current) return;
+        if (gameId === 'appointment' && preparationAction?.run === run && workspace &&
+          (!active || active === document.body || workspace.contains(active)) && !active?.closest('.workspace-actions')) {
+          const target = workspace.querySelector<HTMLButtonElement>(`.workspace-actions > button.${preparationAction.action}`);
+          if (target?.isConnected && target.offsetParent !== null && !target.closest('[inert]')) {
+            target.focus({ preventScroll: true });
+            return;
+          }
+        }
         if (workspace && (!active || !workspace.contains(active) || active === workspace)) workspace.focus();
       }
       if (phase === 'result') panelRef.current?.querySelector<HTMLElement>('.stage-result')?.focus();
     });
     return () => window.cancelAnimationFrame(focusFrame);
-  }, [phase, prepCountdown, run]);
+  }, [gameId, phase, prepCountdown, run]);
 
   useEffect(() => {
     const compactLayout = window.matchMedia('(max-width: 620px)');
@@ -837,9 +859,9 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onComplete, onRea
   }, []);
 
   useEffect(() => {
-    const wasOpen = overlayWasOpenRef.current;
-    overlayWasOpenRef.current = overlayOpen;
-    if (!wasOpen || overlayOpen) return;
+    const previousOverlay = overlayWasOpenRef.current;
+    overlayWasOpenRef.current = overlayOpen ? (assetLoadStatus !== null ? 'asset' : 'other') : null;
+    if (!previousOverlay || overlayOpen) return;
     const focusFrame = window.requestAnimationFrame(() => {
       const panel = panelRef.current;
       const reviewOpener = reviewReturnFocusRef.current;
@@ -847,6 +869,11 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onComplete, onRea
       if (phaseRef.current === 'play') {
         const workspace = panel?.querySelector<HTMLElement>('.game-workspace');
         if (workspace) {
+          const active = document.activeElement;
+          // Preserve a preparation header action chosen before the queued asset return runs.
+          if (previousOverlay === 'asset' && workspace.matches('.game-appointment') && workspace.querySelector('.game-preparation') &&
+            active instanceof HTMLButtonElement && workspace.contains(active) && active.matches('.workspace-actions > button[data-game-shortcut-ignore]') &&
+            active.isConnected && active.offsetParent !== null && !active.closest('[inert]')) return;
           workspace.focus({ preventScroll: true });
           return;
         }
@@ -858,7 +885,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onComplete, onRea
       (fallback ?? panel)?.focus();
     });
     return () => window.cancelAnimationFrame(focusFrame);
-  }, [overlayOpen]);
+  }, [assetLoadStatus, overlayOpen]);
 
   useEffect(() => {
     if (phase !== 'play' || finishedRun.current) return;
@@ -1775,7 +1802,33 @@ function GameFrame({ gameId, current, total, children, helper, simulationHelper,
   const liveMessage = `${progressText}${liveDetail ? `. ${liveDetail}` : ''}`;
   const footerHelper = mode === 'practice' ? helper : simulationHelper ?? '고정 설정으로 진행 중';
   useLayoutEffect(() => {
-    bodyRef.current?.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    const body = bodyRef.current;
+    if (!body) return;
+    const previousPadding = { value: body.style.getPropertyValue('scroll-padding-block-start'), priority: body.style.getPropertyPriority('scroll-padding-block-start') };
+    const shell = gameId === 'path' && current > 0 ? body.querySelector<HTMLElement>('.path-shell') : null;
+    let top = 0;
+    if (shell && body.clientHeight > 0) {
+      const origin = body.getBoundingClientRect().top + body.clientTop;
+      const bounds = [shell, ...shell.querySelectorAll<HTMLElement>('.edge-marker > span, .edge-marker > span b')]
+        .map((element) => element.getBoundingClientRect()).filter((rect) => rect.width > 0 && rect.height > 0);
+      const contentTop = Math.min(...bounds.map((rect) => rect.top)) - origin + body.scrollTop;
+      const contentBottom = Math.max(...bounds.map((rect) => rect.bottom)) - origin + body.scrollTop;
+      const contentHeight = contentBottom - contentTop;
+      const deadline = body.querySelector<HTMLElement>(':scope > .time-strip');
+      const style = deadline ? getComputedStyle(deadline) : null;
+      const deadlineBounds = deadline?.getBoundingClientRect();
+      const inset = style?.position === 'sticky' && deadlineBounds && deadlineBounds.height > 0
+        ? Math.max(0, deadlineBounds.bottom - origin + Math.max(0, Number.parseFloat(style.marginBottom) || 0)) : 0;
+      // Native focus scrolling uses the same measured reservation; no new focus handler or timer.
+      body.style.setProperty('scroll-padding-block-start', `${inset}px`);
+      const usableHeight = body.clientHeight - inset;
+      if (contentHeight > 0 && usableHeight > 0) {
+        if (contentTop < inset) top = contentTop - inset;
+        else if (contentBottom > body.clientHeight) top = contentHeight <= usableHeight ? contentBottom - body.clientHeight : contentTop - inset;
+      }
+    }
+    body.scrollTo({ top: Math.max(0, Math.min(top, body.scrollHeight - body.clientHeight)), left: 0, behavior: 'auto' });
+    if (gameId === 'path') return () => body.style.setProperty('scroll-padding-block-start', previousPadding.value, previousPadding.priority);
   }, [current, gameId]);
   return (
     <div className={`game-workspace game-${gameId}`} data-mode={mode} role="region" aria-labelledby={`${gameId}-workspace-title`} tabIndex={-1}>
@@ -2725,6 +2778,9 @@ function AppointmentGame({ onFinish, onClose, config, preferences }: GameProps &
     if (isPaused) return;
     const frame = window.requestAnimationFrame(() => {
       resetWorkspaceScroll(phaseContainerRef.current);
+      const workspace = phaseContainerRef.current?.closest('.game-workspace');
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && workspace?.contains(active) && active.closest('.workspace-actions')) return;
       const selector = phase === 'answer'
         ? '.appointment-choice-grid button:not(:disabled)'
         : mode === 'practice'
@@ -3736,7 +3792,7 @@ function NumberGame({ onFinish, onClose, config }: GameProps & { config: Practic
 
 const COUNT_BLANK_MS = 350;
 function CountCloud({ word, count, offset }: { word: string; count: number; offset: number }) {
-  return <div className="word-cloud">{Array.from({ length: count }, (_, index) => <span key={index} style={{ left: `${6 + ((index * 37 + offset * 11) % 82)}%`, top: `${7 + ((index * 29 + offset * 17) % 82)}%`, fontSize: `${11 + ((index * 7 + offset) % 5) * 3}px`, fontWeight: 500 + ((index + offset) % 3) * 150 }}>{word}</span>)}</div>;
+  return <div className="word-cloud">{Array.from({ length: count }, (_, index) => <span key={index} style={{ left: `clamp(1em, ${6 + ((index * 37 + offset * 11) % 82)}%, calc(100% - 1em))`, top: `clamp(.75em, ${7 + ((index * 29 + offset * 17) % 82)}%, calc(100% - .75em))`, fontSize: `${11 + ((index * 7 + offset) % 5) * 3}px`, fontWeight: 500 + ((index + offset) % 3) * 150 }}>{word}</span>)}</div>;
 }
 
 function CountGame({ onFinish, onClose, config }: GameProps & { config: PracticeConfig }) {

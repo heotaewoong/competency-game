@@ -111,8 +111,10 @@ for (const clipboardFailure of ['missing', 'sync-throw', 'rejected'] as const) {
     await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
     await page.locator('#feedback').getByRole('button', { name: '개선 의견 보내기' }).click();
     const dialog = page.getByRole('dialog', { name: '의견 보내기', exact: true });
+    await expect(dialog.locator('#feedback-public-notice')).toBeFocused();
     const message = dialog.locator('textarea');
     await message.fill('가'.repeat(1000));
+    await expect(message).toHaveValue('가'.repeat(1000));
     await dialog.getByRole('button', { name: /복사 후 GitHub 열기/ }).click();
     await expect(dialog.locator('.feedback-status')).toContainText('자동 복사가 차단됐습니다');
     await expect(message).toHaveValue('가'.repeat(1000));
@@ -162,6 +164,79 @@ for (const width of [320, 390, 621, 760, 900, 1280]) {
     expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    const requestsLink = section.getByRole('link', { name: '공개 요청 목록, GitHub 새 창으로 열기', exact: true });
+    await expect(requestsLink).toContainText('공개 요청 목록 (GitHub)');
+    await expect(requestsLink).toHaveAttribute('href', 'https://github.com/heotaewoong/competency-game/issues');
+    await expect(requestsLink).toHaveAttribute('target', '_blank');
+    await expect(requestsLink).toHaveAttribute('rel', 'noopener noreferrer');
+    await expect(requestsLink.locator('span')).toHaveAttribute('aria-hidden', 'true');
+    await page.keyboard.press('Tab');
+    await expect(requestsLink).toBeFocused();
+    const readLinkLayout = () => requestsLink.evaluate((link) => {
+      const box = link.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(link);
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      const outline = getComputedStyle(link);
+      return {
+        box: { left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, height: box.height },
+        viewport: { width: innerWidth, height: innerHeight },
+        outline: { style: outline.outlineStyle, width: outline.outlineWidth, offset: outline.outlineOffset },
+        focused: document.activeElement === link,
+        textRects: Array.from(range.getClientRects(), ({ left, right, top, bottom, width, height }) => ({ left, right, top, bottom, width, height })).filter((rect) => rect.width > 0 && rect.height > 0),
+        centerHit: hit === link || link.contains(hit),
+        clientWidth: link.clientWidth, scrollWidth: link.scrollWidth, clientHeight: link.clientHeight, scrollHeight: link.scrollHeight,
+      };
+    });
+    let linkLayout = await readLinkLayout();
+    await testInfo.attach('public-request-link-layout', { body: JSON.stringify({ project: testInfo.project.name, width, layout: linkLayout }), contentType: 'application/json' });
+    console.log('PUBLIC_REQUEST_LINK_LAYOUT', JSON.stringify({ project: testInfo.project.name, width, layout: linkLayout }));
+    // Native focus can finish scrolling after the first raw capture; retain both observations.
+    try {
+      await expect.poll(async () => {
+        linkLayout = await readLinkLayout();
+        const { box, viewport, outline } = linkLayout;
+        const outlineWidth = Number.parseFloat(outline.width), outlineOffset = Number.parseFloat(outline.offset);
+        const outset = Math.max(0, outlineWidth + outlineOffset);
+        return linkLayout.focused && !['none', 'hidden'].includes(outline.style) && outlineWidth > 0 &&
+          [box.left, box.right, box.top, box.bottom, viewport.width, viewport.height, outlineWidth, outlineOffset].every(Number.isFinite) &&
+          box.left - outset >= 0 && box.right + outset <= viewport.width &&
+          box.top - outset >= 0 && box.bottom + outset <= viewport.height;
+      }, { message: '공개 요청 링크의 초점 외곽이 화면 안에 들어와야 합니다.' }).toBe(true);
+    } finally {
+      await testInfo.attach('public-request-link-visible-layout', { body: JSON.stringify({ project: testInfo.project.name, width, layout: linkLayout }), contentType: 'application/json' })
+        .catch((captureError) => console.log('PUBLIC_REQUEST_LINK_VISIBLE_CAPTURE_ERROR', String(captureError)));
+      console.log('PUBLIC_REQUEST_LINK_VISIBLE_LAYOUT', JSON.stringify({ project: testInfo.project.name, width, layout: linkLayout }));
+    }
+    expect(linkLayout.focused).toBe(true);
+    expect(linkLayout.centerHit).toBe(true);
+    expect(linkLayout.box.width).toBeGreaterThanOrEqual(44);
+    expect(linkLayout.box.height).toBeGreaterThanOrEqual(44);
+    expect(linkLayout.box.left).toBeGreaterThanOrEqual(0);
+    expect(linkLayout.box.right).toBeLessThanOrEqual(linkLayout.viewport.width);
+    expect(linkLayout.box.top).toBeGreaterThanOrEqual(0);
+    expect(linkLayout.box.bottom).toBeLessThanOrEqual(linkLayout.viewport.height);
+    const outlineWidth = Number.parseFloat(linkLayout.outline.width);
+    const outlineOffset = Number.parseFloat(linkLayout.outline.offset);
+    expect(['none', 'hidden']).not.toContain(linkLayout.outline.style);
+    expect(outlineWidth).toBeGreaterThan(0);
+    expect(Number.isFinite(outlineOffset)).toBe(true);
+    const outlineOutset = Math.max(0, outlineWidth + outlineOffset);
+    expect(linkLayout.box.left - outlineOutset).toBeGreaterThanOrEqual(0);
+    expect(linkLayout.box.right + outlineOutset).toBeLessThanOrEqual(linkLayout.viewport.width);
+    expect(linkLayout.box.top - outlineOutset).toBeGreaterThanOrEqual(0);
+    expect(linkLayout.box.bottom + outlineOutset).toBeLessThanOrEqual(linkLayout.viewport.height);
+    expect(linkLayout.textRects.length).toBeGreaterThan(0);
+    expect(linkLayout.scrollWidth).toBeLessThanOrEqual(linkLayout.clientWidth);
+    expect(linkLayout.scrollHeight).toBeLessThanOrEqual(linkLayout.clientHeight);
+    for (const rect of linkLayout.textRects) {
+      expect(rect.left).toBeGreaterThanOrEqual(linkLayout.box.left);
+      expect(rect.right).toBeLessThanOrEqual(linkLayout.box.right);
+      expect(rect.top).toBeGreaterThanOrEqual(linkLayout.box.top);
+      expect(rect.bottom).toBeLessThanOrEqual(linkLayout.box.bottom);
+    }
+    await page.keyboard.press('Shift+Tab');
     await expect(opener).toBeFocused();
     await expect(page.locator('.site-shell > [inert]')).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
