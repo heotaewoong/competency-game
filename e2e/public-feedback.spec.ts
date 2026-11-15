@@ -178,9 +178,11 @@ for (const width of [320, 390, 621, 760, 900, 1280]) {
       const range = document.createRange();
       range.selectNodeContents(link);
       const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      const outline = getComputedStyle(link);
       return {
         box: { left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, height: box.height },
         viewport: { width: innerWidth, height: innerHeight },
+        outline: { style: outline.outlineStyle, width: outline.outlineWidth, offset: outline.outlineOffset },
         textRects: Array.from(range.getClientRects(), ({ left, right, top, bottom, width, height }) => ({ left, right, top, bottom, width, height })).filter((rect) => rect.width > 0 && rect.height > 0),
         centerHit: hit === link || link.contains(hit),
         clientWidth: link.clientWidth, scrollWidth: link.scrollWidth, clientHeight: link.clientHeight, scrollHeight: link.scrollHeight,
@@ -195,6 +197,16 @@ for (const width of [320, 390, 621, 760, 900, 1280]) {
     expect(linkLayout.box.right).toBeLessThanOrEqual(linkLayout.viewport.width);
     expect(linkLayout.box.top).toBeGreaterThanOrEqual(0);
     expect(linkLayout.box.bottom).toBeLessThanOrEqual(linkLayout.viewport.height);
+    const outlineWidth = Number.parseFloat(linkLayout.outline.width);
+    const outlineOffset = Number.parseFloat(linkLayout.outline.offset);
+    expect(['none', 'hidden']).not.toContain(linkLayout.outline.style);
+    expect(outlineWidth).toBeGreaterThan(0);
+    expect(Number.isFinite(outlineOffset)).toBe(true);
+    const outlineOutset = Math.max(0, outlineWidth + outlineOffset);
+    expect(linkLayout.box.left - outlineOutset).toBeGreaterThanOrEqual(0);
+    expect(linkLayout.box.right + outlineOutset).toBeLessThanOrEqual(linkLayout.viewport.width);
+    expect(linkLayout.box.top - outlineOutset).toBeGreaterThanOrEqual(0);
+    expect(linkLayout.box.bottom + outlineOutset).toBeLessThanOrEqual(linkLayout.viewport.height);
     expect(linkLayout.textRects.length).toBeGreaterThan(0);
     expect(linkLayout.scrollWidth).toBeLessThanOrEqual(linkLayout.clientWidth);
     expect(linkLayout.scrollHeight).toBeLessThanOrEqual(linkLayout.clientHeight);
