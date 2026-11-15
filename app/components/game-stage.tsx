@@ -677,7 +677,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onComplete, onRea
   const phaseRef = useRef(phase);
   const onCloseRef = useRef(onClose);
   const onSwitchRef = useRef(onSwitch);
-  const overlayWasOpenRef = useRef(false);
+  const overlayWasOpenRef = useRef<'asset' | 'other' | null>(null);
   const reviewReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   const overlayOpenRef = useRef(false);
   const visibilityPausedRef = useRef(false);
@@ -859,9 +859,9 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onComplete, onRea
   }, []);
 
   useEffect(() => {
-    const wasOpen = overlayWasOpenRef.current;
-    overlayWasOpenRef.current = overlayOpen;
-    if (!wasOpen || overlayOpen) return;
+    const previousOverlay = overlayWasOpenRef.current;
+    overlayWasOpenRef.current = overlayOpen ? (assetLoadStatus !== null ? 'asset' : 'other') : null;
+    if (!previousOverlay || overlayOpen) return;
     const focusFrame = window.requestAnimationFrame(() => {
       const panel = panelRef.current;
       const reviewOpener = reviewReturnFocusRef.current;
@@ -869,6 +869,11 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onComplete, onRea
       if (phaseRef.current === 'play') {
         const workspace = panel?.querySelector<HTMLElement>('.game-workspace');
         if (workspace) {
+          const active = document.activeElement;
+          // Preserve a preparation header action chosen before the queued asset return runs.
+          if (previousOverlay === 'asset' && workspace.matches('.game-appointment') && workspace.querySelector('.game-preparation') &&
+            active instanceof HTMLButtonElement && workspace.contains(active) && active.matches('.workspace-actions > button[data-game-shortcut-ignore]') &&
+            active.isConnected && active.offsetParent !== null && !active.closest('[inert]')) return;
           workspace.focus({ preventScroll: true });
           return;
         }
@@ -880,7 +885,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onComplete, onRea
       (fallback ?? panel)?.focus();
     });
     return () => window.cancelAnimationFrame(focusFrame);
-  }, [overlayOpen]);
+  }, [assetLoadStatus, overlayOpen]);
 
   useEffect(() => {
     if (phase !== 'play' || finishedRun.current) return;

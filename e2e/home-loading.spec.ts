@@ -1,4 +1,4 @@
-import { expect, test, type ElementHandle, type Locator, type Page, type TestInfo } from '@playwright/test';
+import { expect, test, type ElementHandle, type Locator, type Page, type Route, type TestInfo } from '@playwright/test';
 import { games } from '../app/lib/game-data';
 
 test('첫 화면은 Tailwind 빌드 컴파일러를 내려받지 않는다', async ({ page }) => {
@@ -1556,6 +1556,195 @@ for (const action of [
     }
   });
 }
+
+test('약속 자산 대기 종료: 568×320 큰 글자의 첫 준비 헤더 닫기 초점과 Enter 동작을 유지한다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  await page.setViewportSize({ width: 568, height: 320 });
+  await page.clock.install({ time: Date.UTC(2035, 0, 20) });
+  const atlasPath = '**/assets/appointment/food-sprite-v1.webp';
+  const pendingAtlas = new Set<Route>();
+  let atlasRequests = 0;
+  const holdAtlas = (route: Route) => { atlasRequests += 1; pendingAtlas.add(route); };
+  await page.route(atlasPath, holdAtlas);
+  const stage = page.locator('.stage-panel[data-game="appointment"]');
+  const workspace = page.locator('.game-workspace.game-appointment');
+  const loading = page.getByRole('alertdialog', { name: '메뉴 그림을 준비하고 있습니다', exact: true });
+  const readStorage = () => page.evaluate(() => {
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    return { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null };
+  });
+  let originalTarget: ElementHandle<HTMLElement | SVGElement> | null = null;
+  const capture = async (phase: string) => {
+    const raw = await page.evaluate(() => {
+      const frame = document.querySelector('.game-workspace.game-appointment');
+      const target = frame?.querySelector<HTMLButtonElement>('.workspace-actions > button.session-close') ?? null;
+      const active = document.activeElement;
+      const summarize = (node: Element | null) => node ? { tag: node.tagName, className: node.getAttribute('class'),
+        label: node.getAttribute('aria-label'), text: node.textContent?.trim().slice(0, 100), connected: node.isConnected,
+        inert: Boolean(node.closest('[inert]')) } : null;
+      const timer = frame?.querySelector('.game-preparation');
+      const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+      const box = target?.getBoundingClientRect();
+      return { wall: Date.now(), ticks: performance.now(), documentHasFocus: document.hasFocus(), visibility: document.visibilityState,
+        viewport: { width: innerWidth, height: innerHeight }, textScale: document.documentElement.dataset.textScale,
+        target: summarize(target), active: summarize(active), targetIsActive: target === active,
+        targetBox: box ? { left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, height: box.height } : null,
+        assetDialogCount: document.querySelectorAll('.appointment-asset-dialog').length,
+        confirmations: Array.from(document.querySelectorAll('[role="alertdialog"] h2'), heading => heading.textContent),
+        preparationCount: document.querySelectorAll('.game-preparation').length,
+        timerLabel: timer?.getAttribute('aria-label') ?? null, countdown: timer?.querySelector('b')?.textContent ?? null,
+        progress: frame?.querySelector('.workspace-progress > span')?.textContent?.trim(),
+        roundIntroCount: frame?.querySelectorAll('.appointment-round-intro').length ?? 0,
+        stimulusCount: frame?.querySelectorAll('.appointment-stimulus').length ?? 0,
+        questionCount: frame?.querySelectorAll('.appointment-question').length ?? 0,
+        resultCount: document.querySelectorAll('.stage-result').length,
+        storage: { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null } };
+    });
+    const snapshot = { project: testInfo.project.name, phase, ...raw, atlasRequests, heldAtlasRequests: pendingAtlas.size,
+      originalTargetConnected: originalTarget ? await originalTarget.evaluate(element => element.isConnected) : null, errors: [...errors] };
+    await testInfo.attach('appointment-cold-asset-focus-' + phase, { body: JSON.stringify(snapshot), contentType: 'application/json' });
+    console.log('APPOINTMENT_COLD_ASSET_FOCUS', JSON.stringify(snapshot));
+    return snapshot;
+  };
+  let failed = false, closedNormally = false;
+  try {
+    await page.goto('/');
+    await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+    await page.getByRole('navigation', { name: '빠른 메뉴', exact: true }).getByRole('button', { name: '준비', exact: true }).click();
+    const readiness = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+    await readiness.getByRole('button', { name: '큰 글자', exact: true }).click();
+    await readiness.getByRole('button', { name: '설정 저장하고 닫기', exact: true }).click();
+    await expect(readiness).toHaveCount(0);
+    await expect(page.locator('html')).toHaveAttribute('data-text-scale', 'large');
+    await page.evaluate(() => document.fonts.ready);
+    const baseline = await readStorage();
+    expect(baseline.generation).not.toBeNull();
+    expect(baseline.resultsRaw).not.toBeNull();
+    expect(JSON.parse(baseline.resultsRaw!).results).toEqual([]);
+    // Keyboard entry and a neutral pointer keep the CTA from preloading the held atlas early.
+    await page.mouse.move(0, 0);
+    const opener = page.getByRole('button', { name: '약속 정하기, 난이도 상, 설정 열기', exact: true });
+    await opener.focus();
+    await expect(opener).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(stage).toBeVisible();
+    await expect(stage.getByRole('button', { name: '게임 바꾸기', exact: true })).toBeFocused();
+    await expect(stage.getByRole('radio', { name: /연습 모드/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(stage.getByLabel('라운드당 문항 현재 값', { exact: true })).toHaveText('3');
+    await expect(stage.locator('.appointment-practice-options > p > em')).toHaveText('총 12문항');
+    await page.evaluate(() => document.fonts.ready);
+    expect(atlasRequests).toBe(0);
+    expect(pendingAtlas.size).toBe(0);
+    await capture('before-cold-start');
+    // Pause before the real loader creates its unchanged 10-second timeout.
+    await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 60_000);
+    const started = await page.evaluate(() => ({ wall: Date.now(), ticks: performance.now() }));
+    const start = stage.getByRole('button', { name: /^설명·연습 시작/ });
+    await start.focus();
+    await expect(start).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(loading).toBeVisible();
+    await expect.poll(() => atlasRequests).toBe(1);
+    expect(pendingAtlas.size).toBe(1);
+    await expect(page.locator('.game-workspace, .game-preparation, .stage-result')).toHaveCount(0);
+    const held = await capture('cold-loading-held');
+    expect(held).toMatchObject({ wall: started.wall, ticks: started.ticks, assetDialogCount: 1,
+      preparationCount: 0, resultCount: 0, atlasRequests: 1, heldAtlasRequests: 1, storage: baseline, errors: [] });
+    for (const route of pendingAtlas) { pendingAtlas.delete(route); await route.continue(); }
+    await expect(loading).toHaveCount(0);
+    const preparation = workspace.getByRole('timer');
+    await expect(preparation).toHaveAttribute('aria-label', '3초 뒤 약속 정하기 시작');
+    await expect(preparation.locator('> b')).toHaveText('3');
+    const close = workspace.getByRole('button', { name: '연습 닫기', exact: true });
+    originalTarget = await close.elementHandle();
+    expect(originalTarget).not.toBeNull();
+    await close.focus();
+    await expect(close).toBeFocused();
+    const firstReady = await capture('ready3-after-focus');
+    expect(firstReady).toMatchObject({ wall: started.wall, ticks: started.ticks, targetIsActive: true, assetDialogCount: 0,
+      preparationCount: 1, countdown: '3', roundIntroCount: 0, stimulusCount: 0, questionCount: 0, resultCount: 0,
+      viewport: { width: 568, height: 320 }, textScale: 'large', atlasRequests: 1, storage: baseline, errors: [] });
+    expect(firstReady.progress).toMatch(/^0\s*\/\s*12\s*문항$/);
+    await page.clock.runFor(20);
+    const returned = await capture('after-asset-return-frame');
+    expect(returned).toMatchObject({ wall: started.wall + 20, ticks: started.ticks + 20, targetIsActive: true,
+      assetDialogCount: 0, preparationCount: 1, countdown: '3', roundIntroCount: 0, resultCount: 0, storage: baseline, errors: [] });
+    await expect(close).toBeFocused();
+    await page.clock.runFor(980);
+    await expect(preparation).toHaveAttribute('aria-label', '2초 뒤 약속 정하기 시작');
+    await expect(preparation.locator('> b')).toHaveText('2');
+    await page.clock.runFor(1000);
+    await expect(preparation).toHaveAttribute('aria-label', '1초 뒤 약속 정하기 시작');
+    await expect(preparation.locator('> b')).toHaveText('1');
+    await page.clock.runFor(999);
+    // Do not refocus at 2999ms: the intent from the first READY3 must survive both boundaries.
+    const beforeEnd = await capture('before-preparation-end-2999');
+    expect(beforeEnd).toMatchObject({ wall: started.wall + 2999, ticks: started.ticks + 2999, targetIsActive: true,
+      preparationCount: 1, countdown: '1', roundIntroCount: 0, resultCount: 0, storage: baseline, errors: [] });
+    await page.clock.runFor(1);
+    await capture('at-preparation-end-3000');
+    await page.clock.runFor(20);
+    const afterEnd = await capture('after-preparation-focus-frame');
+    expect(afterEnd).toMatchObject({ wall: started.wall + 3020, ticks: started.ticks + 3020, targetIsActive: true,
+      assetDialogCount: 0, preparationCount: 0, roundIntroCount: 1, stimulusCount: 0, questionCount: 0, resultCount: 0,
+      atlasRequests: 1, storage: baseline, errors: [] });
+    expect(afterEnd.progress).toMatch(/^1\s*\/\s*12\s*문항$/);
+    await expect(workspace.getByRole('button', { name: '연습 닫기', exact: true })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await page.clock.runFor(20);
+    await capture('native-enter');
+    const confirmation = page.getByRole('alertdialog', { name: '이번 세션을 종료할까요?', exact: true });
+    await expect(confirmation).toBeVisible();
+    await expect(confirmation.getByRole('button', { name: '계속 연습', exact: true })).toBeFocused();
+    await expect(workspace.locator('.appointment-round-intro')).toHaveCount(1);
+    await expect(workspace.locator('.appointment-stimulus, .appointment-question')).toHaveCount(0);
+    expect(await readStorage()).toEqual(baseline);
+    await confirmation.getByRole('button', { name: '계속 연습', exact: true }).click();
+    await page.clock.runFor(20);
+    await expect(confirmation).toHaveCount(0);
+    await closeCommonHeaderSession(page, workspace, false);
+    closedNormally = true;
+    expect(await readStorage()).toEqual(baseline);
+    await expect(page.locator('.stage-result')).toHaveCount(0);
+    expect(errors).toEqual([]);
+  } catch (error) {
+    failed = true;
+    await capture('first-failure').catch(captureError => console.log('APPOINTMENT_COLD_ASSET_FOCUS_CAPTURE_ERROR', String(captureError)));
+    await page.content().then(body => testInfo.attach('appointment-cold-asset-focus-first-failure.html', { body, contentType: 'text/html' }))
+      .catch(captureError => console.log('APPOINTMENT_COLD_ASSET_FOCUS_DOM_CAPTURE_ERROR', String(captureError)));
+    await page.screenshot({ path: testInfo.outputPath('appointment-cold-asset-focus-first-failure.png') })
+      .catch(captureError => console.log('APPOINTMENT_COLD_ASSET_FOCUS_PNG_CAPTURE_ERROR', String(captureError)));
+    throw error;
+  } finally {
+    console.log('APPOINTMENT_COLD_ASSET_FOCUS_ERRORS', JSON.stringify({ project: testInfo.project.name, atlasRequests, errors }));
+    let cleanupFailure: unknown;
+    const recordCleanupError = (step: string, error: unknown) => {
+      console.log('APPOINTMENT_COLD_ASSET_FOCUS_CLEANUP_ERROR', JSON.stringify({ step, error: String(error) }));
+      if (!failed && cleanupFailure === undefined) cleanupFailure = error;
+    };
+    try {
+      const assetCancel = page.locator('.appointment-asset-dialog').getByRole('button', { name: '시작 취소', exact: true });
+      if (await assetCancel.count()) await assetCancel.click();
+    } catch (error) { recordCleanupError('cancel-asset-start', error); }
+    for (const route of pendingAtlas) {
+      pendingAtlas.delete(route);
+      try { await route.continue(); } catch (error) { recordCleanupError('release-real-asset', error); }
+    }
+    try { await page.unroute(atlasPath, holdAtlas); } catch (error) { recordCleanupError('remove-route', error); }
+    if (!closedNormally) {
+      try {
+        const cancel = page.getByRole('button', { name: '계속 연습', exact: true });
+        if (await cancel.count()) { await cancel.click(); await page.clock.runFor(20); }
+        if (await workspace.count()) await closeCommonHeaderSession(page, workspace, false);
+        else if (await stage.count()) await stage.getByRole('button', { name: '연습 닫기', exact: true }).click();
+      } catch (error) { recordCleanupError('close-session', error); }
+    }
+    try { await originalTarget?.dispose(); } catch (error) { recordCleanupError('dispose-original-target', error); }
+    if (cleanupFailure !== undefined) throw cleanupFailure;
+  }
+});
 
 async function captureNumberRpsFirstBoard(firstFrame: Locator, gameId: 'number' | 'rps') {
   return firstFrame.evaluate((frame, id) => {
