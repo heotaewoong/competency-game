@@ -672,6 +672,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onComplete, onRea
   const [appointmentPreferences, setAppointmentPreferences] = useState<AppointmentPreferences>(DEFAULT_APPOINTMENT_PREFERENCES);
   const [focusedPractice, setFocusedPractice] = useState<FocusedPracticePreferences>(DEFAULT_FOCUSED_PRACTICE);
   const panelRef = useRef<HTMLElement>(null);
+  const preparationActionFocusRef = useRef<{ action: string; run: number } | null>(null);
   const finishedRun = useRef(false);
   const phaseRef = useRef(phase);
   const onCloseRef = useRef(onClose);
@@ -689,7 +690,16 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onComplete, onRea
   useEffect(() => () => { startRequestRef.current += 1; }, []);
 
   usePausableTimeout(
-    () => setPrepCountdown((value) => value === 1 ? null : (value ?? 1) - 1),
+    () => {
+      if (gameId === 'appointment' && prepCountdown === 1) {
+        const active = document.activeElement;
+        const action = active instanceof HTMLButtonElement && panelRef.current?.contains(active) && active.closest('.game-appointment .workspace-actions')
+          ? ['workspace-switch', 'workspace-report', 'session-close'].find((name) => active.classList.contains(name))
+          : undefined;
+        preparationActionFocusRef.current = action ? { action, run } : null;
+      }
+      setPrepCountdown((value) => value === 1 ? null : (value ?? 1) - 1);
+    },
     1000,
     phase === 'play' && prepCountdown !== null,
     `prep-${run}-${prepCountdown ?? 'done'}`,
@@ -736,6 +746,7 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onComplete, onRea
   useEffect(() => { overlayOpenRef.current = overlayOpen; }, [overlayOpen]);
 
   const stopActiveSession = useCallback(() => {
+    preparationActionFocusRef.current = null;
     visibilityPausedRef.current = false;
     setVisibilityPaused(false);
     setVisibilityPauseCount(0);
@@ -819,12 +830,23 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onComplete, onRea
       if (phase === 'play' && prepCountdown === null) {
         const workspace = panelRef.current?.querySelector<HTMLElement>('.game-workspace');
         const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        const preparationAction = preparationActionFocusRef.current;
+        preparationActionFocusRef.current = null;
+        if (gameId === 'appointment' && overlayOpenRef.current) return;
+        if (gameId === 'appointment' && preparationAction?.run === run && workspace &&
+          (!active || active === document.body || workspace.contains(active)) && !active?.closest('.workspace-actions')) {
+          const target = workspace.querySelector<HTMLButtonElement>(`.workspace-actions > button.${preparationAction.action}`);
+          if (target?.isConnected && target.offsetParent !== null && !target.closest('[inert]')) {
+            target.focus({ preventScroll: true });
+            return;
+          }
+        }
         if (workspace && (!active || !workspace.contains(active) || active === workspace)) workspace.focus();
       }
       if (phase === 'result') panelRef.current?.querySelector<HTMLElement>('.stage-result')?.focus();
     });
     return () => window.cancelAnimationFrame(focusFrame);
-  }, [phase, prepCountdown, run]);
+  }, [gameId, phase, prepCountdown, run]);
 
   useEffect(() => {
     const compactLayout = window.matchMedia('(max-width: 620px)');
@@ -2751,6 +2773,9 @@ function AppointmentGame({ onFinish, onClose, config, preferences }: GameProps &
     if (isPaused) return;
     const frame = window.requestAnimationFrame(() => {
       resetWorkspaceScroll(phaseContainerRef.current);
+      const workspace = phaseContainerRef.current?.closest('.game-workspace');
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && workspace?.contains(active) && active.closest('.workspace-actions')) return;
       const selector = phase === 'answer'
         ? '.appointment-choice-grid button:not(:disabled)'
         : mode === 'practice'

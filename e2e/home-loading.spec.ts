@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
+import { expect, test, type ElementHandle, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { games } from '../app/lib/game-data';
 
 test('첫 화면은 Tailwind 빌드 컴파일러를 내려받지 않는다', async ({ page }) => {
@@ -1407,6 +1407,154 @@ for (const viewport of [{ width: 320, height: 568 }, { width: 568, height: 320 }
       expect(errors).toEqual([]);
     });
   }
+}
+
+for (const action of [
+  { name: '연습 닫기', className: 'session-close', confirmation: '이번 세션을 종료할까요?' },
+  { name: '문제 신고', className: 'workspace-report', confirmation: '현재 세션을 종료하고 의견을 작성할까요?' },
+  { name: '게임 바꾸기', className: 'workspace-switch', confirmation: '현재 세션을 종료하고 게임을 바꿀까요?' },
+] as const) {
+  test('약속 준비 종료: 568×320 기본 글자의 ' + action.name + ' 초점과 Enter 동작을 유지한다', async ({ page }, testInfo) => {
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+    await page.setViewportSize({ width: 568, height: 320 });
+    // Loading and the real asset preload finish before only the session clock is paused.
+    await page.clock.install({ time: Date.UTC(2035, 0, 19) });
+    const readStorage = () => page.evaluate(() => {
+      const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+      return { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null };
+    });
+    let originalTarget: ElementHandle<HTMLElement | SVGElement> | null = null;
+    const capture = async (phase: string) => {
+      const raw = await page.evaluate((className) => {
+        const workspace = document.querySelector('.game-workspace.game-appointment');
+        const target = workspace?.querySelector<HTMLButtonElement>('.workspace-actions > button.' + className) ?? null;
+        const active = document.activeElement;
+        const summarize = (node: Element | null) => node ? { tag: node.tagName, className: node.getAttribute('class'),
+          label: node.getAttribute('aria-label'), text: node.textContent?.trim().slice(0, 80), connected: node.isConnected,
+          inert: Boolean(node.closest('[inert]')) } : null;
+        const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+        const timer = workspace?.querySelector('.game-preparation');
+        return { wall: Date.now(), ticks: performance.now(), documentHasFocus: document.hasFocus(), visibility: document.visibilityState,
+          viewport: { width: innerWidth, height: innerHeight }, textScale: document.documentElement.dataset.textScale,
+          target: summarize(target), active: summarize(active), targetIsActive: target === active,
+          preparationCount: document.querySelectorAll('.game-preparation').length, timerLabel: timer?.getAttribute('aria-label') ?? null,
+          countdown: timer?.querySelector('b')?.textContent ?? null, progress: workspace?.querySelector('.workspace-progress > span')?.textContent?.trim(),
+          roundIntroCount: workspace?.querySelectorAll('.appointment-round-intro').length ?? 0,
+          stimulusCount: workspace?.querySelectorAll('.appointment-stimulus').length ?? 0,
+          questionCount: workspace?.querySelectorAll('.appointment-question').length ?? 0,
+          resultCount: document.querySelectorAll('.stage-result').length,
+          confirmations: Array.from(document.querySelectorAll('[role="alertdialog"] h2'), heading => heading.textContent),
+          storage: { generation, resultsRaw: generation ? localStorage.getItem('nineflow-practice-results-v4:' + generation) : null } };
+      }, action.className);
+      const snapshot = { project: testInfo.project.name, action: action.name, phase, ...raw,
+        originalTargetConnected: originalTarget ? await originalTarget.evaluate(element => element.isConnected) : null, errors: [...errors] };
+      await testInfo.attach('appointment-preparation-focus-' + action.className + '-' + phase,
+        { body: JSON.stringify(snapshot), contentType: 'application/json' });
+      console.log('APPOINTMENT_PREPARATION_FOCUS', JSON.stringify(snapshot));
+      return snapshot;
+    };
+    let failed = false, closedNormally = false;
+    try {
+      await page.goto('/');
+      await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+      await page.getByRole('navigation', { name: '빠른 메뉴', exact: true }).getByRole('button', { name: '준비', exact: true }).click();
+      const readiness = page.getByRole('dialog', { name: '응시 준비센터', exact: true });
+      await readiness.getByRole('button', { name: '기본 크기', exact: true }).click();
+      await readiness.getByRole('button', { name: '설정 저장하고 닫기', exact: true }).click();
+      await expect(readiness).toHaveCount(0);
+      await expect(page.locator('html')).toHaveAttribute('data-text-scale', 'standard');
+      await page.evaluate(() => document.fonts.ready);
+      const baseline = await readStorage();
+      expect(baseline.generation).not.toBeNull();
+      expect(baseline.resultsRaw).not.toBeNull();
+      expect(JSON.parse(baseline.resultsRaw!).results).toEqual([]);
+      await page.getByRole('button', { name: '약속 정하기, 난이도 상, 설정 열기', exact: true }).click();
+      const stage = page.locator('.stage-panel[data-game="appointment"]');
+      await expect(stage).toBeVisible();
+      await stage.getByRole('radio', { name: /연습 모드/ }).click();
+      await expect(stage.getByLabel('라운드당 문항 현재 값', { exact: true })).toHaveText('3');
+      await expect(stage.locator('.appointment-practice-options > p > em')).toHaveText('총 12문항');
+      const start = stage.getByRole('button', { name: /^설명·연습 시작/ });
+      await start.focus();
+      const atlas = await page.evaluate(async () => {
+        const image = new Image();
+        image.src = '/assets/appointment/food-sprite-v1.webp';
+        await image.decode();
+        return { complete: image.complete, width: image.naturalWidth, height: image.naturalHeight };
+      });
+      expect(atlas.complete).toBe(true);
+      expect(atlas.width).toBeGreaterThan(0);
+      expect(atlas.height).toBeGreaterThan(0);
+      await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 60_000);
+      const started = await page.evaluate(() => ({ wall: Date.now(), ticks: performance.now() }));
+      await start.click();
+      const workspace = page.locator('.game-workspace.game-appointment');
+      const preparation = workspace.getByRole('timer');
+      for (const second of ['3', '2']) {
+        await expect(preparation).toHaveAttribute('aria-label', second + '초 뒤 약속 정하기 시작');
+        await expect(preparation.locator('> b')).toHaveText(second);
+        await page.clock.runFor(1_000);
+      }
+      await expect(preparation).toHaveAttribute('aria-label', '1초 뒤 약속 정하기 시작');
+      await expect(preparation.locator('> b')).toHaveText('1');
+      await page.clock.runFor(999);
+      const headerAction = workspace.getByRole('button', { name: action.name, exact: true });
+      originalTarget = await headerAction.elementHandle();
+      expect(originalTarget).not.toBeNull();
+      await headerAction.focus();
+      await expect(headerAction).toBeFocused();
+      const before = await capture('before-2999');
+      expect(before).toMatchObject({ wall: started.wall + 2999, ticks: started.ticks + 2999, targetIsActive: true,
+        preparationCount: 1, countdown: '1', roundIntroCount: 0, stimulusCount: 0, questionCount: 0, resultCount: 0,
+        viewport: { width: 568, height: 320 }, textScale: 'standard', storage: baseline, errors: [] });
+      await page.clock.runFor(1);
+      await capture('at-3000');
+      // Let the already scheduled focus RAF run; do not refocus the replacement header.
+      await page.clock.runFor(20);
+      const after = await capture('after-focus-frame');
+      expect(after).toMatchObject({ wall: started.wall + 3020, ticks: started.ticks + 3020, targetIsActive: true,
+        preparationCount: 0, roundIntroCount: 1, stimulusCount: 0, questionCount: 0, resultCount: 0, storage: baseline, errors: [] });
+      expect(after.progress).toMatch(/^1\s*\/\s*12\s*문항$/);
+      await expect(workspace.getByRole('button', { name: action.name, exact: true })).toBeFocused();
+      await page.keyboard.press('Enter');
+      await page.clock.runFor(20);
+      await capture('native-enter');
+      const confirmation = page.getByRole('alertdialog', { name: action.confirmation, exact: true });
+      await expect(confirmation).toBeVisible();
+      await expect(confirmation.getByRole('button', { name: '계속 연습', exact: true })).toBeFocused();
+      await expect(workspace.locator('.appointment-round-intro')).toHaveCount(1);
+      await expect(workspace.locator('.appointment-stimulus, .appointment-question')).toHaveCount(0);
+      expect(await readStorage()).toEqual(baseline);
+      await confirmation.getByRole('button', { name: '계속 연습', exact: true }).click();
+      await page.clock.runFor(20);
+      await expect(confirmation).toHaveCount(0);
+      await closeCommonHeaderSession(page, workspace, false);
+      closedNormally = true;
+      expect(await readStorage()).toEqual(baseline);
+      await expect(page.locator('.stage-result')).toHaveCount(0);
+      expect(errors).toEqual([]);
+    } catch (error) {
+      failed = true;
+      await capture('first-failure').catch(captureError => console.log('APPOINTMENT_PREPARATION_FOCUS_CAPTURE_ERROR', String(captureError)));
+      throw error;
+    } finally {
+      console.log('APPOINTMENT_PREPARATION_FOCUS_ERRORS', JSON.stringify({ project: testInfo.project.name, action: action.name, errors }));
+      if (!closedNormally) {
+        try {
+          const cancel = page.getByRole('button', { name: '계속 연습', exact: true });
+          if (await cancel.count()) { await cancel.click(); await page.clock.runFor(20); }
+          const workspace = page.locator('.game-workspace.game-appointment');
+          if (await workspace.count()) await closeCommonHeaderSession(page, workspace, false);
+        } catch (closeError) {
+          if (!failed) throw closeError;
+          console.log('APPOINTMENT_PREPARATION_FOCUS_CLOSE_ERROR', String(closeError));
+        }
+      }
+      await originalTarget?.dispose();
+    }
+  });
 }
 
 async function captureNumberRpsFirstBoard(firstFrame: Locator, gameId: 'number' | 'rps') {

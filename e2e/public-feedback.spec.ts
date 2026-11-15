@@ -173,7 +173,7 @@ for (const width of [320, 390, 621, 760, 900, 1280]) {
     await expect(requestsLink.locator('span')).toHaveAttribute('aria-hidden', 'true');
     await page.keyboard.press('Tab');
     await expect(requestsLink).toBeFocused();
-    const linkLayout = await requestsLink.evaluate((link) => {
+    const readLinkLayout = () => requestsLink.evaluate((link) => {
       const box = link.getBoundingClientRect();
       const range = document.createRange();
       range.selectNodeContents(link);
@@ -183,13 +183,33 @@ for (const width of [320, 390, 621, 760, 900, 1280]) {
         box: { left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, height: box.height },
         viewport: { width: innerWidth, height: innerHeight },
         outline: { style: outline.outlineStyle, width: outline.outlineWidth, offset: outline.outlineOffset },
+        focused: document.activeElement === link,
         textRects: Array.from(range.getClientRects(), ({ left, right, top, bottom, width, height }) => ({ left, right, top, bottom, width, height })).filter((rect) => rect.width > 0 && rect.height > 0),
         centerHit: hit === link || link.contains(hit),
         clientWidth: link.clientWidth, scrollWidth: link.scrollWidth, clientHeight: link.clientHeight, scrollHeight: link.scrollHeight,
       };
     });
+    let linkLayout = await readLinkLayout();
     await testInfo.attach('public-request-link-layout', { body: JSON.stringify({ project: testInfo.project.name, width, layout: linkLayout }), contentType: 'application/json' });
     console.log('PUBLIC_REQUEST_LINK_LAYOUT', JSON.stringify({ project: testInfo.project.name, width, layout: linkLayout }));
+    // Native focus can finish scrolling after the first raw capture; retain both observations.
+    try {
+      await expect.poll(async () => {
+        linkLayout = await readLinkLayout();
+        const { box, viewport, outline } = linkLayout;
+        const outlineWidth = Number.parseFloat(outline.width), outlineOffset = Number.parseFloat(outline.offset);
+        const outset = Math.max(0, outlineWidth + outlineOffset);
+        return linkLayout.focused && !['none', 'hidden'].includes(outline.style) && outlineWidth > 0 &&
+          [box.left, box.right, box.top, box.bottom, viewport.width, viewport.height, outlineWidth, outlineOffset].every(Number.isFinite) &&
+          box.left - outset >= 0 && box.right + outset <= viewport.width &&
+          box.top - outset >= 0 && box.bottom + outset <= viewport.height;
+      }, { message: '공개 요청 링크의 초점 외곽이 화면 안에 들어와야 합니다.' }).toBe(true);
+    } finally {
+      await testInfo.attach('public-request-link-visible-layout', { body: JSON.stringify({ project: testInfo.project.name, width, layout: linkLayout }), contentType: 'application/json' })
+        .catch((captureError) => console.log('PUBLIC_REQUEST_LINK_VISIBLE_CAPTURE_ERROR', String(captureError)));
+      console.log('PUBLIC_REQUEST_LINK_VISIBLE_LAYOUT', JSON.stringify({ project: testInfo.project.name, width, layout: linkLayout }));
+    }
+    expect(linkLayout.focused).toBe(true);
     expect(linkLayout.centerHit).toBe(true);
     expect(linkLayout.box.width).toBeGreaterThanOrEqual(44);
     expect(linkLayout.box.height).toBeGreaterThanOrEqual(44);
