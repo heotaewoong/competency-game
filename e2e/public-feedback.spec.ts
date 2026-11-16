@@ -194,24 +194,29 @@ for (const width of [320, 390, 621, 760, 900, 1280]) {
         focused: document.activeElement === link,
         textRects: Array.from(range.getClientRects(), ({ left, right, top, bottom, width, height }) => ({ left, right, top, bottom, width, height })).filter((rect) => rect.width > 0 && rect.height > 0),
         centerHit: hit === link || link.contains(hit),
+        hitTarget: hit ? {
+          tag: hit.tagName, id: hit.id, className: hit.getAttribute('class'),
+          link: hit.closest('a')?.getAttribute('href') ?? null,
+          navigation: hit.closest('nav')?.getAttribute('aria-label') ?? null,
+        } : null,
         clientWidth: link.clientWidth, scrollWidth: link.scrollWidth, clientHeight: link.clientHeight, scrollHeight: link.scrollHeight,
       };
     });
     let linkLayout = await readLinkLayout();
     await testInfo.attach('public-request-link-layout', { body: JSON.stringify({ project: testInfo.project.name, width, layout: linkLayout }), contentType: 'application/json' });
     console.log('PUBLIC_REQUEST_LINK_LAYOUT', JSON.stringify({ project: testInfo.project.name, width, layout: linkLayout }));
-    // Native focus can finish scrolling after the first raw capture; retain both observations.
+    // Retain the raw capture, then await every required focus, visibility, and hit-test condition.
     try {
       await expect.poll(async () => {
         linkLayout = await readLinkLayout();
         const { box, viewport, outline } = linkLayout;
         const outlineWidth = Number.parseFloat(outline.width), outlineOffset = Number.parseFloat(outline.offset);
         const outset = Math.max(0, outlineWidth + outlineOffset);
-        return linkLayout.focused && !['none', 'hidden'].includes(outline.style) && outlineWidth > 0 &&
+        return linkLayout.focused && linkLayout.centerHit && !['none', 'hidden'].includes(outline.style) && outlineWidth > 0 &&
           [box.left, box.right, box.top, box.bottom, viewport.width, viewport.height, outlineWidth, outlineOffset].every(Number.isFinite) &&
           box.left - outset >= 0 && box.right + outset <= viewport.width &&
           box.top - outset >= 0 && box.bottom + outset <= viewport.height;
-      }, { message: '공개 요청 링크의 초점 외곽이 화면 안에 들어와야 합니다.' }).toBe(true);
+      }, { message: '공개 요청 링크의 초점 외곽이 화면 안에 있고 중앙점에서 링크를 클릭할 수 있어야 합니다.' }).toBe(true);
     } finally {
       await testInfo.attach('public-request-link-visible-layout', { body: JSON.stringify({ project: testInfo.project.name, width, layout: linkLayout }), contentType: 'application/json' })
         .catch((captureError) => console.log('PUBLIC_REQUEST_LINK_VISIBLE_CAPTURE_ERROR', String(captureError)));
