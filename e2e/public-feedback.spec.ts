@@ -138,8 +138,16 @@ for (const width of [320, 390, 621, 760, 900, 1280]) {
       if (/(^|\.)(github\.com|githubusercontent\.com)$/.test(new URL(request.url()).hostname)) githubRequests.push(request.url());
     });
     await page.setViewportSize({ width, height: 900 });
-    await page.goto('/#feedback');
+    await page.goto('/');
     await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+    const quickLink = page.getByRole('link', { name: '개선 요청·현황', exact: true });
+    await expect(quickLink).toHaveAttribute('href', '#feedback');
+    await quickLink.press('Shift+Tab');
+    await expect(page.getByRole('button', { name: '공략 보기', exact: true })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(quickLink).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/#feedback$/);
     const section = page.getByRole('region', { name: '개선 의견과 처리 현황' });
     await expect(section.getByRole('heading', { level: 2 })).toBeVisible();
     await expect(section).toContainText('실시간 접수함은 아닙니다.');
@@ -186,24 +194,29 @@ for (const width of [320, 390, 621, 760, 900, 1280]) {
         focused: document.activeElement === link,
         textRects: Array.from(range.getClientRects(), ({ left, right, top, bottom, width, height }) => ({ left, right, top, bottom, width, height })).filter((rect) => rect.width > 0 && rect.height > 0),
         centerHit: hit === link || link.contains(hit),
+        hitTarget: hit ? {
+          tag: hit.tagName, id: hit.id, className: hit.getAttribute('class'),
+          link: hit.closest('a')?.getAttribute('href') ?? null,
+          navigation: hit.closest('nav')?.getAttribute('aria-label') ?? null,
+        } : null,
         clientWidth: link.clientWidth, scrollWidth: link.scrollWidth, clientHeight: link.clientHeight, scrollHeight: link.scrollHeight,
       };
     });
     let linkLayout = await readLinkLayout();
     await testInfo.attach('public-request-link-layout', { body: JSON.stringify({ project: testInfo.project.name, width, layout: linkLayout }), contentType: 'application/json' });
     console.log('PUBLIC_REQUEST_LINK_LAYOUT', JSON.stringify({ project: testInfo.project.name, width, layout: linkLayout }));
-    // Native focus can finish scrolling after the first raw capture; retain both observations.
+    // Retain the raw capture, then await every required focus, visibility, and hit-test condition.
     try {
       await expect.poll(async () => {
         linkLayout = await readLinkLayout();
         const { box, viewport, outline } = linkLayout;
         const outlineWidth = Number.parseFloat(outline.width), outlineOffset = Number.parseFloat(outline.offset);
         const outset = Math.max(0, outlineWidth + outlineOffset);
-        return linkLayout.focused && !['none', 'hidden'].includes(outline.style) && outlineWidth > 0 &&
+        return linkLayout.focused && linkLayout.centerHit && !['none', 'hidden'].includes(outline.style) && outlineWidth > 0 &&
           [box.left, box.right, box.top, box.bottom, viewport.width, viewport.height, outlineWidth, outlineOffset].every(Number.isFinite) &&
           box.left - outset >= 0 && box.right + outset <= viewport.width &&
           box.top - outset >= 0 && box.bottom + outset <= viewport.height;
-      }, { message: '공개 요청 링크의 초점 외곽이 화면 안에 들어와야 합니다.' }).toBe(true);
+      }, { message: '공개 요청 링크의 초점 외곽이 화면 안에 있고 중앙점에서 링크를 클릭할 수 있어야 합니다.' }).toBe(true);
     } finally {
       await testInfo.attach('public-request-link-visible-layout', { body: JSON.stringify({ project: testInfo.project.name, width, layout: linkLayout }), contentType: 'application/json' })
         .catch((captureError) => console.log('PUBLIC_REQUEST_LINK_VISIBLE_CAPTURE_ERROR', String(captureError)));

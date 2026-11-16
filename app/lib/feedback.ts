@@ -16,7 +16,16 @@ export type PublicFeedbackEntry = {
 
 // Only manually approved, de-identified summaries belong here. Never import raw issues.
 // Mark complete only after the change is verified at the public site.
-export const publicFeedbackEntries: readonly PublicFeedbackEntry[] = [];
+export const publicFeedbackEntries: readonly PublicFeedbackEntry[] = [
+  {
+    id: 'responsive-layout-2026-11-16',
+    title: '작은 화면에서 게임 화면이 겹치는 문제',
+    summary: '창을 좁히면 게임 그림과 제목·설명이 겹치고 일부 조작이 화면 밖으로 밀리는 불편이 있었습니다.',
+    status: '반영 완료',
+    updatedAt: '2026-11-16',
+    response: '9개 게임 카드의 글줄과 작은 화면 배치를 조정했습니다. 게임별 좁은 화면과 가로 화면에서 조작 영역을 정리하고 키보드 초점 이동을 보완했습니다.',
+  },
+];
 
 export type FeedbackCategory = 'bug' | 'rule' | 'difficulty' | 'feature' | 'other';
 
