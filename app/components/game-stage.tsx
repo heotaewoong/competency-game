@@ -843,7 +843,10 @@ export function GameStage({ gameId, onClose, onSwitch, onSave, onComplete, onRea
         }
         if (workspace && (!active || !workspace.contains(active) || active === workspace)) workspace.focus();
       }
-      if (phase === 'result') panelRef.current?.querySelector<HTMLElement>('.stage-result')?.focus();
+      if (phase === 'result') {
+        const resultPanel = panelRef.current?.querySelector<HTMLElement>('.stage-result');
+        if (resultPanel && !resultPanel.contains(document.activeElement)) resultPanel.focus();
+      }
     });
     return () => window.cancelAnimationFrame(focusFrame);
   }, [gameId, phase, prepCountdown, run]);
