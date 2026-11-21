@@ -1,5 +1,105 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
+test('숫자 예외 규칙의 두 번 입력은 유지 Enter가 아니라 해제 뒤 새 Enter만 수락한다', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  const readSnapshot = () => page.evaluate(() => {
+    const workspace = document.querySelector('.game-workspace.game-number');
+    const generation = localStorage.getItem('nineflow-practice-results-generation-v1');
+    const raw = generation ? localStorage.getItem(`nineflow-practice-results-v4:${generation}`) : null;
+    return {
+      generation,
+      savedCount: raw ? (JSON.parse(raw) as { results: unknown[] }).results.length : 0,
+      input: workspace?.querySelector('.number-rule > em')?.textContent ?? null,
+      progress: workspace?.querySelector('.workspace-progress i')?.getAttribute('aria-valuenow') ?? null,
+      enabled: Array.from(workspace?.querySelectorAll<HTMLButtonElement>('.number-board-pro button') ?? []).filter(button => !button.disabled).length,
+      signals: Array.from(workspace?.querySelectorAll('.answer-signal') ?? []).map(signal => signal.textContent),
+      footer: workspace?.querySelector('.workspace-foot > b')?.textContent ?? null,
+      resultCount: document.querySelectorAll('.stage-result').length,
+    };
+  });
+  await page.goto('/');
+  await expect(page.locator('#records')).toHaveAttribute('aria-busy', 'false');
+  await page.getByRole('button', { name: /숫자 누르기, 난이도 하, 설정 열기/ }).click();
+  const stage = page.locator('section[data-game="number"]');
+  await stage.locator('.practice-advanced-settings > summary').click();
+  await stage.getByRole('radio', { name: /2R · 규칙/ }).click();
+  await expect(stage.getByRole('radio', { name: /2R · 규칙/ })).toHaveAttribute('aria-checked', 'true');
+  const untimed = stage.getByRole('checkbox', { name: /시간 제한 없이 연습/ });
+  if (!await untimed.isChecked()) await stage.getByText('시간 제한 없이 연습', { exact: true }).click();
+  await expect(untimed).toBeChecked();
+  await stage.getByRole('button', { name: /^설명·연습 시작/ }).click();
+  const workspace = page.locator('.game-workspace.game-number');
+  const actions = workspace.locator('.number-board-pro button');
+  await expect(actions).toHaveCount(9);
+  await expect(workspace.locator('.number-round-banner')).toContainText('ROUND 2 유형 집중');
+  const skip = Number((await workspace.locator('.number-rule > span').nth(0).textContent())?.match(/\d+/)?.[0]);
+  const doubles = [...((await workspace.locator('.number-rule > span').nth(1).textContent()) ?? '').matchAll(/\d+/g)].map(match => Number(match[0]));
+  expect(Number.isInteger(skip) && skip >= 1 && skip <= 9).toBe(true);
+  expect(doubles).toHaveLength(2);
+  expect(new Set(doubles).size).toBe(2);
+  expect(doubles.every(value => Number.isInteger(value) && value >= 1 && value <= 9 && value !== skip)).toBe(true);
+  const target = Math.min(...doubles);
+  let entered = 0;
+  for (let value = 1; value < target; value += 1) {
+    if (value === skip) continue;
+    await workspace.getByRole('button', { name: String(value), exact: true }).click();
+    entered += 1;
+  }
+  const answer = workspace.getByRole('button', { name: String(target), exact: true });
+  await answer.focus();
+  await expect(answer).toBeFocused();
+  const before = await readSnapshot();
+  expect(before.generation).toBeTruthy();
+  const total = Number(before.input?.match(/\/ (\d+)/)?.[1]);
+  expect(total).toBe(10);
+  expect(before).toMatchObject({ savedCount: 0, input: `입력 ${entered} / ${total}`, progress: '1', enabled: 9, signals: [], footer: '', resultCount: 0 });
+  let first = before;
+  let repeated = before;
+  try {
+    await page.keyboard.down('Enter');
+    first = await readSnapshot();
+    await page.keyboard.down('Enter');
+    repeated = await readSnapshot();
+  } finally {
+    await page.keyboard.up('Enter');
+  }
+  const released = await readSnapshot();
+  await testInfo.attach('number-native-enter-repeat', { body: JSON.stringify({ skip, doubles, target, before, first, repeated, released }), contentType: 'application/json' });
+  console.log('NUMBER_NATIVE_ENTER_REPEAT', JSON.stringify({ skip, doubles, target, before, first, repeated, released }));
+  await page.screenshot({ path: testInfo.outputPath('number-held-enter.png') });
+  expect(first).toEqual({ ...before, input: `입력 ${entered + 1} / ${total}` });
+  expect(repeated).toEqual(first);
+  expect(released).toEqual(first);
+  await answer.focus();
+  await expect(answer).toBeFocused();
+  try {
+    await page.keyboard.down('Enter');
+  } finally {
+    await page.keyboard.up('Enter');
+  }
+  const fresh = await readSnapshot();
+  await testInfo.attach('number-fresh-enter', { body: JSON.stringify(fresh), contentType: 'application/json' });
+  expect(fresh).toEqual({ ...before, input: `입력 ${entered + 2} / ${total}` });
+  await page.screenshot({ path: testInfo.outputPath('number-fresh-enter.png') });
+  for (let value = target + 1; value <= 9; value += 1) {
+    if (value === skip) continue;
+    for (let count = 0; count < (doubles.includes(value) ? 2 : 1); count += 1) {
+      await workspace.getByRole('button', { name: String(value), exact: true }).click();
+    }
+  }
+  await expect(workspace.locator('.answer-signal')).toHaveText('정답');
+  await expect(workspace.locator('.number-board-pro button:disabled')).toHaveCount(9);
+  const completed = await readSnapshot();
+  expect(completed).toMatchObject({ generation: before.generation, savedCount: 0, progress: '1', enabled: 0, resultCount: 0 });
+  await workspace.getByRole('button', { name: '연습 닫기', exact: true }).click();
+  await page.locator('.session-confirm[role="alertdialog"]').getByRole('button', { name: '연습창 닫기', exact: true }).click();
+  await expect(page.locator('.game-workspace')).toHaveCount(0);
+  expect(await readSnapshot()).toMatchObject({ generation: before.generation, savedCount: 0, resultCount: 0 });
+  expect(errors).toEqual([]);
+});
+
 async function startTimedSession(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem('nineflow-practice-config-v1', JSON.stringify({ rps: { quantity: 9, paceMs: 2500 } }));
